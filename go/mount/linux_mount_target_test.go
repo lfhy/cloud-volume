@@ -25,15 +25,18 @@ func TestPrepareLinuxMountPathRejectsNonEmptyCustomTarget(t *testing.T) {
 }
 
 func TestMountSessionMatchesCustomMountPath(t *testing.T) {
+	cfg := storageconfig.DefaultConfig()
+	// Normalized must be stored in the session so that reflect.DeepEqual
+	// against a freshly normalized config succeeds.
 	session := &mountSession{
-		config:        storageconfig.DefaultConfig(),
+		config:        cfg.Normalized(),
 		bucket:        "demo",
 		requestedPath: filepath.Clean("/tmp/demo-mount"),
 	}
 
 	if !mountSessionMatches(
 		session,
-		storageconfig.DefaultConfig(),
+		cfg,
 		"demo",
 		MountOptions{MountPath: "/tmp/demo-mount"},
 	) {
@@ -42,7 +45,7 @@ func TestMountSessionMatchesCustomMountPath(t *testing.T) {
 
 	if mountSessionMatches(
 		session,
-		storageconfig.DefaultConfig(),
+		cfg,
 		"demo",
 		MountOptions{MountPath: "/tmp/other-mount"},
 	) {

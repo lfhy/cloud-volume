@@ -94,6 +94,10 @@ if [ "$RELEASE_MODE" = true ]; then
   FLUTTER_ARGS+=("--release")
 fi
 
+# Flutter/Dart 包镜像（pub.dev 在某些网络环境下不可达）
+export PUB_HOSTED_URL=https://pub.flutter-io.cn
+export FLUTTER_STORAGE_BASE_URL=https://storage.flutter-io.cn
+
 if [ "$PLATFORM" = "macos" ]; then
   DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer" \
     flutter "${FLUTTER_ARGS[@]}"
