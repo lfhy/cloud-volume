@@ -39,6 +39,9 @@ echo "============================================"
 echo ""
 echo "📦 构建 Go bridge ..."
 
+# 设置国内可访问的 Go 模块代理（proxy.golang.org 在某些网络环境下不可达）
+export GOPROXY=https://goproxy.cn,direct
+
 mkdir -p bin/bridge
 
 case "$PLATFORM" in

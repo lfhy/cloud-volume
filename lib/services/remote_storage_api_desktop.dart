@@ -13,6 +13,7 @@ import 'package:remote_storage/models/s3_objects.dart';
 import 'package:remote_storage/models/share_record.dart';
 import 'package:remote_storage/models/trash_item.dart';
 import 'package:remote_storage/models/transfer_job.dart';
+import 'package:remote_storage/models/mount_cache_cleanup_result.dart';
 import 'package:remote_storage/services/remote_storage_gateway.dart';
 
 part 'remote_storage_api_desktop_shares.dart';
@@ -434,6 +435,14 @@ class RemoteStorageApi
       return (result['count'] ?? 0) as int;
     }
     return 0;
+  }
+
+  @override
+  Future<MountCacheCleanupResult> clearMountCache() async {
+    final result = await runBridgeCall('clear_mount_cache');
+    return MountCacheCleanupResult.fromJson(
+      result as Map<String, dynamic>? ?? const <String, dynamic>{},
+    );
   }
 
   @override

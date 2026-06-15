@@ -224,7 +224,8 @@ class FileCacheStore {
 
   /// 递归清理缓存根目录下的空子目录。
   Future<void> _cleanupEmptyCacheDirs() async {
-    final root = await _cacheDirectory();
+    if (_cacheRoot == null || _cacheRootPath == null) return;
+    final root = _cacheRoot!;
     if (!await root.exists()) return;
     final entities = await root.list(recursive: false).toList();
     for (final entity in entities) {
@@ -253,10 +254,10 @@ class FileCacheStore {
     }
   }
 
-  /// 返回缓存文件数量。获取缓存根目录路径。
+  /// 返回缓存根目录路径。
   Future<String> getCacheDirectoryPath() async {
-    final dir = await _cacheDirectory();
-    return dir.path;
+    if (_cacheRootPath != null) return _cacheRootPath!;
+    return '';
   }
 
   Future<Database> _openDatabase() async {

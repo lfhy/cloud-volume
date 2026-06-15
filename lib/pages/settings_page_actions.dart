@@ -362,4 +362,13 @@ extension _SettingsPageActions on _SettingsPageState {
       showAppErrorToast(context, title: '退出登录失败', message: error.toString());
     }
   }
+
+  Future<int> _clearMountCache() async {
+    try {
+      final result = await widget.api.clearMountCache();
+      return result.removedCount;
+    } catch (_) {
+      return 0;
+    }
+  }
 }

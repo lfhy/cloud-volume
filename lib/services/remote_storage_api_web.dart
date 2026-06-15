@@ -13,6 +13,7 @@ import 'package:remote_storage/models/s3_objects.dart';
 import 'package:remote_storage/models/share_record.dart';
 import 'package:remote_storage/models/trash_item.dart';
 import 'package:remote_storage/models/transfer_job.dart';
+import 'package:remote_storage/models/mount_cache_cleanup_result.dart';
 import 'package:remote_storage/services/remote_storage_gateway.dart';
 
 part 'remote_storage_api_web_objects.dart';
@@ -366,5 +367,10 @@ class RemoteStorageApi
       'bucket': bucket,
     });
     return BucketMountStatus.fromJson(result as Map<String, dynamic>);
+  }
+
+  @override
+  Future<MountCacheCleanupResult> clearMountCache() async {
+    return const MountCacheCleanupResult(removedCount: 0, freedBytes: 0);
   }
 }

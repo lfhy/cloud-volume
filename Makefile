@@ -25,7 +25,7 @@ CLI_FULL_OUT := $(CLI_DIR)/cloud-volume-cli-full
 MACOS_BRIDGE_OUT := $(BRIDGE_DIR)/libremote_storage_bridge.dylib
 LINUX_BRIDGE_OUT := $(BRIDGE_DIR)/libremote_storage_bridge.so
 WINDOWS_BRIDGE_OUT := $(BRIDGE_DIR)/remote_storage_bridge.dll
-BRIDGE_GO_ENV := CGO_ENABLED=1
+BRIDGE_GO_ENV := CGO_ENABLED=1 GOPROXY=https://goproxy.cn,direct
 
 ifneq ($(BRIDGE_CC),)
 BRIDGE_GO_ENV += CC=$(BRIDGE_CC)

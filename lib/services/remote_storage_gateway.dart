@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:remote_storage/models/auth_session_state.dart';
 import 'package:remote_storage/models/bootstrap_state.dart';
 import 'package:remote_storage/models/bucket_mount_status.dart';
+import 'package:remote_storage/models/mount_cache_cleanup_result.dart';
 import 'package:remote_storage/models/paged_listings.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
 import 'package:remote_storage/models/s3_objects.dart';
@@ -205,6 +206,7 @@ abstract class RemoteStorageGateway {
   Future<BucketMountStatus> unmountBucket(String bucket);
   Future<BucketMountStatus> getBucketMountStatus(String bucket);
   Future<BucketMountStatus> openBucketMount(String bucket);
+  Future<MountCacheCleanupResult> clearMountCache();
 }
 
 typedef RemoteStorageApiFactory = Future<RemoteStorageGateway> Function();

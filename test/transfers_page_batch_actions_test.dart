@@ -13,6 +13,7 @@ import 'package:remote_storage/models/s3_objects.dart';
 import 'package:remote_storage/models/share_record.dart';
 import 'package:remote_storage/models/trash_item.dart';
 import 'package:remote_storage/models/transfer_job.dart';
+import 'package:remote_storage/models/mount_cache_cleanup_result.dart';
 import 'package:remote_storage/pages/transfers_page.dart';
 import 'package:remote_storage/services/remote_storage_api.dart';
 import 'package:remote_storage/state/transfer_queue.dart';
@@ -353,6 +354,10 @@ class _TransfersPageFakeApi implements RemoteStorageGateway {
   @override
   Future<BucketMountStatus> openBucketMount(String bucket) async =>
       throw UnimplementedError();
+
+  @override
+  Future<MountCacheCleanupResult> clearMountCache() async =>
+      const MountCacheCleanupResult(removedCount: 0, freedBytes: 0);
 
   @override
   Uri? objectDownloadUri(String bucket, String key, {bool inline = false}) =>
