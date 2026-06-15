@@ -1,4 +1,4 @@
-// 设置页：展示连接信息、主题色、下载目录和文件浏览交互偏好。
+// 设置页：展示连接信息、主题色、下载目录、缓存清理和文件浏览交互偏好。
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -106,6 +106,15 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 20),
             _buildCard(
               theme,
+              '缓存管理',
+              CacheCleanupSection(
+                theme: theme,
+                onClearMountCache: () => _clearMountCache(),
+              ),
+            ),
+            const SizedBox(height: 20),
+            _buildCard(
+              theme,
               '连接信息',
               Column(
                 children: [
@@ -173,6 +182,15 @@ class _SettingsPageState extends State<SettingsPage> {
       return;
     }
     await _saveDownloadDirectory(config, path.trim());
+  }
+
+  Future<int> _clearMountCache() async {
+    try {
+      final result = await widget.api.clearMountCache();
+      return result.removedCount;
+    } catch (_) {
+      return 0;
+    }
   }
 
   Future<void> _resetDownloadDirectory(RemoteStorageConfig config) async {

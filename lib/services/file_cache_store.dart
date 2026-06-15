@@ -8,6 +8,25 @@ import 'package:remote_storage/models/cached_file_record.dart';
 import 'package:remote_storage/models/s3_objects.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+/// 缓存统计信息。
+class CacheStats {
+  const CacheStats({required this.count, required this.totalBytes});
+
+  final int count;
+  final int totalBytes;
+
+  String get formattedSize {
+    if (totalBytes < 1024) return '$totalBytes B';
+    if (totalBytes < 1024 * 1024) {
+      return '${(totalBytes / 1024).toStringAsFixed(1)} KB';
+    }
+    if (totalBytes < 1024 * 1024 * 1024) {
+      return '${(totalBytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(totalBytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
+  }
+}
+
 class FileCacheStore {
   FileCacheStore._();
 
@@ -135,6 +154,101 @@ class FileCacheStore {
 
   Future<void> deleteFileIfExists(String localPath) async {
     await _deleteFileIfExists(localPath);
+  }
+
+  /// 返回缓存统计：实际存在于磁盘上的文件数量和总字节数。
+  /// 会同时清理数据库中已不存在的文件记录。
+  Future<CacheStats> getCacheStats() async {
+    final db = await _openDatabase();
+    final rows = await db.query(_tableName);
+    int count = 0;
+    int totalBytes = 0;
+    final staleKeys = <Map<String, String>>[];
+
+    for (final row in rows) {
+      final localPath = (row['local_path'] ?? '').toString();
+      final bucket = (row['bucket'] ?? '').toString();
+      final objectKey = (row['object_key'] ?? '').toString();
+
+      final file = File(localPath);
+      final exists = await file.exists();
+      if (!exists) {
+        staleKeys.add({'bucket': bucket, 'object_key': objectKey});
+        continue;
+      }
+      final actualSize = await file.length();
+      count++;
+      totalBytes += actualSize;
+    }
+
+    // 清理数据库中已不存在对应文件的脏记录。
+    for (final key in staleKeys) {
+      await db.delete(
+        _tableName,
+        where: 'bucket = ? AND object_key = ?',
+        whereArgs: <Object?>[key['bucket'], key['object_key']],
+      );
+    }
+
+    return CacheStats(count: count, totalBytes: totalBytes);
+  }
+
+  /// 清除所有缓存记录并删除对应的本地文件。返回实际删除的文件数量。
+  Future<int> clearAllCache() async {
+    final db = await _openDatabase();
+    final rows = await db.query(_tableName, columns: const <String>['local_path']);
+    int deletedCount = 0;
+    for (final row in rows) {
+      final localPath = (row['local_path'] ?? '').toString();
+      if (localPath.isNotEmpty) {
+        final file = File(localPath);
+        if (await file.exists()) {
+          await file.delete();
+          deletedCount++;
+        }
+      }
+    }
+    await db.delete(_tableName);
+    // 清理残留的缓存目录结构（可能由于记录丢失而残留的空目录）。
+    await _cleanupEmptyCacheDirs();
+    return deletedCount;
+  }
+
+  /// 递归清理缓存根目录下的空子目录。
+  Future<void> _cleanupEmptyCacheDirs() async {
+    final root = await _cacheDirectory();
+    if (!await root.exists()) return;
+    final entities = await root.list(recursive: false).toList();
+    for (final entity in entities) {
+      if (entity is Directory && await entity.exists()) {
+        try {
+          await _removeEmptyDirsRecursive(entity);
+        } on FileSystemException {
+          // 忽略删除失败。
+        }
+      }
+    }
+  }
+
+  Future<void> _removeEmptyDirsRecursive(Directory dir) async {
+    if (!await dir.exists()) return;
+    final entities = await dir.list(recursive: false).toList();
+    for (final entity in entities) {
+      if (entity is Directory) {
+        await _removeEmptyDirsRecursive(entity);
+      }
+    }
+    // 目录为空则删除。
+    final remaining = await dir.list().toList();
+    if (remaining.isEmpty) {
+      await dir.delete();
+    }
+  }
+
+  /// 返回缓存文件数量。获取缓存根目录路径。
+  Future<String> getCacheDirectoryPath() async {
+    final dir = await _cacheDirectory();
+    return dir.path;
   }
 
   Future<Database> _openDatabase() async {

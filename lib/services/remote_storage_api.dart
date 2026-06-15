@@ -11,6 +11,7 @@ import 'package:remote_storage/models/s3_objects.dart';
 import 'package:remote_storage/models/share_record.dart';
 import 'package:remote_storage/models/trash_item.dart';
 import 'package:remote_storage/models/transfer_job.dart';
+import 'package:remote_storage/models/mount_cache_cleanup_result.dart';
 
 part 'remote_storage_api_shares.dart';
 part 'remote_storage_api_paging.dart';
@@ -129,6 +130,7 @@ abstract class RemoteStorageGateway {
   Future<BucketMountStatus> unmountBucket(String bucket);
   Future<BucketMountStatus> getBucketMountStatus(String bucket);
   Future<BucketMountStatus> openBucketMount(String bucket);
+  Future<MountCacheCleanupResult> clearMountCache();
 }
 
 typedef RemoteStorageApiFactory = Future<RemoteStorageGateway> Function();
@@ -433,6 +435,14 @@ class RemoteStorageApi
       'bucket': bucket,
     });
     return BucketMountStatus.fromJson(result as Map<String, dynamic>);
+  }
+
+  @override
+  Future<MountCacheCleanupResult> clearMountCache() async {
+    final result = _bridge.call('clear_mount_cache');
+    return MountCacheCleanupResult.fromJson(
+      result as Map<String, dynamic>? ?? const <String, dynamic>{},
+    );
   }
 
   @override

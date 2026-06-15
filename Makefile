@@ -110,6 +110,19 @@ else
 	@echo "build-windows must be run on a Windows host."
 	@exit 1
 endif
+# Convenient one-click script (auto-detects platform).
+run-script:
+	./scripts/run.sh
+
+run-script-release:
+	./scripts/run.sh --release
+appimage:
+ifeq ($(HOST_PLATFORM),linux)
+	./scripts/build_appimage.sh
+else
+	@echo "appimage must be run on a Linux host."
+	@exit 1
+endif
 
 test:
 	flutter test

@@ -7,6 +7,7 @@ import 'package:remote_storage/app/remote_storage_app.dart';
 import 'package:remote_storage/services/remote_storage_api.dart';
 import 'package:remote_storage/models/bootstrap_state.dart';
 import 'package:remote_storage/models/bucket_mount_status.dart';
+import 'package:remote_storage/models/mount_cache_cleanup_result.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
 import 'package:remote_storage/models/paged_listings.dart';
 import 'package:remote_storage/models/s3_objects.dart';
@@ -303,4 +304,8 @@ class _FakeApi implements RemoteStorageGateway {
         serverUrl: '',
         port: 0,
       );
+
+  @override
+  Future<MountCacheCleanupResult> clearMountCache() async =>
+      const MountCacheCleanupResult(removedCount: 0, freedBytes: 0);
 }

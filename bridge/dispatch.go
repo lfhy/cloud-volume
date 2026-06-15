@@ -97,6 +97,8 @@ func invokeBridgeMethod(method string, args json.RawMessage) (any, error) {
 		return openBucketMount(args)
 	case "cleanup_mounts":
 		return cleanupMounts()
+	case "clear_mount_cache":
+		return clearMountCache()
 	default:
 		return nil, fmt.Errorf("unsupported bridge method %q", method)
 	}

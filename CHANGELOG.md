@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added a **缓存管理** card to the settings page that shows local cache file statistics (file count and total size) and provides a one-click **清理缓存** button. It clears both Dart-side download cache (SQLite + file cache) and Go-side mount cache (staging/cache files under `~/.remote-storage/runtime/mounts/`), with the result shown inline below the card.
+
+- Added a standalone `scripts/build_appimage.sh` script and a `make appimage` target that build the full Linux AppImage in one step — Go bridge + Flutter release + AppDir assembly + appimagetool packaging.
 - The settings page now keeps extra bottom breathing room below the final action row, so the lower section no longer feels visually stuck to the window edge when scrolled to the bottom.
 - Trash listing, restore, and permanent delete bridge calls now run off the Flutter UI isolate so opening the recycle bin no longer freezes the app while S3 metadata is scanned or retention cleanup runs.
 - The recycle-bin page now hides mount, upload, and new-folder actions so its action bar only shows controls relevant to trash browsing.

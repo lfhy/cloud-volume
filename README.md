@@ -24,8 +24,7 @@
 - 品牌名为 `云卷`，使用统一的侧边栏、列表和弹窗风格。
 - 内嵌 `Source Han Sans CN`，减少不同平台的中文显示漂移。
 - UI 基于 `shadcn_ui`，避免混用多套桌面/Material 风格控件。
-- 主界面围绕“文件管理、任务队列、回收站、分享管理、系统设置”五类核心页面展开。
-
+- 主界面围绕“文件管理、任务队列、回收站、分享管理、系统设置”五类核心页面展开。- 系统设置包含**缓存管理**卡片，可查看本地缓存大小并一键清理下载缓存与挂载缓存。
 ## 运行方式
 
 ### 首次启动
@@ -50,8 +49,16 @@ make run
 平台相关命令：
 
 - macOS: `make bridge-macos`, `make run-macos`, `make build-macos`
-- Linux: `make bridge-linux`, `make run-linux`, `make build-linux`
+- Linux: `make bridge-linux`, `make run-linux`, `make build-linux`, `make appimage`
 - Windows: `make bridge-windows`, `make build-windows`
+
+### AppImage 构建
+
+在 Linux 上运行 `make appimage` 即可一键构建 AppImage 包，产物位于 `dist/` 目录。
+
+该流程会依次：编译 Go bridge → 编译 Flutter Linux release → 组装 AppDir → 下载 appimagetool → 打包为 AppImage。
+
+如需更多控制，也可直接使用 `./scripts/build_appimage.sh`，支持 `--version`、`--arch`、`--skip-bridge` 等选项。
 
 ## 配置项
 
