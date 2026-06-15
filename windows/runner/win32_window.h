@@ -55,6 +55,14 @@ class Win32Window {
   // Return a RECT representing the bounds of the current client area.
   RECT GetClientArea();
 
+  // Window-control helpers are exposed so the Flutter chrome can drive the
+  // borderless host window over a lightweight method channel.
+  void Minimize();
+  void MaximizeOrRestore();
+  void Close();
+  void StartDrag();
+  bool IsWindowMaximized() const;
+
  protected:
   // Processes and route salient window messages for mouse handling,
   // size change and DPI. Delegates handling of these to member overloads that
@@ -72,6 +80,10 @@ class Win32Window {
   virtual void OnDestroy();
 
  private:
+  // Hit testing keeps resize borders working after the standard Windows title
+  // bar is removed.
+  LRESULT HitTestNonClientArea(HWND window, LPARAM lparam) const noexcept;
+
   friend class WindowClassRegistrar;
 
   // OS callback called by message pump. Handles the WM_NCCREATE message which

@@ -1,8 +1,10 @@
 import Cocoa
+import desktop_multi_window
 import FlutterMacOS
 
 private let yunjuanDefaultWindowSize = NSSize(width: 1160, height: 740)
 private let yunjuanMinimumWindowSize = NSSize(width: 920, height: 620)
+private let yunjuanCompactFallbackSize = NSSize(width: 840, height: 560)
 
 func yunjuanMainWindow() -> NSWindow? {
   NSApp.windows.first { $0 is MainFlutterWindow } ?? NSApp.mainWindow ?? NSApp.windows.first
@@ -45,16 +47,26 @@ final class MenuBarController: NSObject {
     button.title = ""
     button.target = self
     button.action = #selector(handleStatusItemPressed(_:))
+    button.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
-    if let image = NSImage(named: "TrayIcon")?.copy() as? NSImage {
-      image.isTemplate = true
-      image.size = NSSize(width: 18, height: 18)
+    if let image = makeTrayStatusImage() {
       button.image = image
     } else if let image = NSApp.applicationIconImage.copy() as? NSImage {
       image.isTemplate = true
-      image.size = NSSize(width: 18, height: 18)
+      image.size = NSSize(width: 22, height: 21)
       button.image = image
     }
+  }
+
+  private func makeTrayStatusImage() -> NSImage? {
+    guard let image = NSImage(named: "TrayIcon")?.copy() as? NSImage else {
+      return nil
+    }
+    // Keep tray rendering simple and deterministic: use the prebuilt transparent
+    // template asset instead of reshaping the app icon at runtime.
+    image.isTemplate = true
+    image.size = NSSize(width: 22, height: 21)
+    return image
   }
 
   private func configureMenu() {
@@ -120,6 +132,11 @@ class MainFlutterWindow: NSWindow {
     self.delegate = self
 
     RegisterGeneratedPlugins(registry: flutterViewController)
+    FlutterMultiWindowPlugin.setOnWindowCreatedCallback { controller in
+      // Secondary preview windows run in their own engine, so plugins must be
+      // registered for each created controller as well as the main one.
+      RegisterGeneratedPlugins(registry: controller)
+    }
     menuBarController = MenuBarController()
 
     super.awakeFromNib()
@@ -132,8 +149,46 @@ class MainFlutterWindow: NSWindow {
   }
 
   private func applyDefaultWindowLayout() {
-    let targetFrame = centeredWindowFrame(for: yunjuanDefaultWindowSize)
+    let targetSize = resolvedInitialWindowSize()
+    self.minSize = NSSize(
+      width: min(yunjuanMinimumWindowSize.width, targetSize.width),
+      height: min(yunjuanMinimumWindowSize.height, targetSize.height)
+    )
+    let targetFrame = centeredWindowFrame(for: targetSize)
     self.setFrame(targetFrame, display: true)
+  }
+
+  // macOS should follow the same small-screen behavior as Linux so the first
+  // window fits lower-resolution laptops without relying on manual resize.
+  private func resolvedInitialWindowSize() -> NSSize {
+    let visibleFrame = (self.screen ?? NSScreen.main)?.visibleFrame ?? self.frame
+    let width = resolvedDimension(
+      available: visibleFrame.width,
+      defaultValue: yunjuanDefaultWindowSize.width,
+      minimumValue: yunjuanMinimumWindowSize.width,
+      fallbackValue: yunjuanCompactFallbackSize.width,
+      scale: 0.72
+    )
+    let height = resolvedDimension(
+      available: visibleFrame.height,
+      defaultValue: yunjuanDefaultWindowSize.height,
+      minimumValue: yunjuanMinimumWindowSize.height,
+      fallbackValue: yunjuanCompactFallbackSize.height,
+      scale: 0.66
+    )
+    return NSSize(width: width, height: height)
+  }
+
+  private func resolvedDimension(
+    available: CGFloat,
+    defaultValue: CGFloat,
+    minimumValue: CGFloat,
+    fallbackValue: CGFloat,
+    scale: CGFloat
+  ) -> CGFloat {
+    let fittedMinimum = min(minimumValue, max(fallbackValue, available - 32))
+    let fittedMaximum = min(defaultValue, max(fittedMinimum, available * scale))
+    return max(fittedMinimum, fittedMaximum)
   }
 
   private func centeredWindowFrame(for size: NSSize) -> NSRect {
@@ -148,6 +203,33 @@ class MainFlutterWindow: NSWindow {
     allowsDirectClose = true
     NSApp.terminate(nil)
   }
+
+  override func close() {
+    if allowsDirectClose {
+      super.close()
+      return
+    }
+    confirmCloseRequest()
+  }
+
+  fileprivate func confirmCloseRequest() {
+    let alert = NSAlert()
+    alert.alertStyle = .informational
+    alert.messageText = "退出云卷？"
+    alert.informativeText = "你可以直接退出应用，也可以隐藏到托盘后继续在后台保留。"
+    alert.addButton(withTitle: "退出云卷")
+    alert.addButton(withTitle: "隐藏到托盘")
+    alert.addButton(withTitle: "取消")
+
+    let response = alert.runModal()
+    if response == .alertFirstButtonReturn {
+      terminateWithoutConfirmation()
+      return
+    }
+    if response == .alertSecondButtonReturn {
+      hideYunjuanMainWindow()
+    }
+  }
 }
 
 extension MainFlutterWindow: NSWindowDelegate {
@@ -155,24 +237,7 @@ extension MainFlutterWindow: NSWindowDelegate {
     if allowsDirectClose {
       return true
     }
-
-    let alert = NSAlert()
-    alert.alertStyle = .informational
-    alert.messageText = "退出云卷？"
-    alert.informativeText = "你可以直接退出应用，也可以最小化到托盘后继续在后台保留。"
-    alert.addButton(withTitle: "最小化到托盘")
-    alert.addButton(withTitle: "退出云卷")
-    alert.addButton(withTitle: "取消")
-
-    let response = alert.runModal()
-    if response == .alertFirstButtonReturn {
-      sender.miniaturize(nil)
-      return false
-    }
-    if response == .alertSecondButtonReturn {
-      terminateWithoutConfirmation()
-      return false
-    }
+    confirmCloseRequest()
     return false
   }
 }

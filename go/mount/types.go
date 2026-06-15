@@ -13,7 +13,7 @@ const (
 	defaultTransferTimeout = 300
 	defaultCacheTTL        = 15
 	defaultPrefetchTTL     = 10
-	writebackQuietPeriod   = time.Minute
+	mountProbeCacheTTL     = 1200 * time.Millisecond
 )
 
 // BucketMountStatus is returned to Flutter so the UI can render mount actions.
@@ -26,19 +26,41 @@ type BucketMountStatus struct {
 	LastError string `json:"lastError,omitempty"`
 }
 
+// mountBackend keeps lifecycle differences out of the cross-platform manager.
+type mountBackend interface {
+	Initialize(*mountSession) error
+	Start(*mountSession) error
+	Stop(*mountSession) error
+	IsActive(*mountSession) (bool, error)
+	CleanupStale(*mountSession) error
+}
+
+type mountProbeSnapshot struct {
+	checkedAt time.Time
+	active    bool
+	err       error
+}
+
 type mountSession struct {
-	config      storageconfig.RemoteStorageConfig
-	bucket      string
-	rootPrefix  string
-	mountName   string
-	mountPath   string
-	mountTarget string
-	serverURL   string
-	port        int
-	mounted     bool
-	server      *webDAVServer
-	access      *bucketAccess
-	lastError   string
+	config        storageconfig.RemoteStorageConfig
+	bucket        string
+	rootPrefix    string
+	mountName     string
+	requestedPath string
+	readOnly      bool
+	autoSync      bool
+	uploadWorkers int
+	mountPath     string
+	mountTarget   string
+	managedPath   bool
+	serverURL     string
+	port          int
+	mounted       bool
+	server        *webDAVServer
+	access        *bucketAccess
+	backend       mountBackend
+	lastError     string
+	stopping      bool
 }
 
 func (s *mountSession) status() BucketMountStatus {

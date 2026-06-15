@@ -155,6 +155,33 @@ func DeleteTrashItemContext(
 	return deleteTrashByID(ctx, client, cfg, bucket, trashID)
 }
 
+// ClearTrash permanently removes every current trash entry in a bucket.
+func ClearTrash(cfg storageconfig.RemoteStorageConfig, bucket string) error {
+	return ClearTrashContext(Ctx(), cfg, bucket)
+}
+
+// ClearTrashContext deletes all trash payloads and metadata for the bucket.
+func ClearTrashContext(
+	ctx context.Context,
+	cfg storageconfig.RemoteStorageConfig,
+	bucket string,
+) error {
+	client := NewClient(cfg)
+	if ctx == nil {
+		ctx = Ctx()
+	}
+	items, err := listTrashMetadata(ctx, client, cfg, bucket)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := deleteTrashByID(ctx, client, cfg, bucket, item.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func listTrashMetadata(
 	ctx context.Context,
 	client *s3.Client,

@@ -1,19 +1,28 @@
-// 任务队列页：展示上传、下载、复制、移动、删除以及挂载写回等待任务。
-
+// 任务队列页：展示对象操作与挂载写回任务，并提供筛选、批量操作和时间线信息。
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
 import 'package:remote_storage/services/remote_storage_api.dart';
 import 'package:remote_storage/state/transfer_queue.dart';
-import 'package:remote_storage/widgets/app_tooltip.dart';
+import 'package:remote_storage/utils/transfer_format.dart';
+import 'package:remote_storage/widgets/app_toast.dart';
+import 'package:remote_storage/widgets/transfer_task_widgets.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
+part 'transfers_page_retry.dart';
+
 class TransfersPage extends StatefulWidget {
-  const TransfersPage({super.key, required this.api, required this.config});
+  const TransfersPage({
+    super.key,
+    required this.api,
+    required this.config,
+    this.active = false,
+  });
 
   final RemoteStorageGateway api;
   final RemoteStorageConfig config;
+  final bool active;
 
   @override
   State<TransfersPage> createState() => _TransfersPageState();
@@ -21,13 +30,16 @@ class TransfersPage extends StatefulWidget {
 
 class _TransfersPageState extends State<TransfersPage> {
   final TextEditingController _searchController = TextEditingController();
+  final Set<String> _selectedTaskIds = <String>{};
   String _searchText = '';
   _TransferStatusFilter _statusFilter = _TransferStatusFilter.all;
   _TransferKindFilter _kindFilter = _TransferKindFilter.all;
+  bool _runningBatchAction = false;
 
   @override
   void initState() {
     super.initState();
+    TransferQueue.instance.addListener(_syncSelectionWithQueue);
     _searchController.addListener(() {
       setState(() => _searchText = _searchController.text.trim().toLowerCase());
     });
@@ -35,50 +47,177 @@ class _TransfersPageState extends State<TransfersPage> {
 
   @override
   void dispose() {
+    TransferQueue.instance.removeListener(_syncSelectionWithQueue);
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _syncSelectionWithQueue() {
+    final taskIds = TransferQueue.instance.tasks.map((task) => task.id).toSet();
+    final before = _selectedTaskIds.length;
+    _selectedTaskIds.removeWhere((id) => !taskIds.contains(id));
+    if (_selectedTaskIds.length != before && mounted) {
+      setState(() {});
+    }
+  }
+
+  void _toggleTaskSelection(String id) {
+    setState(() {
+      if (!_selectedTaskIds.remove(id)) {
+        _selectedTaskIds.add(id);
+      }
+    });
+  }
+
+  void _toggleVisibleSelection(List<TransferTask> tasks) {
+    final visibleIds = tasks.map((task) => task.id).toSet();
+    final shouldSelectAll = visibleIds.any(
+      (id) => !_selectedTaskIds.contains(id),
+    );
+    setState(() {
+      if (shouldSelectAll) {
+        _selectedTaskIds.addAll(visibleIds);
+      } else {
+        _selectedTaskIds.removeAll(visibleIds);
+      }
+    });
+  }
+
+  void _clearSelection() {
+    if (_selectedTaskIds.isEmpty) {
+      return;
+    }
+    setState(_selectedTaskIds.clear);
+  }
+
+  Future<void> _startSelectedTasks(TransferQueue queue) async {
+    if (_runningBatchAction) {
+      return;
+    }
+    setState(() => _runningBatchAction = true);
+    try {
+      final triggered = await queue.triggerTasksNow(_selectedTaskIds);
+      if (!mounted) {
+        return;
+      }
+      if (triggered == 0) {
+        showAppToast(context, message: '当前选中没有可立即同步的任务；只有“等待同步”的任务可以立即同步。');
+        return;
+      }
+      showAppToast(context, title: '已批量开始', message: '已开始 $triggered 个等待同步任务。');
+    } catch (error) {
+      if (mounted) {
+        showAppErrorToast(context, title: '批量开始失败', message: error.toString());
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _runningBatchAction = false);
+      }
+    }
+  }
+
+  Future<void> _cancelSelectedTasks(TransferQueue queue) async {
+    if (_runningBatchAction) {
+      return;
+    }
+    setState(() => _runningBatchAction = true);
+    try {
+      final canceled = await queue.cancelTasks(_selectedTaskIds);
+      if (!mounted) {
+        return;
+      }
+      if (canceled == 0) {
+        showAppToast(context, message: '当前选中没有可取消的任务。');
+        return;
+      }
+      showAppToast(context, title: '已批量取消', message: '已取消 $canceled 个任务。');
+    } catch (error) {
+      if (mounted) {
+        showAppErrorToast(context, title: '批量取消失败', message: error.toString());
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _runningBatchAction = false);
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final queue = TransferQueue.instance;
-
+    final body = widget.active
+        ? AnimatedBuilder(
+            animation: queue,
+            builder: (context, _) => _buildQueueBody(theme, queue),
+          )
+        : _buildQueueBody(theme, queue);
     return Padding(
-      padding: const EdgeInsets.only(top: 56, left: 36, right: 36),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '任务队列',
-            style: theme.textTheme.h3.copyWith(
-              fontWeight: FontWeight.w700,
-              fontSize: 22,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '查看上传、下载、复制、移动、删除，以及等待同步到远端的挂载任务。',
-            style: TextStyle(
-              color: theme.colorScheme.mutedForeground,
-              fontSize: 13,
-            ),
-          ),
-          const SizedBox(height: 16),
-          _buildFilters(theme),
-          const SizedBox(height: 16),
-          Expanded(
-            child: AnimatedBuilder(
-              animation: queue,
-              builder: (context, _) => _buildList(theme, queue),
-            ),
-          ),
-        ],
-      ),
+      padding: const EdgeInsets.only(top: 56, left: 36, right: 36, bottom: 20),
+      child: body,
     );
   }
 
-  Widget _buildFilters(ShadThemeData theme) {
+  Widget _buildQueueBody(ShadThemeData theme, TransferQueue queue) {
+    final selectedCount = _selectedTaskIds.length;
+    final visibleTasks = _filteredTasks(queue);
+    final selectedVisibleCount = visibleTasks
+        .where((task) => _selectedTaskIds.contains(task.id))
+        .length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '任务队列',
+                    style: theme.textTheme.h3.copyWith(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 22,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '查看上传、下载、复制、移动、删除，以及等待同步到远端的挂载写回任务。',
+                    style: TextStyle(
+                      color: theme.colorScheme.mutedForeground,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (selectedCount > 0)
+              Padding(
+                padding: const EdgeInsets.only(left: 16),
+                child: TransferTaskSelectionActions(
+                  selectedCount: selectedCount,
+                  selectedVisibleCount: selectedVisibleCount,
+                  startableCount: queue.triggerableTaskCount(_selectedTaskIds),
+                  cancelableCount: queue.cancelableTaskCount(_selectedTaskIds),
+                  runningBatchAction: _runningBatchAction,
+                  onStartSelected: () => unawaited(_startSelectedTasks(queue)),
+                  onCancelSelected: () =>
+                      unawaited(_cancelSelectedTasks(queue)),
+                  onClearSelection: _clearSelection,
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _buildFilters(),
+        const SizedBox(height: 16),
+        Expanded(child: _buildList(theme, queue, visibleTasks)),
+      ],
+    );
+  }
+
+  Widget _buildFilters() {
     return Row(
       children: [
         Expanded(
@@ -113,11 +252,11 @@ class _TransfersPageState extends State<TransfersPage> {
     );
   }
 
-  Widget _buildList(ShadThemeData theme, TransferQueue queue) {
-    final filteredTasks = queue.tasks
-        .where(_matchesFilters)
-        .toList(growable: false);
-
+  Widget _buildList(
+    ShadThemeData theme,
+    TransferQueue queue,
+    List<TransferTask> filteredTasks,
+  ) {
     if (queue.tasks.isEmpty) {
       return _buildEmptyState(
         theme,
@@ -128,130 +267,44 @@ class _TransfersPageState extends State<TransfersPage> {
     if (filteredTasks.isEmpty) {
       return _buildEmptyState(theme, '没有匹配结果', '调整筛选条件后再试。');
     }
-
+    final allVisibleSelected =
+        filteredTasks.isNotEmpty &&
+        filteredTasks.every((task) => _selectedTaskIds.contains(task.id));
+    final partiallySelected =
+        filteredTasks.any((task) => _selectedTaskIds.contains(task.id)) &&
+        !allVisibleSelected;
     return ShadCard(
       padding: const EdgeInsets.all(4),
       child: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
-            child: Row(
-              children: [
-                Text(
-                  '共 ${filteredTasks.length} 条',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: theme.colorScheme.mutedForeground,
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  queue.speedSummary,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: theme.colorScheme.mutedForeground,
-                  ),
-                ),
-              ],
-            ),
+          TransferTaskListHeader(
+            totalCount: filteredTasks.length,
+            speedSummary: queue.speedSummary,
+            allVisibleSelected: allVisibleSelected,
+            partiallySelected: partiallySelected,
+            onToggleVisibleSelection: () =>
+                _toggleVisibleSelection(filteredTasks),
           ),
-          const Divider(height: 1),
           Expanded(
-            child: ListView.separated(
+            child: ListView.builder(
               itemCount: filteredTasks.length,
-              separatorBuilder: (context, index) =>
-                  Divider(height: 1, color: theme.colorScheme.border),
               itemBuilder: (context, index) {
                 final task = filteredTasks[index];
-                return Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Icon(
-                          _iconFor(task),
-                          size: 18,
-                          color: _colorFor(task),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              task.displayName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: theme.colorScheme.foreground,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              _subtitleFor(task),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: theme.colorScheme.mutedForeground,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (task.isCancelable)
-                            AppTooltip(
-                              message: '取消任务',
-                              child: ShadIconButton.ghost(
-                                icon: Icon(
-                                  LucideIcons.circleX,
-                                  color: theme.colorScheme.mutedForeground,
-                                ),
-                                width: 28,
-                                height: 28,
-                                iconSize: 16,
-                                onPressed: () => unawaited(
-                                  TransferQueue.instance.cancelTask(task.id),
-                                ),
-                              ),
-                            ),
-                          if (task.status == TransferStatus.pending &&
-                              task.isUpload)
-                            AppTooltip(
-                              message: '立即同步',
-                              child: ShadIconButton.ghost(
-                                icon: Icon(
-                                  LucideIcons.play,
-                                  color: theme.colorScheme.primary,
-                                ),
-                                width: 28,
-                                height: 28,
-                                iconSize: 16,
-                                onPressed: () => unawaited(
-                                  TransferQueue.instance.triggerTaskNow(
-                                    task.id,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          const SizedBox(width: 8),
-                          _StatusBadge(task: task),
-                        ],
-                      ),
-                    ],
-                  ),
+                return TransferTaskRow(
+                  task: task,
+                  subtitle: _subtitleFor(task),
+                  selected: _selectedTaskIds.contains(task.id),
+                  onToggleSelected: () => _toggleTaskSelection(task.id),
+                  showDivider: index != filteredTasks.length - 1,
+                  onCancelPressed: queue.canCancelTask(task.id)
+                      ? () => unawaited(queue.cancelTask(task.id))
+                      : null,
+                  onStartNowPressed: queue.canTriggerTask(task.id)
+                      ? () => unawaited(queue.triggerTaskNow(task.id))
+                      : null,
+                  onRetryPressed: task.isRetryableFileTransfer
+                      ? () => unawaited(_retryFileTransfer(task))
+                      : null,
                 );
               },
             ),
@@ -262,10 +315,7 @@ class _TransfersPageState extends State<TransfersPage> {
   }
 
   bool _matchesFilters(TransferTask task) {
-    if (!_statusFilter.matches(task)) {
-      return false;
-    }
-    if (!_kindFilter.matches(task)) {
+    if (!_statusFilter.matches(task) || !_kindFilter.matches(task)) {
       return false;
     }
     if (_searchText.isEmpty) {
@@ -280,6 +330,10 @@ class _TransfersPageState extends State<TransfersPage> {
       task.typeLabel,
     ].join('\n').toLowerCase();
     return haystack.contains(_searchText);
+  }
+
+  List<TransferTask> _filteredTasks(TransferQueue queue) {
+    return queue.taskView.where(_matchesFilters).toList(growable: false);
   }
 
   Widget _buildEmptyState(ShadThemeData theme, String title, String detail) {
@@ -342,48 +396,55 @@ class _TransfersPageState extends State<TransfersPage> {
   }
 
   String _subtitleFor(TransferTask task) {
+    final createdAtLabel = formatTransferCreatedAt(task.createdAt);
     if (task.status == TransferStatus.failed) {
-      return task.error ?? '${task.typeLabel}失败';
+      return _joinSubtitleParts([
+        task.error ?? '${task.typeLabel}失败',
+        createdAtLabel,
+      ]);
     }
     if (task.status == TransferStatus.canceled) {
-      return '${task.typeLabel}已取消';
+      return _joinSubtitleParts(['${task.typeLabel}已取消', createdAtLabel]);
     }
     if (task.status == TransferStatus.pending && task.isUpload) {
-      if (task.totalBytes > 0) {
-        return '等待同步到远端  ${formatBytes(task.totalBytes)}';
-      }
-      return '等待同步到远端';
+      return _joinSubtitleParts([
+        task.isUploadWaiting
+            ? task.totalBytes > 0
+                  ? '等待可用上传协程  ${formatBytes(task.totalBytes)}'
+                  : '等待可用上传协程'
+            : task.totalBytes > 0
+            ? '等待同步到远端  ${formatBytes(task.totalBytes)}'
+            : '等待同步到远端',
+        createdAtLabel,
+      ]);
     }
     if ((task.isCopy || task.isMove) && task.targetPath.isNotEmpty) {
       final suffix = task.totalBytes > 0
           ? '  ${formatBytes(task.bytesCompleted)} / ${formatBytes(task.totalBytes)}'
           : '';
-      return '${task.typeLabel}到 ${task.targetPath}$suffix';
+      return _joinSubtitleParts([
+        '${task.typeLabel}到 ${task.targetPath}$suffix',
+        createdAtLabel,
+      ]);
     }
     if (task.totalBytes > 0) {
-      return '${task.typeLabel}  ${formatBytes(task.bytesCompleted)} / ${formatBytes(task.totalBytes)}';
+      final progressLabel =
+          '${task.typeLabel}  ${formatBytes(task.bytesCompleted)} / ${formatBytes(task.totalBytes)}';
+      return _joinSubtitleParts([
+        progressLabel,
+        task.progressTargetLabel,
+        createdAtLabel,
+      ]);
     }
     if (task.status == TransferStatus.done) {
-      return '${task.typeLabel}已完成';
+      return _joinSubtitleParts(['${task.typeLabel}已完成', createdAtLabel]);
     }
-    return '${task.typeLabel}中';
+    return _joinSubtitleParts(['${task.typeLabel}中', createdAtLabel]);
   }
+}
 
-  IconData _iconFor(TransferTask task) {
-    if (task.isUpload) return LucideIcons.upload;
-    if (task.isDownload) return LucideIcons.download;
-    if (task.isCopy) return LucideIcons.copy;
-    if (task.isDelete) return LucideIcons.trash2;
-    return LucideIcons.moveRight;
-  }
-
-  Color _colorFor(TransferTask task) {
-    if (task.isUpload) return const Color(0xff2563eb);
-    if (task.isDownload) return const Color(0xff0f766e);
-    if (task.isCopy) return const Color(0xff7c3aed);
-    if (task.isDelete) return const Color(0xffdc2626);
-    return const Color(0xffc2410c);
-  }
+String _joinSubtitleParts(List<String> parts) {
+  return parts.where((part) => part.trim().isNotEmpty).join('  ·  ');
 }
 
 enum _TransferStatusFilter {
@@ -396,27 +457,20 @@ enum _TransferStatusFilter {
   canceled('已取消');
 
   const _TransferStatusFilter(this.label);
-
   final String label;
 
   bool matches(TransferTask task) {
-    switch (this) {
-      case _TransferStatusFilter.all:
-        return true;
-      case _TransferStatusFilter.active:
-        return task.status == TransferStatus.pending ||
-            task.status == TransferStatus.running;
-      case _TransferStatusFilter.pending:
-        return task.status == TransferStatus.pending;
-      case _TransferStatusFilter.running:
-        return task.status == TransferStatus.running;
-      case _TransferStatusFilter.done:
-        return task.status == TransferStatus.done;
-      case _TransferStatusFilter.failed:
-        return task.status == TransferStatus.failed;
-      case _TransferStatusFilter.canceled:
-        return task.status == TransferStatus.canceled;
-    }
+    return switch (this) {
+      _TransferStatusFilter.all => true,
+      _TransferStatusFilter.active =>
+        task.status == TransferStatus.pending ||
+            task.status == TransferStatus.running,
+      _TransferStatusFilter.pending => task.status == TransferStatus.pending,
+      _TransferStatusFilter.running => task.status == TransferStatus.running,
+      _TransferStatusFilter.done => task.status == TransferStatus.done,
+      _TransferStatusFilter.failed => task.status == TransferStatus.failed,
+      _TransferStatusFilter.canceled => task.status == TransferStatus.canceled,
+    };
   }
 }
 
@@ -429,67 +483,16 @@ enum _TransferKindFilter {
   delete('删除');
 
   const _TransferKindFilter(this.label);
-
   final String label;
 
   bool matches(TransferTask task) {
-    switch (this) {
-      case _TransferKindFilter.all:
-        return true;
-      case _TransferKindFilter.upload:
-        return task.isUpload;
-      case _TransferKindFilter.download:
-        return task.isDownload;
-      case _TransferKindFilter.copy:
-        return task.isCopy;
-      case _TransferKindFilter.move:
-        return task.isMove;
-      case _TransferKindFilter.delete:
-        return task.isDelete;
-    }
-  }
-}
-
-class _StatusBadge extends StatelessWidget {
-  const _StatusBadge({required this.task});
-
-  final TransferTask task;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-    final text = switch (task.status) {
-      TransferStatus.pending => task.isUpload ? '等待同步' : '等待中',
-      TransferStatus.running =>
-        task.speedBytes > 0
-            ? formatBytesPerSecond(task.speedBytes)
-            : '${task.typeLabel}中',
-      TransferStatus.done => '已完成',
-      TransferStatus.failed => '失败',
-      TransferStatus.canceled => '已取消',
+    return switch (this) {
+      _TransferKindFilter.all => true,
+      _TransferKindFilter.upload => task.isUpload,
+      _TransferKindFilter.download => task.isDownload,
+      _TransferKindFilter.copy => task.isCopy,
+      _TransferKindFilter.move => task.isMove,
+      _TransferKindFilter.delete => task.isDelete,
     };
-    final color = switch (task.status) {
-      TransferStatus.pending => theme.colorScheme.mutedForeground,
-      TransferStatus.running => theme.colorScheme.primary,
-      TransferStatus.done => const Color(0xff15803d),
-      TransferStatus.failed => theme.colorScheme.destructive,
-      TransferStatus.canceled => theme.colorScheme.mutedForeground,
-    };
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 10.5,
-          fontWeight: FontWeight.w600,
-          color: color,
-        ),
-      ),
-    );
   }
 }

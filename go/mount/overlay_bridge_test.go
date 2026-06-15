@@ -64,7 +64,9 @@ func newTestBucketAccess(t *testing.T) *bucketAccess {
 		t.Fatalf("newLocalMountOverlay: %v", err)
 	}
 	access := &bucketAccess{
+		backend:        mountTestBackend{},
 		bucket:         "test-bucket",
+		sessionRoot:    root,
 		cacheRoot:      filepath.Join(root, "cache"),
 		stageRoot:      filepath.Join(root, "staging"),
 		requestTimeout: time.Second,
@@ -79,6 +81,13 @@ func newTestBucketAccess(t *testing.T) *bucketAccess {
 	if err := os.MkdirAll(access.stageRoot, 0o755); err != nil {
 		t.Fatalf("mkdir stage root: %v", err)
 	}
-	access.writeback = newWritebackQueue(access)
+	writeback, err := newWritebackQueue(access)
+	if err != nil {
+		t.Fatalf("newWritebackQueue: %v", err)
+	}
+	access.writeback = writeback
+	t.Cleanup(func() {
+		_ = access.close()
+	})
 	return access
 }

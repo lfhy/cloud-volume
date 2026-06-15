@@ -1,148 +1,298 @@
-// 右侧表单面板：居中卡片式布局，认证字段为主，高级设置通过弹窗配置。
-// 标题固定顶部，按钮固定底部，中间字段区可滚动以防溢出。
+// 右侧表单面板：有空间时垂直居中，空间不足时回退为可滚动布局。
+// 这样大窗口不会显得偏上，小窗口也不会把提交按钮挤出可视区域。
 
 import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
+import 'package:remote_storage/models/remote_storage_config.dart';
+import 'package:remote_storage/widgets/baidu_pan_auth_section.dart';
 import 'package:remote_storage/widgets/app_loading_indicator.dart';
+import 'package:remote_storage/widgets/cloud_storage_account_form_field.dart';
 
 /// 配置页右侧完整表单。
 class ConfigRightFormPanel extends StatelessWidget {
   const ConfigRightFormPanel({
     super.key,
+    required this.storageType,
+    required this.nameController,
+    required this.mappedBucketNameController,
+    this.onNameChanged,
+    this.onMappedBucketNameChanged,
     required this.endpointController,
     required this.regionController,
     required this.accessKeyController,
     required this.secretKeyController,
+    required this.hasStoredSecretKey,
+    required this.webdavUsernameController,
+    required this.webdavPasswordController,
+    required this.hasStoredWebdavPassword,
+    required this.baiduPanAuthorized,
+    required this.baiduPanAccountLabel,
+    required this.baiduPanCodeController,
+    required this.baiduPanAuthUrl,
+    required this.baiduPanOpeningBrowser,
+    required this.baiduPanAuthorizing,
+    required this.onStartBaiduPanAuthorization,
+    required this.onAuthorizeBaiduPan,
     required this.usePathStyle,
     required this.onPathStyleChanged,
     required this.isSaving,
     required this.errorText,
     required this.onSave,
+    this.onBack,
   });
 
+  final StorageType storageType;
+  final TextEditingController nameController;
+  final TextEditingController mappedBucketNameController;
+  final ValueChanged<String>? onNameChanged;
+  final ValueChanged<String>? onMappedBucketNameChanged;
   final TextEditingController endpointController;
   final TextEditingController regionController;
   final TextEditingController accessKeyController;
   final TextEditingController secretKeyController;
+  final bool hasStoredSecretKey;
+  final TextEditingController? webdavUsernameController;
+  final TextEditingController? webdavPasswordController;
+  final bool hasStoredWebdavPassword;
+  final bool baiduPanAuthorized;
+  final String baiduPanAccountLabel;
+  final TextEditingController baiduPanCodeController;
+  final String baiduPanAuthUrl;
+  final bool baiduPanOpeningBrowser;
+  final bool baiduPanAuthorizing;
+  final VoidCallback onStartBaiduPanAuthorization;
+  final VoidCallback onAuthorizeBaiduPan;
   final bool usePathStyle;
   final ValueChanged<bool> onPathStyleChanged;
   final bool isSaving;
   final String? errorText;
   final VoidCallback onSave;
+  final VoidCallback? onBack;
 
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
+    final isWebDav = storageType == StorageType.webdav;
+    final isBaiduPan = storageType == StorageType.baiduPan;
+    final title = isBaiduPan
+        ? '添加百度网盘账号'
+        : isWebDav
+        ? '添加 WebDAV 账号'
+        : '添加 S3 对象存储账号';
+    final subtitle = isBaiduPan
+        ? '通过百度要求的 oob 授权码流程完成百度网盘 OpenAPI 登录。'
+        : isWebDav
+        ? '填写 WebDAV 服务地址和登录账号。'
+        : '填写对象存储端点和访问密钥。';
 
     return Container(
       color: theme.colorScheme.background,
-      child: Center(
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 380),
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // 顶部留白（为 macOS 红绿灯让位）。
-              const SizedBox(height: 72),
-              // 标题。
-              Text(
-                '登录远程存储',
-                style: theme.textTheme.h3.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: theme.colorScheme.foreground,
-                  fontSize: 22,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                '输入你的认证信息以开始使用。',
-                style: TextStyle(
-                  color: theme.colorScheme.mutedForeground,
-                  fontSize: 13,
-                  height: 1.5,
-                ),
-              ),
-              const SizedBox(height: 32),
-              // 可滚动表单区。
-              Expanded(
-                child: SingleChildScrollView(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final viewportHeight = constraints.maxHeight;
+          final minContentHeight = viewportHeight > 64
+              ? viewportHeight - 64
+              : viewportHeight;
+          return SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 32),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: minContentHeight),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 380),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // 分区标题。
-                      _sectionLabel(context, '认证信息'),
+                      if (onBack != null) ...[
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: ShadButton.ghost(
+                            size: ShadButtonSize.sm,
+                            onPressed: isSaving ? null : onBack,
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.arrow_back, size: 15),
+                                SizedBox(width: 6),
+                                Text('返回'),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                      ],
+                      // 标题。
+                      Text(
+                        title,
+                        style: theme.textTheme.h3.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: theme.colorScheme.foreground,
+                          fontSize: 22,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          color: theme.colorScheme.mutedForeground,
+                          fontSize: 13,
+                          height: 1.5,
+                        ),
+                      ),
+                      const SizedBox(height: 28),
+                      _sectionLabel(context, '连接信息'),
                       const SizedBox(height: 16),
-                      // 访问密钥 ID。
-                      _fieldLabel(context, '访问密钥 ID'),
+                      _fieldLabel(context, '名称'),
                       const SizedBox(height: 6),
                       ShadInput(
-                        controller: accessKeyController,
-                        placeholder: const Text('输入 Access Key ID'),
+                        controller: nameController,
+                        placeholder: Text(
+                          isBaiduPan
+                              ? '例如：我的百度网盘'
+                              : isWebDav
+                              ? '例如：IHEP WebDAV'
+                              : '例如：对象存储账号',
+                        ),
+                        onChanged: onNameChanged,
                       ),
-                      const SizedBox(height: 18),
-                      // 访问密钥。
-                      _fieldLabel(context, '访问密钥'),
-                      const SizedBox(height: 6),
-                      ShadInput(
-                        controller: secretKeyController,
-                        placeholder: const Text('输入 Secret Access Key'),
-                        obscureText: true,
-                      ),
+                      if (isWebDav) ...[
+                        const SizedBox(height: 18),
+                        _fieldLabel(context, '映射桶名称'),
+                        const SizedBox(height: 6),
+                        ShadInput(
+                          controller: mappedBucketNameController,
+                          placeholder: const Text('默认使用名称'),
+                          onChanged: onMappedBucketNameChanged,
+                        ),
+                        const SizedBox(height: 18),
+                      ],
+                      if (!isWebDav && !isBaiduPan) ...[
+                        const SizedBox(height: 18),
+                      ],
+                      if (isBaiduPan) ...[
+                        const SizedBox(height: 18),
+                        BaiduPanAuthSection(
+                          accountLabel: baiduPanAccountLabel,
+                          authorized: baiduPanAuthorized,
+                          codeController: baiduPanCodeController,
+                          authUrl: baiduPanAuthUrl,
+                          openingBrowser: baiduPanOpeningBrowser,
+                          submittingCode: baiduPanAuthorizing,
+                          onOpenAuthorizationPage: onStartBaiduPanAuthorization,
+                          onSubmitAuthorizationCode: onAuthorizeBaiduPan,
+                        ),
+                      ] else ...[
+                        _fieldLabel(context, isWebDav ? 'WebDAV 地址' : '网关地址'),
+                        const SizedBox(height: 6),
+                        CloudStorageTechnicalInput(
+                          controller: endpointController,
+                          keyboardType: TextInputType.url,
+                          placeholder: Text(
+                            isWebDav
+                                ? 'https://dav.example.com/remote.php/dav/files/me'
+                                : 'https://s3.example.com',
+                          ),
+                        ),
+                        const SizedBox(height: 22),
+                      ],
+                      if (!isBaiduPan &&
+                          isWebDav &&
+                          webdavUsernameController != null &&
+                          webdavPasswordController != null) ...[
+                        _fieldLabel(context, '用户名'),
+                        const SizedBox(height: 6),
+                        CloudStorageTechnicalInput(
+                          controller: webdavUsernameController!,
+                          placeholder: const Text('输入 WebDAV 用户名'),
+                        ),
+                        const SizedBox(height: 18),
+                        _fieldLabel(context, '密码'),
+                        const SizedBox(height: 6),
+                        CloudStorageSecretInput(
+                          controller: webdavPasswordController!,
+                          placeholder: Text(
+                            hasStoredWebdavPassword
+                                ? '留空则保留当前已保存的 WebDAV 密码'
+                                : '输入 WebDAV 登录密码',
+                          ),
+                        ),
+                      ] else if (!isBaiduPan) ...[
+                        // 访问密钥 ID。
+                        _fieldLabel(context, '访问密钥 ID'),
+                        const SizedBox(height: 6),
+                        CloudStorageTechnicalInput(
+                          controller: accessKeyController,
+                          placeholder: const Text('输入 Access Key ID'),
+                        ),
+                        const SizedBox(height: 18),
+                        // 访问密钥。
+                        _fieldLabel(context, '访问密钥'),
+                        const SizedBox(height: 6),
+                        CloudStorageSecretInput(
+                          controller: secretKeyController,
+                          placeholder: Text(
+                            hasStoredSecretKey
+                                ? '留空则保留当前已保存的 Secret Access Key'
+                                : '输入 Secret Access Key',
+                          ),
+                        ),
+                      ],
                       // 高级设置入口。
-                      const SizedBox(height: 18),
-                      _AdvancedSettingsLink(
-                        onTap: isSaving
-                            ? null
-                            : () => _openAdvancedDialog(context),
-                      ),
+                      if (!isWebDav && !isBaiduPan) ...[
+                        const SizedBox(height: 18),
+                        _AdvancedSettingsLink(
+                          onTap: isSaving
+                              ? null
+                              : () => _openAdvancedDialog(context),
+                        ),
+                      ],
                       // 错误提示。
                       if (errorText != null) ...[
                         const SizedBox(height: 16),
                         _errorBanner(context, errorText!),
                       ],
+                      const SizedBox(height: 24),
+                      // 底部保存按钮。
+                      SizedBox(
+                        width: double.infinity,
+                        height: 44,
+                        child: ShadButton(
+                          onPressed: isSaving ? null : onSave,
+                          child: isSaving
+                              ? Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    SizedBox(
+                                      width: 14,
+                                      height: 14,
+                                      child: AppLoadingIndicator(
+                                        strokeWidth: 2,
+                                        color:
+                                            theme.colorScheme.primaryForeground,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    const Text('保存中...'),
+                                  ],
+                                )
+                              : const Text(
+                                  '确认添加',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
               ),
-              // 底部保存按钮。
-              Padding(
-                padding: const EdgeInsets.only(top: 24, bottom: 40),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 44,
-                  child: ShadButton(
-                    onPressed: isSaving ? null : onSave,
-                    child: isSaving
-                        ? Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: AppLoadingIndicator(
-                                  strokeWidth: 2,
-                                  color: theme.colorScheme.primaryForeground,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              const Text('保存中...'),
-                            ],
-                          )
-                        : const Text(
-                            '保存并继续',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -207,7 +357,6 @@ class ConfigRightFormPanel extends StatelessWidget {
 
   /// 打开高级设置弹窗。
   void _openAdvancedDialog(BuildContext context) {
-    final epCtrl = TextEditingController(text: endpointController.text);
     final rgCtrl = TextEditingController(text: regionController.text);
     var pathStyle = usePathStyle;
 
@@ -216,7 +365,7 @@ class ConfigRightFormPanel extends StatelessWidget {
       builder: (dialogContext) {
         return ShadDialog(
           title: const Text('高级设置'),
-          description: const Text('配置端点地址、区域和连接选项。'),
+          description: const Text('配置区域和连接选项。'),
           child: StatefulBuilder(
             builder: (dialogContext, setDialogState) {
               final theme = ShadTheme.of(dialogContext);
@@ -227,16 +376,9 @@ class ConfigRightFormPanel extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const SizedBox(height: 8),
-                    _fieldLabel(dialogContext, '端点地址'),
-                    const SizedBox(height: 5),
-                    ShadInput(
-                      controller: epCtrl,
-                      placeholder: const Text('https://s3.example.com'),
-                    ),
-                    const SizedBox(height: 14),
                     _fieldLabel(dialogContext, '区域'),
                     const SizedBox(height: 5),
-                    ShadInput(
+                    CloudStorageTechnicalInput(
                       controller: rgCtrl,
                       placeholder: const Text('auto / us-east-1'),
                     ),
@@ -270,7 +412,6 @@ class ConfigRightFormPanel extends StatelessWidget {
                         const SizedBox(width: 10),
                         ShadButton(
                           onPressed: () {
-                            endpointController.text = epCtrl.text;
                             regionController.text = rgCtrl.text;
                             onPathStyleChanged(pathStyle);
                             Navigator.of(dialogContext).pop();

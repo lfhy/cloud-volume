@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 
 	storageconfig "remote-storage/go/config"
-	s3ops "remote-storage/go/s3"
+	storageops "remote-storage/go/storage"
 )
 
 // Trash bridge methods expose app-level soft delete and recovery flows to Flutter.
@@ -24,7 +24,16 @@ func listTrash(args json.RawMessage) (any, error) {
 	if err := decodeArgs(args, &input); err != nil {
 		return nil, err
 	}
-	return s3ops.ListTrash(input.Config, input.Bucket)
+	page, err := storageops.ForConfig(input.Config).ListTrashPage(
+		nil,
+		input.Bucket,
+		"",
+		1000,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return page.Items, nil
 }
 
 func restoreTrashItem(args json.RawMessage) (any, error) {
@@ -32,7 +41,11 @@ func restoreTrashItem(args json.RawMessage) (any, error) {
 	if err := decodeArgs(args, &input); err != nil {
 		return nil, err
 	}
-	if err := s3ops.RestoreTrashItem(input.Config, input.Bucket, input.TrashID); err != nil {
+	if err := storageops.ForConfig(input.Config).RestoreTrashItem(
+		nil,
+		input.Bucket,
+		input.TrashID,
+	); err != nil {
 		return nil, err
 	}
 	return map[string]any{"ok": true}, nil
@@ -43,7 +56,22 @@ func deleteTrashItem(args json.RawMessage) (any, error) {
 	if err := decodeArgs(args, &input); err != nil {
 		return nil, err
 	}
-	if err := s3ops.DeleteTrashItem(input.Config, input.Bucket, input.TrashID); err != nil {
+	if err := storageops.ForConfig(input.Config).DeleteTrashItem(
+		nil,
+		input.Bucket,
+		input.TrashID,
+	); err != nil {
+		return nil, err
+	}
+	return map[string]any{"ok": true}, nil
+}
+
+func clearTrash(args json.RawMessage) (any, error) {
+	var input trashListArgs
+	if err := decodeArgs(args, &input); err != nil {
+		return nil, err
+	}
+	if err := storageops.ForConfig(input.Config).ClearTrash(nil, input.Bucket); err != nil {
 		return nil, err
 	}
 	return map[string]any{"ok": true}, nil

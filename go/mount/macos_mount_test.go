@@ -1,3 +1,5 @@
+//go:build darwin
+
 // macOS mount tests pin unmount fallback order for busy WebDAV volumes.
 package mount
 

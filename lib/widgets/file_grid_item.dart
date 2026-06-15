@@ -1,6 +1,7 @@
 // Finder 风格的文件网格单元：无边框、图标居中、名称压在图标下方。
 
 import 'package:flutter/material.dart';
+import 'package:remote_storage/theme/list_interaction_colors.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 /// 文件管理页的 Finder 风格网格项。
@@ -21,7 +22,6 @@ class FileGridItem extends StatelessWidget {
     this.isSelected = false,
     this.showSelectionControl = false,
     this.deleting = false,
-    this.onSecondaryTapDown,
     this.footer,
     this.bottomOverlay,
     this.contentWidth,
@@ -37,7 +37,6 @@ class FileGridItem extends StatelessWidget {
   final bool isSelected;
   final bool showSelectionControl;
   final bool deleting;
-  final GestureTapDownCallback? onSecondaryTapDown;
   final Widget? footer;
   final Widget? bottomOverlay;
   final double? contentWidth;
@@ -45,21 +44,20 @@ class FileGridItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
+    final interactionColors = ListInteractionColors.fromTheme(theme);
     return _HoverBuilder(
       builder: (hovered) {
         return GestureDetector(
           onTap: deleting ? null : onTap,
           onDoubleTap: deleting ? null : onDoubleTap,
-          onSecondaryTapDown: deleting ? null : onSecondaryTapDown,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
             curve: Curves.easeOut,
             decoration: BoxDecoration(
-              color: isSelected
-                  ? theme.colorScheme.primary.withValues(alpha: 0.15)
-                  : hovered
-                  ? theme.colorScheme.primary.withValues(alpha: 0.08)
-                  : Colors.transparent,
+              color: interactionColors.gridBackground(
+                selected: isSelected,
+                hovered: hovered,
+              ),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Stack(
@@ -174,6 +172,7 @@ class _SelectionIndicator extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
+    final interactionColors = ListInteractionColors.fromTheme(theme);
     final accent = theme.colorScheme.primary;
 
     return GestureDetector(
@@ -186,7 +185,7 @@ class _SelectionIndicator extends StatelessWidget {
           color: isSelected
               ? accent
               : hovered
-              ? theme.colorScheme.primary.withValues(alpha: 0.08)
+              ? interactionColors.hover
               : Colors.transparent,
           borderRadius: BorderRadius.circular(999),
           border: Border.all(

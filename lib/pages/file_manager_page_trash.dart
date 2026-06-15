@@ -5,25 +5,22 @@ part of 'file_manager_page.dart';
 // 文件管理页回收站逻辑：按 bucket 浏览、恢复和彻底删除软删除对象。
 
 extension _FileManagerPageTrash on _FileManagerPageState {
-  Future<bool> _openBucketTrash([String? bucket]) async {
-    final targetBucket = bucket ?? _activeBucket;
+  Future<bool> _openBucketTrash([FileManagerBucketEntry? bucket]) async {
+    final targetBucket = bucket ?? _activeBucketEntry;
     if (targetBucket == null) {
       return false;
     }
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    _beginLoading(message: '加载回收站...');
     try {
       final page = await widget.api.listTrashPage(
-        widget.config,
-        targetBucket,
+        targetBucket.config,
+        targetBucket.bucket.name,
         '',
         _FileManagerPageState._trashPageSize,
       );
       if (!mounted) return false;
       setState(() {
-        _activeBucket = targetBucket;
+        _activeBucketEntry = targetBucket;
         _objects = null;
         _trashItems = page.items;
         _prefix = '';
@@ -36,7 +33,7 @@ extension _FileManagerPageTrash on _FileManagerPageState {
         _trashHasMore = page.hasMore;
         _pagingTrash = false;
         _selectedObjectKeys.clear();
-        _loading = false;
+        _endLoading();
       });
       if (_contentScrollController.hasClients) {
         _contentScrollController.jumpTo(0);
@@ -46,7 +43,7 @@ extension _FileManagerPageTrash on _FileManagerPageState {
       if (!mounted) return false;
       setState(() {
         _error = error.toString();
-        _loading = false;
+        _endLoading();
       });
       return false;
     }
@@ -60,7 +57,7 @@ extension _FileManagerPageTrash on _FileManagerPageState {
     if (_activeBucket == null) {
       return;
     }
-    await _loadObjects(_activeBucket!, '');
+    await _loadObjects(_activeBucketEntry!, '');
   }
 
   Future<void> _restoreTrashItem(TrashItem item) async {
@@ -68,10 +65,10 @@ extension _FileManagerPageTrash on _FileManagerPageState {
       return;
     }
     try {
-      await widget.api.restoreTrashItem(widget.config, _activeBucket!, item.id);
+      await widget.api.restoreTrashItem(_activeConfig, _activeBucket!, item.id);
       ObjectListingNotifier.instance.markRestored(_activeBucket!, [item]);
       if (!mounted) return;
-      await _openBucketTrash(_activeBucket!);
+      await _openBucketTrash(_activeBucketEntry!);
       _showPageSnack('已恢复 ${item.name}');
     } catch (error) {
       _showPageError(error);
@@ -87,10 +84,36 @@ extension _FileManagerPageTrash on _FileManagerPageState {
       return;
     }
     try {
-      await widget.api.deleteTrashItem(widget.config, _activeBucket!, item.id);
+      await widget.api.deleteTrashItem(_activeConfig, _activeBucket!, item.id);
       if (!mounted) return;
-      await _openBucketTrash(_activeBucket!);
+      await _openBucketTrash(_activeBucketEntry!);
     } catch (error) {
+      _showPageError(error);
+    }
+  }
+
+  Future<void> _clearBucketTrash() async {
+    final bucket = _activeBucket;
+    if (bucket == null || (_trashItems?.isEmpty ?? true)) {
+      return;
+    }
+    final confirmed = await showClearTrashDialog(context, bucket);
+    if (!confirmed) {
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+      _selectedObjectKeys.clear();
+    });
+    try {
+      await widget.api.clearTrash(_activeConfig, bucket);
+      if (!mounted) return;
+      await _openBucketTrash(_activeBucketEntry!);
+      _showPageSnack('已清空 $bucket 的回收站');
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _loading = false);
       _showPageError(error);
     }
   }
@@ -98,10 +121,10 @@ extension _FileManagerPageTrash on _FileManagerPageState {
   Widget _buildTrashView(ShadThemeData theme) {
     final items = _filteredTrashItems;
     if (items.isEmpty) {
-      return _empty(
-        theme,
-        LucideIcons.trash2,
-        _hasSearchQuery ? '当前搜索没有结果' : '此存储桶回收站为空',
+      return FileManagerEmptyState(
+        theme: theme,
+        icon: LucideIcons.trash2,
+        text: _hasSearchQuery ? '当前搜索没有结果' : '此存储桶回收站为空',
       );
     }
     return FileManagerTrashBrowser(

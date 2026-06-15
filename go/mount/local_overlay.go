@@ -31,9 +31,12 @@ func newLocalMountOverlay(root string) (*localMountOverlay, error) {
 	overlay := &localMountOverlay{
 		root: root,
 		entries: map[string]localOverlayEntry{
-			".TemporaryItems":       {name: ".TemporaryItems", isDir: true, mode: 0o777 | fs.ModeSticky},
-			".fseventsd":            {name: ".fseventsd", isDir: true, mode: 0o755},
-			".metadata_never_index": {name: ".metadata_never_index", isDir: false, mode: 0o644},
+			".TemporaryItems":                     {name: ".TemporaryItems", isDir: true, mode: 0o777 | fs.ModeSticky},
+			".fseventsd":                          {name: ".fseventsd", isDir: true, mode: 0o755},
+			".metadata_never_index":               {name: ".metadata_never_index", isDir: false, mode: 0o644},
+			".metadata_never_index_unless_rootfs": {name: ".metadata_never_index_unless_rootfs", isDir: false, mode: 0o644},
+			".ql_disablecache":                    {name: ".ql_disablecache", isDir: false, mode: 0o644},
+			".ql_disablethumbnails":               {name: ".ql_disablethumbnails", isDir: false, mode: 0o644},
 		},
 		trashUID: strconv.Itoa(os.Getuid()),
 	}

@@ -3,8 +3,11 @@ package mount
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -14,7 +17,17 @@ import (
 	s3ops "remote-storage/go/s3"
 )
 
+func (a *bucketAccess) readOnlyError() error {
+	if a != nil && a.readOnly {
+		return fmt.Errorf("mount is read-only")
+	}
+	return nil
+}
+
 func (a *bucketAccess) registerLocalWrite(virtualPath, localPath string, size int64) {
+	if a != nil && a.readOnly {
+		return
+	}
 	info := s3ops.ObjectInfo{
 		Key:          cleanVirtualPath(virtualPath),
 		Size:         size,
@@ -25,6 +38,16 @@ func (a *bucketAccess) registerLocalWrite(virtualPath, localPath string, size in
 }
 
 func (a *bucketAccess) scheduleUpload(virtualPath, localPath string) {
+	if a != nil && a.readOnly {
+		return
+	}
+	log.Printf(
+		"[mount/writeback] enqueue-request bucket=%q path=%q local_path=%q size=%d",
+		a.bucket,
+		cleanVirtualPath(virtualPath),
+		localPath,
+		fileSize(localPath),
+	)
 	a.writeback.enqueue(cleanVirtualPath(virtualPath), localPath, fileSize(localPath))
 }
 
@@ -33,6 +56,9 @@ func (a *bucketAccess) createDirectory(
 	virtualPath string,
 ) error {
 	clean := cleanVirtualPath(virtualPath)
+	if err := a.readOnlyError(); err != nil {
+		return err
+	}
 	if err := a.hiddenTrashError(clean); err != nil {
 		return err
 	}
@@ -52,6 +78,9 @@ func (a *bucketAccess) deletePath(
 	isDir bool,
 ) error {
 	_ = ctx
+	if err := a.readOnlyError(); err != nil {
+		return err
+	}
 	if err := a.hiddenTrashError(virtualPath); err != nil {
 		return err
 	}
@@ -80,6 +109,9 @@ func (a *bucketAccess) renamePath(
 ) error {
 	oldClean := cleanVirtualPath(oldVirtualPath)
 	newClean := cleanVirtualPath(newVirtualPath)
+	if err := a.readOnlyError(); err != nil {
+		return err
+	}
 	if a.overlay.isTrashPath(newClean) {
 		return a.deletePath(ctx, oldClean, isDir)
 	}
@@ -112,9 +144,8 @@ func (a *bucketAccess) renamePath(
 	timeoutCtx, cancel := a.withTimeout(ctx)
 	defer cancel()
 	taskID := "mount-move-" + uuid.NewString()
-	if err := s3ops.MoveObjectContextWithTask(
+	if err := a.backend.MoveObject(
 		timeoutCtx,
-		a.config,
 		a.bucket,
 		a.remoteKeyForMutation(oldClean, isDir),
 		a.remoteKeyForMutation(newClean, isDir),
@@ -130,12 +161,7 @@ func (a *bucketAccess) renamePath(
 }
 
 func (a *bucketAccess) remoteFileExists(ctx context.Context, virtualPath string) bool {
-	_, err := s3ops.HeadObjectContext(
-		ctx,
-		a.config,
-		a.bucket,
-		a.remoteKey(virtualPath),
-	)
+	_, err := a.backend.HeadObject(ctx, a.bucket, a.remoteKey(virtualPath))
 	return err == nil
 }
 
@@ -143,13 +169,11 @@ func (a *bucketAccess) remotePathExists(ctx context.Context, virtualPath string,
 	if !isDir {
 		return a.remoteFileExists(ctx, virtualPath)
 	}
-	items, err := s3ops.ListObjectsContext(
-		ctx,
-		a.config,
-		a.bucket,
-		a.remotePrefix(virtualPath),
-	)
-	return err == nil && len(items) > 0
+	if _, err := a.backend.HeadObject(ctx, a.bucket, a.remoteKeyForMutation(virtualPath, true)); err == nil {
+		return true
+	}
+	page, err := a.backend.ListObjectsPage(ctx, a.bucket, a.remotePrefix(virtualPath), "", 1)
+	return err == nil && len(page.Items) > 0
 }
 
 func (a *bucketAccess) stagePathFor(virtualPath string) string {
@@ -161,14 +185,13 @@ func (a *bucketAccess) cachePathFor(virtualPath string) string {
 }
 
 func pathForVirtualKey(root, virtualPath string) string {
-	segments := []string{root}
-	for _, part := range splitVirtualPath(virtualPath) {
-		segments = append(segments, safeSegment(part))
+	clean := cleanVirtualPath(virtualPath)
+	if clean == "" {
+		return filepath.Join(root, "_root")
 	}
-	if len(segments) == 1 {
-		segments = append(segments, "_root")
-	}
-	return filepath.Join(segments...)
+	sum := sha1.Sum([]byte(clean))
+	encoded := hex.EncodeToString(sum[:])
+	return filepath.Join(root, encoded[:2], encoded[2:])
 }
 
 func copyFile(dstPath, srcPath string) error {

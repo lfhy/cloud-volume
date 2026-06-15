@@ -3,6 +3,7 @@ package s3
 
 import (
 	"context"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 
 const defaultListPageSize int32 = 200
 const trashMetadataPageConcurrency = 8
+const objectListTimeout = 15 * time.Second
 
 type ObjectPage struct {
 	Items     []ObjectInfo `json:"items"`
@@ -49,6 +51,10 @@ func ListObjectsPageContext(
 	if ctx == nil {
 		ctx = Ctx()
 	}
+	ctx, cancel := context.WithTimeout(ctx, objectListTimeout)
+	defer cancel()
+	startedAt := time.Now()
+	log.Printf("[s3/list] start bucket=%q prefix=%q next_token=%q page_size=%d", bucket, prefix, nextToken, pageSize)
 	if prefix != "" && !strings.HasSuffix(prefix, "/") {
 		prefix += "/"
 	}
@@ -66,6 +72,7 @@ func ListObjectsPageContext(
 	}
 	out, err := client.ListObjectsV2(ctx, input)
 	if err != nil {
+		log.Printf("[s3/list] error bucket=%q prefix=%q duration=%s err=%v", bucket, prefix, time.Since(startedAt).Round(time.Millisecond), err)
 		return ObjectPage{}, err
 	}
 
@@ -84,14 +91,13 @@ func ListObjectsPageContext(
 			continue
 		}
 		info := ObjectInfo{Key: *obj.Key, Size: *obj.Size}
-		if obj.LastModified != nil {
-			info.LastModified = obj.LastModified.Format("2006-01-02 15:04:05")
-		}
+		info.LastModified = formatObjectLastModified(obj.LastModified)
 		items = append(items, info)
 	}
 	if items == nil {
 		items = []ObjectInfo{}
 	}
+	log.Printf("[s3/list] done bucket=%q prefix=%q duration=%s items=%d next_token=%q", bucket, prefix, time.Since(startedAt).Round(time.Millisecond), len(items), aws.ToString(out.NextContinuationToken))
 	return ObjectPage{
 		Items:     items,
 		NextToken: aws.ToString(out.NextContinuationToken),

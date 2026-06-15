@@ -32,6 +32,17 @@ class DesktopContextMenuRegistry {
   }
 }
 
+class DesktopContextMenuHandle extends ChangeNotifier {
+  Offset? _globalPosition;
+
+  Offset? get globalPosition => _globalPosition;
+
+  void showAt(Offset globalPosition) {
+    _globalPosition = globalPosition;
+    notifyListeners();
+  }
+}
+
 class DesktopContextMenuRegion extends StatefulWidget {
   const DesktopContextMenuRegion({
     super.key,
@@ -40,6 +51,9 @@ class DesktopContextMenuRegion extends StatefulWidget {
     required this.child,
     this.menuOffset = const Offset(96, 4),
     this.constraints = const BoxConstraints(minWidth: 164),
+    this.handle,
+    this.captureSecondaryTap = true,
+    this.onSecondaryTapDown,
   });
 
   final Object groupId;
@@ -47,6 +61,9 @@ class DesktopContextMenuRegion extends StatefulWidget {
   final Widget child;
   final Offset menuOffset;
   final BoxConstraints constraints;
+  final DesktopContextMenuHandle? handle;
+  final bool captureSecondaryTap;
+  final GestureTapDownCallback? onSecondaryTapDown;
 
   @override
   State<DesktopContextMenuRegion> createState() =>
@@ -62,10 +79,21 @@ class _DesktopContextMenuRegionState extends State<DesktopContextMenuRegion> {
     super.initState();
     _controller = ShadContextMenuController();
     _controller.addListener(_syncActiveController);
+    widget.handle?.addListener(_showFromHandle);
+  }
+
+  @override
+  void didUpdateWidget(covariant DesktopContextMenuRegion oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.handle != widget.handle) {
+      oldWidget.handle?.removeListener(_showFromHandle);
+      widget.handle?.addListener(_showFromHandle);
+    }
   }
 
   @override
   void dispose() {
+    widget.handle?.removeListener(_showFromHandle);
     _controller.removeListener(_syncActiveController);
     DesktopContextMenuRegistry.deactivate(widget.groupId, _controller);
     _controller.dispose();
@@ -86,6 +114,14 @@ class _DesktopContextMenuRegionState extends State<DesktopContextMenuRegion> {
     _controller.show();
   }
 
+  void _showFromHandle() {
+    final globalPosition = widget.handle?.globalPosition;
+    if (globalPosition == null) {
+      return;
+    }
+    _showAt(globalPosition);
+  }
+
   @override
   Widget build(BuildContext context) {
     return ShadContextMenu(
@@ -99,7 +135,15 @@ class _DesktopContextMenuRegionState extends State<DesktopContextMenuRegion> {
       items: widget.items,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onSecondaryTapDown: (details) => _showAt(details.globalPosition),
+        onSecondaryTapDown: widget.captureSecondaryTap
+            ? (details) {
+                widget.onSecondaryTapDown?.call(details);
+                _showAt(details.globalPosition);
+              }
+            : null,
+        onTapDown: (_) {
+          DesktopContextMenuRegistry.dismiss(widget.groupId);
+        },
         child: widget.child,
       ),
     );

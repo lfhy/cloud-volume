@@ -1,9 +1,10 @@
+//go:build darwin
+
 // System mount probing keeps in-memory mount state aligned with macOS reality.
 package mount
 
 import (
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -13,7 +14,7 @@ import (
 var mountEscapePattern = regexp.MustCompile(`\\([0-7]{3})`)
 
 func isWebDAVMountActive(mountPath string) (bool, error) {
-	output, err := exec.Command("mount", "-t", "webdav").CombinedOutput()
+	output, err := runLoggedCommand(macosProbeCommandTimeout, "probe-webdav-mounts", "mount", "-t", "webdav")
 	if err != nil {
 		return false, fmt.Errorf("list webdav mounts: %w: %s", err, string(output))
 	}
@@ -21,7 +22,7 @@ func isWebDAVMountActive(mountPath string) (bool, error) {
 }
 
 func listWebDAVMountPaths() ([]string, error) {
-	output, err := exec.Command("mount", "-t", "webdav").CombinedOutput()
+	output, err := runLoggedCommand(macosProbeCommandTimeout, "list-webdav-mounts", "mount", "-t", "webdav")
 	if err != nil {
 		return nil, fmt.Errorf("list webdav mounts: %w: %s", err, string(output))
 	}

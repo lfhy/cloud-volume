@@ -1,25 +1,4 @@
-// Download directory helpers centralize the fallback logic for desktop saves.
+// Conditional directory helpers keep desktop-only filesystem code out of web builds.
 
-import 'dart:io';
-
-import 'package:path_provider/path_provider.dart';
-
-Future<String?> resolveDefaultDownloadDirectory(String configuredPath) async {
-  final trimmed = configuredPath.trim();
-  if (trimmed.isNotEmpty) {
-    return trimmed;
-  }
-
-  try {
-    final downloadsDir = await getDownloadsDirectory();
-    if (downloadsDir == null) {
-      return null;
-    }
-    await downloadsDir.create(recursive: true);
-    return downloadsDir.path;
-  } on UnsupportedError {
-    return null;
-  } on FileSystemException {
-    return null;
-  }
-}
+export 'default_download_directory_io.dart'
+    if (dart.library.html) 'default_download_directory_web.dart';

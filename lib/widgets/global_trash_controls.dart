@@ -84,6 +84,7 @@ class GlobalTrashHeaderActions extends StatelessWidget {
     required this.onRefresh,
     required this.onRestoreSelected,
     required this.onDeleteSelected,
+    required this.onClearTrash,
     required this.onClearSelection,
   });
 
@@ -92,6 +93,7 @@ class GlobalTrashHeaderActions extends StatelessWidget {
   final VoidCallback onRefresh;
   final VoidCallback onRestoreSelected;
   final VoidCallback onDeleteSelected;
+  final VoidCallback? onClearTrash;
   final VoidCallback onClearSelection;
 
   @override
@@ -100,9 +102,20 @@ class GlobalTrashHeaderActions extends StatelessWidget {
     final hasSelection = selectedCount > 0;
 
     if (!hasSelection) {
-      return ShadButton.outline(
-        onPressed: loading ? null : onRefresh,
-        child: const Text('刷新'),
+      return Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        alignment: WrapAlignment.end,
+        children: [
+          ShadButton.outline(
+            onPressed: loading ? null : onRefresh,
+            child: const Text('刷新'),
+          ),
+          ShadButton.destructive(
+            onPressed: loading ? null : onClearTrash,
+            child: const Text('清空回收站'),
+          ),
+        ],
       );
     }
 

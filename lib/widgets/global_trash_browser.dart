@@ -5,6 +5,7 @@ import 'package:remote_storage/models/trash_item.dart';
 import 'package:remote_storage/widgets/desktop_context_menu_region.dart';
 import 'package:remote_storage/widgets/file_list_tile.dart';
 import 'package:remote_storage/widgets/local_cloudpan_file_icon.dart';
+import 'package:remote_storage/widgets/trash_row_actions.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'package:remote_storage/widgets/app_loading_indicator.dart';
@@ -112,6 +113,12 @@ class GlobalTrashBrowser extends StatelessWidget {
                     showSelectionControl: true,
                     showDivider: index != entries.length - 1 || loadingMore,
                     deleting: busy,
+                    trailing: TrashRowActions(
+                      deletedLabel: entry.item.deletedAt,
+                      busy: busy,
+                      onRestore: () => onRestore(entry),
+                      onDeletePermanently: () => onDeletePermanently(entry),
+                    ),
                   ),
                 );
               },
@@ -228,6 +235,11 @@ class _GlobalTrashHeader extends StatelessWidget {
           SizedBox(
             width: FileListTile.modifiedColumnWidth,
             child: Text('删除时间', textAlign: TextAlign.right, style: labelStyle),
+          ),
+          const SizedBox(width: 16),
+          SizedBox(
+            width: TrashRowActions.actionColumnWidth,
+            child: Text('操作', textAlign: TextAlign.right, style: labelStyle),
           ),
         ],
       ),

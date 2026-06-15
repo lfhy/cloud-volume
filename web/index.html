@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="Cloud Volume / 云卷，面向远程卷的本地化管理控制台。">
+  <meta name="theme-color" content="#2563EB">
+  <meta name="color-scheme" content="light">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Cloud Volume">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>Cloud Volume</title>
+  <link rel="manifest" href="manifest.json">
+  <style>
+    :root {
+      --loader-bg: linear-gradient(145deg, #eef4ff 0%, #f9fbff 48%, #f4f8ff 100%);
+      --loader-accent: #2563eb;
+      --loader-accent-soft: #60a5fa;
+      --loader-ink: #0f172a;
+      --loader-muted: #64748b;
+      --loader-line: rgba(37, 99, 235, 0.12);
+    }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: #f7faff;
+    }
+
+    body {
+      overflow: hidden;
+      font-family: "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+
+    #boot-shell {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 28px;
+      background: var(--loader-bg);
+      transition: opacity 360ms ease, visibility 360ms ease;
+      z-index: 9999;
+    }
+
+    #boot-shell.boot-shell--done {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .boot-card {
+      position: relative;
+      width: min(520px, 100%);
+      padding: 28px 28px 24px;
+      border-radius: 28px;
+      background: rgba(255, 255, 255, 0.82);
+      border: 1px solid rgba(255, 255, 255, 0.68);
+      box-shadow: 0 24px 70px rgba(37, 99, 235, 0.12);
+      backdrop-filter: blur(18px);
+      overflow: hidden;
+    }
+
+    .boot-card::before,
+    .boot-card::after {
+      content: "";
+      position: absolute;
+      border-radius: 999px;
+      filter: blur(2px);
+    }
+
+    .boot-card::before {
+      width: 220px;
+      height: 220px;
+      top: -110px;
+      right: -90px;
+      background: rgba(96, 165, 250, 0.14);
+    }
+
+    .boot-card::after {
+      width: 150px;
+      height: 150px;
+      left: -60px;
+      bottom: -70px;
+      background: rgba(37, 99, 235, 0.08);
+    }
+
+    .boot-brand {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      z-index: 1;
+    }
+
+    .boot-icon {
+      width: 72px;
+      height: 52px;
+      flex: 0 0 auto;
+    }
+
+    .boot-copy {
+      min-width: 0;
+    }
+
+    .boot-title {
+      margin: 0;
+      color: var(--loader-ink);
+      font-size: clamp(31px, 4vw, 38px);
+      line-height: 1;
+      letter-spacing: -0.04em;
+      font-weight: 800;
+    }
+
+    .boot-subtitle {
+      margin: 5px 0 0;
+      color: var(--loader-muted);
+      font-size: 11px;
+      letter-spacing: 0.02em;
+      font-weight: 600;
+    }
+
+    .boot-status {
+      position: relative;
+      z-index: 1;
+      margin-top: 28px;
+    }
+
+    .boot-label {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      color: var(--loader-ink);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .boot-percent {
+      color: var(--loader-muted);
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+    }
+
+    .boot-progress {
+      margin-top: 12px;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, 0.16);
+      overflow: hidden;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    }
+
+    .boot-progress-bar {
+      width: 18%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--loader-accent) 0%, var(--loader-accent-soft) 100%);
+      box-shadow: 0 0 22px rgba(37, 99, 235, 0.35);
+      transition: width 280ms ease;
+    }
+
+    .boot-note {
+      margin: 14px 0 0;
+      color: var(--loader-muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    @media (max-width: 640px) {
+      #boot-shell {
+        padding: 18px;
+      }
+
+      .boot-card {
+        padding: 22px 20px 18px;
+        border-radius: 22px;
+      }
+
+      .boot-brand {
+        align-items: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="boot-shell" role="status" aria-live="polite" aria-label="Cloud Volume 正在加载">
+    <div class="boot-card">
+      <div class="boot-brand">
+        <svg class="boot-icon" viewBox="0 0 72 52" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <defs>
+            <linearGradient id="bootBrandGradient" x1="2" y1="1" x2="66" y2="49">
+              <stop offset="0%" stop-color="#60A5FA"/>
+              <stop offset="100%" stop-color="#2563EB"/>
+            </linearGradient>
+          </defs>
+          <path d="M42 44H18C8.6 44 2 37.6 2 29.5C2 22 7.8 15.8 15.3 15.1C18.2 6.5 26.4 1 36 1C47.4 1 56.7 9.4 57.8 20.3C65 21.6 70 27.1 70 34C70 39.7 65.2 44 59 44H52" fill="url(#bootBrandGradient)"/>
+          <path d="M26 31H54C59 31 63 35 63 40C63 45 59 49 54 49H26C21 49 17 45 17 40C17 35 21 31 26 31Z" fill="#FFFFFF" opacity="0.96"/>
+          <circle cx="54" cy="40" r="5" fill="#2563EB"/>
+          <path d="M26 36H47" stroke="#2563EB" stroke-width="3" stroke-linecap="round"/>
+          <path d="M26 44H42" stroke="#93C5FD" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+        <div class="boot-copy">
+          <h1 class="boot-title">云卷</h1>
+          <p class="boot-subtitle">Cloud Volume · Local Manager for Remote Volumes</p>
+        </div>
+      </div>
+      <div class="boot-status">
+        <div class="boot-label">
+          <span id="boot-status-text">正在准备界面资源</span>
+          <span class="boot-percent" id="boot-status-percent">0%</span>
+        </div>
+        <div class="boot-progress">
+          <div class="boot-progress-bar" id="boot-progress-bar"></div>
+        </div>
+        <p class="boot-note">
+          首次打开会加载字体、CanvasKit 与应用资源。加载完成后会自动进入控制台。
+        </p>
+      </div>
+    </div>
+  </div>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>

@@ -52,9 +52,17 @@ func (s *webDAVServer) stop() error {
 	if s == nil || s.server == nil {
 		return nil
 	}
+	if s.listener != nil {
+		_ = s.listener.Close()
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	return s.server.Shutdown(ctx)
+	err := s.server.Shutdown(ctx)
+	if err == context.DeadlineExceeded {
+		_ = s.server.Close()
+		return nil
+	}
+	return err
 }
 
 func scopedServerURL(port int, scope string) string {

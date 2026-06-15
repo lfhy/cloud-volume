@@ -15,9 +15,19 @@ dependencies:
   shared_preferences: ^2.5.5
   file_picker: ^11.0.2
   flutter_svg: ^2.2.1
+  http: ^1.2.2
   path_provider: ^2.1.4
   sqflite_common_ffi: ^2.3.6
   url_launcher: ^6.3.2
+  super_drag_and_drop: ^0.9.1
+  super_clipboard: ^0.9.1
+  desktop_multi_window: ^0.3.0
+  window_manager: ^0.5.1
+
+hooks:
+  user_defines:
+    sqlite3:
+      source: system
 dev_dependencies:
   flutter_test:
     sdk: flutter

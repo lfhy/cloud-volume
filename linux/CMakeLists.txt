@@ -7,7 +7,7 @@ project(runner LANGUAGES CXX)
 set(BINARY_NAME "remote_storage")
 # The unique GTK application identifier for this application. See:
 # https://wiki.gnome.org/HowDoI/ChooseApplicationID
-set(APPLICATION_ID "com.example.remote_storage")
+set(APPLICATION_ID "com.cloudvolume.app")
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.
@@ -54,8 +54,29 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTK REQUIRED IMPORTED_TARGET gtk+-3.0)
 
+# Build and install the Go bridge alongside the Linux bundle so packaged
+# runners can resolve the FFI library without depending on the repo layout.
+set(REPO_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/..")
+set(BRIDGE_OUTPUT_DIR "${REPO_ROOT_DIR}/bin/bridge")
+set(LINUX_BRIDGE_OUTPUT "${BRIDGE_OUTPUT_DIR}/libremote_storage_bridge.so")
+
+find_program(GO_EXECUTABLE NAMES go REQUIRED)
+
+add_custom_target(remote_storage_bridge ALL
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${BRIDGE_OUTPUT_DIR}"
+  COMMAND ${CMAKE_COMMAND} -E env
+    "CGO_ENABLED=1"
+    ${GO_EXECUTABLE} build -buildmode=c-shared -o "${LINUX_BRIDGE_OUTPUT}" ./bridge
+  BYPRODUCTS
+    "${LINUX_BRIDGE_OUTPUT}"
+    "${BRIDGE_OUTPUT_DIR}/libremote_storage_bridge.h"
+  WORKING_DIRECTORY "${REPO_ROOT_DIR}"
+  COMMENT "Building Linux Go bridge"
+  VERBATIM)
+
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")
+add_dependencies(${BINARY_NAME} remote_storage_bridge)
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
@@ -98,6 +119,9 @@ install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}
   COMPONENT Runtime)
 
 install(FILES "${FLUTTER_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  COMPONENT Runtime)
+
+install(FILES "${LINUX_BRIDGE_OUTPUT}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 
 foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})

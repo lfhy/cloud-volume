@@ -5,6 +5,157 @@
 - Added a **缓存管理** card to the settings page that shows local cache file statistics (file count and total size) and provides a one-click **清理缓存** button. It clears both Dart-side download cache (SQLite + file cache) and Go-side mount cache (staging/cache files under `~/.remote-storage/runtime/mounts/`), with the result shown inline below the card.
 
 - Added a standalone `scripts/build_appimage.sh` script and a `make appimage` target that build the full Linux AppImage in one step — Go bridge + Flutter release + AppDir assembly + appimagetool packaging.
+
+- WebDAV 新建目录现在会在 bridge 日志里记录 `[webdav/mkdir]` 开始、`MKCOL` 响应、`405` 后目录存在性反查以及最终错误，方便排查目录创建失败但界面只看到错误提示的情况。
+- 修复 WebDAV 新建目录时把 `MKCOL 405 Method Not Allowed` 一律当作成功的问题；现在只有反查确认目标目录已经存在时才视为幂等成功，否则会把真实的创建失败反馈到界面。
+- 任务队列现在会同步显示前台进度弹框中的上传/下载任务，侧边栏“对象传输”不再在弹框上传或下载时显示“暂无任务”；目录上传和目录下载也会额外记录每个文件的子任务，失败的单文件上传/下载可直接从任务队列单独重试。
+- 账号管理页“新增账号 / 编辑账号”弹框现在每个输入框上方都会显示字段名（名称、网关地址、区域、访问密钥 ID 等），输入后也能直观看到当前正在填写哪一项；URL、Region、Access Key、WebDAV 用户名和百度授权码等技术字段也会关闭智能标点/自动纠错，并把常见全角标点规范为半角，避免中文输入法把 `https://` 这类连接地址打坏。
+- 文件预览弹框里的“外部应用打开 / 另存为 / 下载”现在会直接在预览区域切换为下载进度；外部应用打开会在下载完成后自动打开本地文件并关闭弹框，下载和另存为则显示完成状态。文件列表右键下载和多选下载也会弹出统一下载进度框，不再静默进入后台任务；右键下载会先弹出统一拟态进度框，再继续选择本地保存路径；目录下载在展开目录阶段失败时也会把错误显示在下载任务行里，并在扫描后展示总文件数和总字节数。百度网盘下载和文件信息读取现在也避开 SDK 会把 `hit frequency limit` 吞成 `file not found` 的游标查找，改用带退避重试的路径查找；列表结果会在后端缓存 fsid，后续下载、预览和范围读取会优先用 fsid 获取下载地址，避免每个文件下载前再次 list；下载到本地路径时会先复用已有文件内容缓存，目录递归下载中的子文件也会优先从缓存复制，已经浏览过的目录层级会复用页面对象列表缓存。
+- 文件管理页现在会按账号、bucket、目录前缀和分页 token 缓存对象列表；普通目录来回切换会直接复用已加载页面，只有右键“刷新”、错误页重试或写操作完成后才会绕过并更新缓存。百度网盘目录列表遇到 SDK 返回的 `hit frequency limit` 也会按既有退避策略重试，并会过滤 `listall` 返回的当前目录自身条目，避免同名目录看起来能选中但递归下载时报 `file not found`。
+- 文件管理页的加载态现在会显示中文等待文案；百度网盘目录列表如果等待超过短暂延迟，会提示可能触发频率限制并正在自动重试，不再只显示一个空转圈。
+- 设置页“通用设置”顶部现在新增更新检查区，可检测 GitHub 最新 Release，并直接跳转到 GitHub 下载更新。
+- 文件管理页面包屑现在更接近 Windows 文件管理器的折叠逻辑：空间不足时优先把更早层级收入省略菜单，保留最近几级目录完整显示。
+- 批量上传/删除进度弹框现在只保留“后台运行”作为未完成任务的关闭入口，并把“取消上传/取消删除”按钮改为警告样式，避免和后台继续执行混淆。
+- 文件管理页单个文件夹右键菜单现在会显示“下载”，桌面端会递归展开目录并按原相对路径下载到本地；多选批量下载也不再忽略选中的文件夹。
+- 百度网盘文件夹上传现在使用保守小并发上传文件，并在上游返回 403 限流响应或单个文件上传失败时自动 sleep 后重试，避免 RPM 限制把整条目录上传链路直接打断；上传失败弹框也会显示具体失败原因和文件路径。
+- 修复批量删除完成后进度弹框的顶部进度条仍以不确定态动画转动的问题；无字节总量的删除任务完成后现在会显示 100% 完成进度。
+- 文件管理页批量删除现在会弹出统一拟态进度框，展示每个删除任务的状态，并可关闭弹框切到后台继续执行。
+- 百度网盘目录创建现在会先做幂等检查并缓存已确认目录，避免重复创建已存在目录时被上游自动改名，同时保留文件夹拖拽上传的并发能力。
+- 百度网盘上传现在会关闭 `xpan` SDK 默认的每接口 10 次/分钟限流，避免 4MB 分片上传在文件或目录拖拽上传时被 SDK 内部节流卡住。
+- 文件管理页进入多选状态后，点击文件或目录现在都会切换选择状态，不再误打开文件或进入子目录。
+- 文件管理页鼠标圈选现在会与已有多选状态做切换合并：框内未选对象会加入，框内已选对象会取消，框外选择会保留，拖拽过程中滚动列表也不会打断本次圈选。
+- Release 文案里的国内加速下载区现在会按当前 tag 和实际构建产物生成表格，原始 GitHub、`gh-proxy`、`ghfast` 链接都可直接点击，不再保留旧版 `v1.0.0` 示例链接。
+- 文件管理页桌面端拖拽/粘贴上传现在支持本地文件夹：前端会立即显示统一上传拟态框，Go bridge 在后台扫描目录树、创建远端目录并按相对路径上传文件，同时回传已发现/已上传文件数量并支持从弹框提前取消，避免大目录在 Flutter 侧展开任务时卡住界面。
+- 文件夹上传现在会先完成本地目录扫描并一次性拿到总文件数与总字节数，再进入上传阶段；中途取消、失败或完成后都会刷新当前文件列表，空白区右键菜单也新增“刷新”入口，方便查看已部分上传的对象。
+- 文件夹上传弹框现在区分目录总进度和当前文件进度：顶部汇总卡显示整个目录的字节与文件数量进度，任务行显示当前正在上传的文件路径、字节进度和独立进度条。
+- 文件夹上传现在使用 Go 后端 4 路有界并发上传文件；上传弹框去掉单任务场景下重复的“1 个任务”标签，并把速度合并到目录总进度栏，避免顶部与任务行重复显示。
+- 文件管理页右键菜单现在区分空白区、单对象和多选对象：多选右键不再和背景菜单抢事件，空白点击会取消当前选择，空白区也可直接新建目录或上传文件。
+- 文件管理页现在支持桌面端鼠标圈选：在文件列表或网格中按住左键拖出选框即可批量选中当前可见对象，继续复用现有多选、批量下载和批量删除链路。
+- 修复百度网盘桌面挂载在 macOS 上长时间卡住的问题：挂载层现在把目录预取改成后端能力开关，百度网盘默认禁用目录 `prefetch`，避免挂载后为了预览子目录持续触发受限速的上游 OpenAPI 请求。
+- 设置页现在支持显式控制挂载元数据缓存：默认启用 1 分钟缓存，也可以直接关闭；关闭后挂载目录浏览和文件元数据读取会始终直接请求远端，不再让用户理解内部 `-1` 之类的关闭语义。
+- 设置页里的回收站自动清理也改成显式开关 + 保留天数输入：关闭时只保留回收站内容，开启后按保留天数后台清理；界面不再暴露 `-1` 或“非负数表示开启”这类不直观规则。
+- 修复 S3 桶对象列表与 `headObject` 返回的 `lastModified` 时间展示：后端现在会把 S3 返回的 UTC 时间统一转换为当前本地时区后再返回给 Flutter，避免文件列表里直接显示未校正的 UTC 时间。
+- 修复文件管理页对百度网盘挂载的前端误拦截：在挂载链路已经抽象为多后端通用接口后，百度网盘不再被 `supportsMounts` 和“暂不支持桌面挂载”的旧 UI 判断提前拦住。
+- 账号管理与文件管理首页现在改成真正的多账号共存模型：新增账号后不再需要单独点击“连接”或切换当前账号，文件管理首页会直接聚合展示所有账号下的 bucket / 根目录，并在“来源”列标出所属账号与存储类型。
+- 新增百度网盘 OpenAPI 上游：账号管理与首次初始化现在支持“百度网盘”类型，桌面端会按百度要求使用 `oob` 模式打开浏览器授权页，用户把网页显示的授权码手动粘贴回应用后完成 OAuth 换 token；后端通过 `github.com/lfhy/xpan` 接入百度文件浏览、下载、上传、复制、移动、重命名、删除与挂载链路，并按百度限制把上传内容先写到 `/apps/网盘demo/` 再移动到最终目标路径；分享管理仍暂不在百度账号下开放。
+- 挂载层现在把远端列表、范围读取、建目录、移动、删除、下载和延迟写回都收敛到统一的 storage backend 能力接口，不再在 mount 内部直接绑死 S3 远端操作；因此 S3、WebDAV 和百度网盘可以共用同一套本地优先挂载链路，只有 Linux 的分段预上传仍按后端能力做可选优化。
+- 文件管理页的上传现在会先弹出统一的拟态进度框，拖拽上传、粘贴上传和按钮上传都会显示当前任务列表与进度摘要，并支持直接关闭弹框或切到后台继续上传。
+- 文件管理首页的桶列表现在新增“桶设置/配置”入口，可为每个桶单独设置只读、是否启用回收站，以及桶级回收站目录覆盖；关闭回收站的桶会同步隐藏文件管理里的“打开回收站”入口。
+- 桶级策略现在同时作用于桌面 bridge、Web API、S3 backend、WebDAV backend 与挂载链路：只读桶会拒绝上传、新建、删除、改名、移动、恢复回收站与清空回收站等写操作；S3 删除会按桶策略决定软删或硬删。
+- WebDAV 现在完整支持桶级回收站的 list/restore/delete/clear，并复用与 S3 一致的回收站元数据模型；WebDAV 默认关闭回收站，启用后可把回收站目录改到可写子目录，例如 `20134-image/.trash`。
+- 左下角传输历史浮层现在会延迟收起，并允许鼠标移动到浮层内继续操作，避免刚移过去就消失。
+- macOS 关闭按钮与原生 close 事件现在统一弹出“退出云卷 / 隐藏到托盘 / 取消”确认，不再绕过确认直接最小化窗口。
+- WebDAV 目录权限探测现在会把 PROPFIND / OPTIONS 的状态码、Allow 头、解析到的 privilege 和最终判定写入 bridge 日志，便于排查应为只读却被放行的目录。
+- WebDAV 目录权限探测在 ACL 缺失时会继续按当前目录的 OPTIONS Allow 判断；只有 Allow 明确只暴露只读方法集时才会判定为只读，像 `LOCK/COPY/MOVE/PROPPATCH` 这类未列出 `PUT` 的变更能力也不再被误判成只读。
+- WebDAV 文件管理会按当前目录探测写入权限；明确只读的目录会禁用新建目录、上传、拖拽上传和粘贴上传，并在后端写入入口同步拦截；根目录只读但子目录可写时不再把只读状态错误继承到子目录。
+- WebDAV 文件列表现在会像 S3 一样把目录排在顶部，再按名称排序，避免受服务端 PROPFIND 原始返回顺序影响而把文件夹夹在文件中间。
+- 图片预览现在默认先弹出与其他格式一致的应用内预览框，并在框内显示加载状态；预览弹框统一提供“外部应用打开”入口，不再依赖独立大图窗口。
+- 文件管理首页的桶操作现在收敛为主按钮 `挂载/卸载` 加 `更多` 菜单；`回收站/桶设置/打开挂载目录/WebDAV 地址` 统一复用桶项右键菜单内容，且未启用回收站的桶不再显示“打开回收站”入口。
+- 新增/编辑账号与首次初始化配置现在统一调整字段语义：S3 账号只显示 `名称`，WebDAV 账号同时显示 `名称` 和 `映射桶名称`，其中 WebDAV 的映射桶名称默认跟随名称联动，除非用户手动改写。
+- 修复 WebDAV 文件点击图片预览时 `head_object` 把 Depth 0 目标自身过滤掉，导致已列出的文件仍提示 `file does not exist` 的问题。
+- 桌面端图片预览现在统一走应用内预览弹框并支持缩放查看；图片以及其他暂不支持内嵌预览的格式都可以直接切到系统默认应用打开。
+- 初始化配置与账号新增/编辑现在可以配置映射桶名称；WebDAV 账号不再固定显示为 `WebDAV`，未填写时默认使用账号名称。
+- 文件管理对象列表现在支持拖入本地文件上传、在列表中粘贴系统剪贴板里的本地文件上传，以及复制选中的远端文件后粘贴到本地目录。
+- 文件管理列表、网格与传输任务行现在统一使用灰色 hover/pressed 背景，避免普通悬停状态被品牌色高亮。
+- 修复 WebDAV 账号在文件管理分页列表中因为桥接层传入空请求上下文而报 `net/http: nil Context` 的问题。
+- 文件列表默认点击现在会打开预览窗口；图片可直接在窗口中查看，不支持内嵌预览的 PDF、视频、Word 和其他文件会提示下载查看，并提供取消、另存为、下载操作。
+- 初始化配置页现在改为两步添加存储账号：无配置文件时先选择 S3 对象存储或 WebDAV，再进入对应账号表单，点击确认添加后才写入默认配置。
+- 文件管理页现在只会持续刷新已挂载或正在挂载的 bucket 状态，未挂载桶不会再每 4 秒触发一次 `get_bucket_mount_status`；桥接层也不再为普通状态查询刷 info 日志。
+- 账号管理新增/编辑 S3 账号时现在提供路径风格访问高级选项，和初始化配置页保持一致，便于配置 MinIO 和其他 S3 兼容对象存储。
+- 账号管理在新增、更新或切换账号后会保留当前侧边栏页面，不再因为刷新配置状态而跳回文件管理页。
+- 账号管理删除默认账号时现在会同步清理当前默认配置与旧 Remote Storage 配置源；升级迁移成功后也会删除旧配置源，避免已删除账号在刷新或重启后被旧配置自动恢复。
+- 全局回收站与桶级回收站列表现在显示独立操作列，可直接恢复或彻底删除条目，不再只能依赖右键菜单。
+- 文件管理的桶挂载现在会先弹出挂载设置框，支持选择自定义挂载路径，并可切换只读挂载模式；后端挂载层会在只读模式下拒绝写入、删除和改名。
+- 设置页现在支持配置挂载写入后的异步推送等待时间，并把默认 quiet period 从 60 秒缩短到 10 秒；Go 写回队列会按 `writeback_quiet_seconds` 调度后续等待上传任务。
+- 回收站现在支持手动彻底删除单项、批量删除选中项，以及一键清空当前存储桶回收站；新配置默认关闭自动清理，不再默认按保留天数后台删除回收站内容。
+- 设置页现在支持配置缓存目录；未自定义时默认使用工作路径下的 `cache/`，即 macOS/Linux 的 `~/.cloud-volume/cache` 或 Windows 安装目录下与 `cloud-volume.exe` 同级的 `cache/`，文件预览缓存与挂载缓存都会落到该目录下。
+- 账号管理现在支持多个上游账号：账号 profile 会记录存储类型，页面直接展示所有账号，不再按上游类型分组，并保留和桶列表一致的卡片 / 表格视图切换；新增和编辑账号时先选择 S3 对象存储或 WebDAV，文件管理的桶列表也会展示当前来源账号和存储类型；后端文件浏览、上传、下载、复制、移动等基础存储操作已抽象到统一 storage backend，并新增 WebDAV 上游实现。
+- 默认配置与运行时目录现在统一改为 Cloud Volume 命名：macOS/Linux 使用 `~/.cloud-volume`，Windows 使用安装目录下与 `cloud-volume.exe` 同级的 `config.toml` 和 `runtime/`；升级启动时会从旧的 `~/.remote-storage/config.toml` 或 `~/.remote-storage/profiles/*.toml` 复制配置到新位置，Windows runner 与安装器入口文件也改名为 `cloud-volume.exe`。
+- Windows 启动窗口在高 DPI 小屏幕上的初始尺寸与居中坐标现在统一按逻辑像素计算，不再把物理工作区坐标再次按缩放倍率放大；因此首屏窗口不会再偏到屏幕右下角。
+- Windows Cloud Files watcher 现在会把 Office `~$*.docx/xlsx/pptx` 锁文件和常见 `~wr*.tmp` 临时文件视为本地临时噪声，不再送进远端写回队列；同时本地文件若在 quiet period 内已被删除/改名，对应等待中的 writeback 任务会立即取消，不再残留成长期“等待同步”。
+- Windows 安装包构建链路现在支持注入 Authenticode 签名参数，便于在 release workflow 或本地发布时使用企业/EV 证书对 `installer.exe` 做签名和时间戳，减少 SmartScreen 把安装包判为未知发布者的概率。
+- 修复 `go/mount` 在 Windows 构建路径上的重复 `readRemoteRange` 声明，避免 CLI 打包与相关 CI workflow 在编译阶段直接失败。
+- GitHub Actions tag 发布现在会在部分矩阵任务失败时继续收集已成功构建的产物并创建 release，不再因为个别平台打包失败而整次发布中断；同时 CLI 发布矩阵会把 `lite/full` 变体正确传给打包脚本。
+- macOS WebDAV 挂载读取任务现在按“单个已打开文件”聚合到任务队列，不再把 Finder 的每次分块 range 读取都显示成一条独立下载任务；任务详情会额外显示当前访问的 `bytes=start-end` 范围，便于区分正常 lazy read 与异常循环读取。
+- macOS 挂载调试日志现在会显式记录 `cleanup-stale`、`mount-volume`、`unmount`、`open-mount-path` 与 WebDAV mount probe 各阶段，并给相关系统命令加上超时，避免旧挂载残留或系统挂载命令卡住时前端只表现为一直转圈但 bridge 日志停在入口行。
+- “关于”页版本信息现在统一走构建时注入的 `APP_VERSION_LABEL`：本地开发构建默认显示 `dev`，CI/tag 发布构建会显示对应版本号，不再依赖平台包元信息。
+- CLI 与 Web 运行时现在都支持直接输出版本号：顶层 `cloud-volume-cli version/--version` 继续保留，`cloud-volume-cli-full web version/--version` 与独立 `cloud-volume-web version/--version` 也会直接打印当前构建版本。
+- 设置页现在新增独立的“关于”子 Tab，并通过运行时版本信息展示当前应用版本，同时补充作者版权 `三千` 和 QQ 交流群 `572532027`。
+- 发布体系现在新增 `cloud-volume-cli-full` 变体：保留原有 `cloud-volume-cli` lite 包和独立 `cloud-volume-web` 包不变，同时额外发布内嵌 Flutter Web 静态资源的单文件 full CLI，提供 `web` 子命令启动浏览器控制台，并把对应构建说明同步到了 README、Release 文案和 GitHub Actions workflow。
+- Windows 桌面窗口启动位置现在会按主屏工作区居中计算，不再每次都固定从左上角打开。
+- Windows 本地启动脚本现在同时兼容 PowerShell 风格的 `-Build` / `-SkipPubGet` 与常见的 GNU 风格 `--build` / `--skip-pub-get`，避免误把“仅构建”命令当成调试启动执行。
+- 桌面端文件管理首页在获取存储桶列表失败时，错误提示现在除了“重试”外还会显示“重新配置认证信息”，可直接跳回 AK/SK/Endpoint 配置页修改后再重试。
+- Windows 托盘图标现在会按新版通知区域回调格式处理左键恢复与右键菜单事件，最小化到托盘后可以重新弹出“显示主窗口 / 退出云卷”菜单，不再出现右键无响应导致无法关闭的问题。
+- Windows 安装包现在始终显示安装目录页面；即使复用上一次记住的安装路径，升级安装时也仍然可以手动改到新的目标目录。
+- macOS 和 Windows 托盘菜单现在都会显式处理右键菜单事件，避免依赖平台默认行为导致右键无响应或菜单一闪而过。
+- Windows 安装包的默认安装目录现在固定为 `C:\Program Files\Cloud Volume`，不再直接使用中文产品名作为安装路径，以降低部分环境和第三方组件在中文路径下的兼容性风险。
+- macOS 打包 DMG 现在会内置一个名为 `双击修复已损坏问题.command` 的辅助脚本，用户把应用拖到 `Applications` 后可直接双击移除 `com.apple.quarantine`，不必再手动打开终端输入修复命令。
+- macOS 托盘图标恢复使用内置品牌模板资源，并按侧边栏品牌图的横向比例设置尺寸，避免状态栏里的云形被方形缩放挤压得不自然。
+- 修正打包桌面版启动时的 bridge 加载顺序：应用现在会优先使用 bundle 内置的 Go bridge 动态库，只有开发环境下才回退到仓库根目录与本地 `bin/bridge` 构建路径，避免 release 包启动时报 `Could not locate the Remote Storage repository root.`。
+- Release 文案生成脚本现在会自动附带更新记录、问题修复、macOS “已损坏” 处理方法、国内 GitHub 加速下载说明，以及构建产物的校验和与体积信息，后续 tag 发布不再只有纯资产清单。
+- GitHub Actions 发布矩阵里的 Linux 桌面 GUI 产物现已收敛为 `amd64` 单架构，因为 Flutter 当前不支持在 Linux `x64` runner 上直接 cross-build 出 Linux `arm64` 桌面包；Linux `arm64` 仍继续发布 CLI 与 Web 运行时归档。
+- Windows Cloud Files mounts now keep a stable sync-root path at `~/Cloud Volume/<bucket>` instead of allocating a timestamped directory on every mount, so Explorer paths, remount recovery, and task references no longer drift across sessions.
+- Windows Cloud Files cached writeback persistence no longer depends on a single shared `writeback.db` lock. Each mount process now writes its own queue snapshot under `~/.remote-storage/runtime/mounts/<bucket>/writeback/queue-<pid>.json`, remount recovery compacts old queue files back into the active process, and leftover crashed runners no longer block the next mount just by holding a stale queue DB handle.
+- Linux CLI FUSE 挂载新增 `--auto-sync` 和 `--worker`：顺序追加写现在可以在后台预上传已经完整落盘的 multipart 分块，最终仍保留 quiet-period 自动推送和卸载 drain 推送来补齐尾块并完成 multipart；multipart 并发默认按 CPU 核数动态收敛到 `4..10`，也可以通过 `--worker` 显式放大以适配更高的内网上传带宽。
+- Linux 挂载缓存文件路径现在按对象路径 hash 平铺到每个 bucket 的本地 `cache/` 目录，避免深层对象路径把本地写回缓存展开成层层子目录，同时保留原有远端 key 与桌面端逻辑不变。
+- Makefile 现在提供 `make cli` 作为本地 CLI 构建入口，并新增 `make cli-release` 一次性打包 Linux `amd64/arm64`、macOS `amd64/arm64`、Windows `amd64` 的 CLI 发布包，和现有 GitHub Actions CLI 发布矩阵保持一致。
+- Added `cloud-volume-cli` for headless Linux usage: `init` now prompts for endpoint / AK / SK / bucket / root-prefix / path-style config and saves to the existing TOML store, `mount` can foreground-mount a chosen bucket to either the default `~/Cloud Volume/<bucket>` path or a caller-specified empty directory without changing the existing desktop mount flow on macOS, Windows, or Flutter, and the CLI now also exposes `status` and `unmount` subcommands for scripted server-side mount management.
+- `cloud-volume-cli` now defaults into an interactive shell when started without arguments, keeps a current bucket plus remote working directory, supports `cd` / `pwd`, and adds direct object commands `put`, `get`, `ls`, and `list` on top of the existing S3 config and root-prefix rules.
+- `cloud-volume-cli` now also supports `mkdir` plus hard-delete `rm/delete`, recursive directory `put/get`, and shell-side persistent history plus tab completion for commands and remote paths.
+- `cloud-volume-cli init` no longer prompts for `root_prefix`; first-run setup now only asks for the core connection and auth fields, while any existing stored `root_prefix` remains untouched.
+- `cloud-volume-cli init` no longer requires picking a default bucket up front: after collecting endpoint and credentials it now lists buckets for optional arrow-key selection, and later bucket-scoped commands can trigger that same selection flow on demand when no default bucket is stored.
+- `cloud-volume-cli` now also exposes `bucket` and `bucket list`, so shell users can switch buckets from an arrow-key picker and direct CLI users can inspect the bucket list or set the active bucket without editing config manually.
+- Linux CLI FUSE unmount now blocks on the current bucket's queued writeback tasks before the mount is released, so `Ctrl+C` waits for pending delayed uploads to finish instead of dropping straight into unmount while local cache files still have not been pushed.
+- Mounted multipart writeback uploads now keep the existing resumable `.uploading.json` state but upload pending parts with bounded concurrency instead of strict serial order, so large files such as multi-GB `dd` outputs can push multiple S3 parts in parallel while still resuming from already completed parts after interruption.
+- Release automation now also builds standalone CLI archives for Windows `amd64`, macOS `amd64/arm64`, and Linux `amd64/arm64`, and publishes them alongside the existing desktop release assets.
+- Tagged release automation now also publishes Linux Web runtime archives for `amd64` and `arm64`, each bundling the `cloud-volume-web` server binary with the built Flutter Web static assets so browser deployments can be unpacked and served directly.
+- Added a new Web runtime alongside the existing desktop FFI flow: Flutter Web now boots through a Go HTTP server, requires Cookie-backed login before opening the console, exposes per-bucket WebDAV URLs instead of local mount actions, supports browser-native upload/download, and persists WebDAV credentials in setup plus Settings without echoing saved passwords back to the client.
+- The Web shell now uses the `Cloud Volume / 云卷` browser title and branded app icons, replaces the left-top SVG text path with Flutter-rendered Chinese text so the sidebar logo no longer degrades into `xx` on web, and shows a branded preload screen while fonts, CanvasKit, and app resources are loading instead of leaving a long white screen.
+- Web first-run setup no longer asks for WebDAV username/password up front; it now saves S3 credentials only, defaults WebDAV/browser-login credentials to the current `AK/SK`, auto-signs the browser into the first session after setup, and still allows overriding WebDAV credentials later from Settings.
+- Windows mount startup no longer panics when a leftover `remote_storage.exe` still holds `~/.remote-storage/runtime/mounts/<bucket>/writeback.db`; the bridge now returns a normal actionable error instead, and Windows Settings add an `结束残留占用进程` recovery action for cleaning those stale local runner processes before retrying the mount.
+- Windows Cloud Files cached-writeback now persists queued uploads in a per-bucket BoltDB store, merges repeated edits by virtual path, restores unfinished writeback tasks after remount, and releases unmount without synchronously flushing the whole queue first, so Explorer writes no longer have to wait for pending uploads before the mount disappears and background sync can continue while the app process stays alive.
+- Windows Cloud Files directory-copy recovery now refreshes parent harvest scans when descendant files and child directories keep appearing, and local directory writes clear stale placeholder markers under that subtree, which fixes interrupted large-folder copies that previously only surfaced the first discovered child tree or only queued first-level files while deeper subdirectories such as `.git` stayed missing from the transfers page and mounted file manager.
+- Windows Cloud Files unmount now disconnects the provider before closing the local watcher, and watcher shutdown waits for active harvest scans to stop scheduling new directory watches, which fixes mounts getting stuck at `watcher-close-start` during unmount after large copy operations.
+- Windows mounted writeback uploads now run through a bounded `ants` worker pool instead of launching one upload goroutine per queued file, and the pool size is configurable as `windows_writeback_concurrency` from Settings, which prevents large Explorer copies from exploding into hundreds of concurrent upload tasks, reduces follow-on `context deadline exceeded` failures under overload, and keeps the desktop UI more responsive while the writeback queue drains.
+- The transfers page multi-select list now reuses the same rounded selection control, header treatment, and row hover/press/selected styling as the mounted file-manager list, so batch-selection behavior looks and feels consistent between task management and object browsing.
+- The transfers page now keeps the same bottom breathing room as the file-manager and recycle-bin pages, so the final task rows no longer feel visually stuck to the window edge when scrolled to the end.
+- The settings page now splits platform-neutral preferences and Windows-only mount controls into separate in-page tabs, so general settings stay shorter while non-Windows builds no longer surface a Windows settings tab at all.
+- The file-manager sync badge now treats non-mounted object lists as already synced instead of showing a separate “unmounted” state, which better matches the expectation that remote-only browsing has nothing pending for desktop writeback.
+- Windows desktop startup now opens with a tighter default window size and slightly smaller monitor-based width/height caps, so the app no longer feels overly wide on 1080p and 2K displays before any manual resize.
+- Windows and macOS desktop startup now shrink the initial window on smaller displays using the same adaptive sizing approach already used on Linux, so the first-run layout stays fully visible on lower-resolution laptops instead of opening oversized.
+- The transfer queue now supports row selection plus batch start and batch cancel actions, so waiting uploads and active jobs can be resumed or stopped in bulk from the transfers page instead of one by one.
+- Windows Cloud Files watcher recovery now re-arms the currently opened placeholder directory itself when Explorer fetches that directory, moves raw watcher `Add/Remove` work off the event-processing path, and starts consuming watcher events before the initial directory rescan, which fixes the cases where copying a folder into an already opened nested directory such as `bakcuptest/test/test2` still produced no upload task and where later unmounts or pre-existing directory rescans could wedge around watcher shutdown.
+
+- GitHub Actions 桌面发布流程现在只会在推送形如 `v0.0.1` 的标签时触发，并自动发布 macOS `universal/arm64` 的 `dmg+zip`、Windows `amd64` 的 `installer.exe+zip`、Linux `amd64` 的 `tar.gz+AppImage`。
+- Linux 自定义标题栏现在会使用应用内右上角窗口控件；GTK 应用显示名也显式改成 `云卷`，避免任务栏继续显示 `remote_storage`。
+- Linux 首次启动窗口现在会按屏幕尺寸再缩小一档，关闭按钮会弹出“最小化窗口 / 退出云卷”确认，登录表单改为真正的垂直居中可滚动布局。
+- 初始化配置、启动检查和文件管理里的 Go bridge 错误现在会转换成更友好的中文文案，像 S3 `SignatureDoesNotMatch` 这类常见密钥/签名错误会直接提示检查 AK/SK 与签名配置。
+- 桶列表表头里的 `操作` 列和每一行的固定按钮槽位重新对齐，挂载、卸载、回收站和打开挂载目录操作不再左右参差。
+- Linux 桌面宿主现在会隐藏系统标题栏，并使用与 Windows 一致的应用内右上角最小化 / 最大化 / 关闭控件。
+- Linux 启动窗口现在会按当前显示器尺寸自适应，首次登录页也改成可滚动的垂直居中布局，避免保存按钮在大窗口里显得过低或在小窗口里被挤出可视区域。
+- 首次启动登录页现在包进了居中的圆角壳，左右两栏不再贴满窗口边缘，视觉上更接近桌面应用窗口。
+- Linux bucket mounts now use a FUSE backend rooted at `~/Cloud Volume/<bucket>`, reusing the existing local cache, overlay visibility, delayed writeback queue, and mounted-object UI sync model instead of returning platform-unsupported errors.
+- Linux desktop startup now builds `bin/bridge/libremote_storage_bridge.so` as part of the runner build, installs it into the Linux bundle, and teaches the Dart loader to resolve the bundled `lib/` copy so packaged launches no longer depend on the repository layout.
+
+- The file-manager object list now comes from the mounted local-first directory view when a bucket is mounted, so pending writeback items appear in the list and the sync status stays in a dedicated column instead of repeating under the name.
+- Windows Cloud Files sync roots now project mounted writeback queue state back into Explorer via `CfSetInSyncState`, so files queued by the cached/writeback path show native not-in-sync status until the delayed upload completes and then flip back to in-sync.
+- Mounted bucket file lists now show a per-item sync badge in both list and grid mode, so files and directories can surface `已同步`, `等待同步`, and `同步中` state inline instead of only through the header badge or transfers page.
+- The file-manager header now surfaces per-bucket mounted writeback status directly in the mount badge, showing `等待同步 N` and `同步中 N` counts without making users switch to the transfers page to confirm whether desktop edits are still queued for remote sync.
+- Windows Cloud Files mount-status polling no longer re-runs the sync-root write probe on every periodic `get_bucket_mount_status`, which stops the app's own health check from mutating `.cloud-volume` inside the mounted root and retriggering repeated Explorer placeholder refreshes.
+- Windows Cloud Files browsing now suppresses cached/coalesced placeholder refresh logs and no longer prints every periodic mount-status probe, which keeps bridge logs focused on real placeholder and write-path failures such as unresolved-name copy errors.
+- Windows Cloud Files placeholder population now coalesces repeated directory fetches and skips `CfCreatePlaceholders` for paths that already exist locally, which avoids Explorer placeholder refresh loops and reduces `The cloud operation is invalid` / `Access is denied` callback failures while browsing mounted folders.
+- Windows local run script now appends `127.0.0.1,localhost` to `NO_PROXY` when proxy variables are present, which prevents `flutter run` from sending local Dart VM service websocket traffic through an HTTP proxy and losing the debug connection while the app stays open.
+- Windows Cloud Files mount startup now runs its write probe in-process with short retries instead of spawning a separate PowerShell writer, which avoids false mount failures caused by slow probe startup.
+- Windows Settings now include a force-reset mount action that calls `cleanup_mounts` to clear stuck bucket mounts, stale sync roots, and cached mount state before retesting Explorer write flows.
+- Windows Cloud Files remounts now allocate a fresh sync-root directory and force a rebuild when the same bucket's mount configuration changes, which avoids reusing stale sync-root registration state across mount attempts.
+- Flutter now runs synchronous Go bridge calls on a background isolate before touching the FFI layer, which keeps startup, bucket refresh, mount-status checks, and metadata probes from freezing the desktop UI while the bridge waits on network or mount work.
+- The Go bridge now mirrors runtime diagnostics to `~/.remote-storage/runtime/logs/bridge.log`, and Windows Cloud Files hydration logs now include placeholder fetches plus aligned transfer ranges for mount-debugging.
+- Windows mount settings now expose three selectable modes: `cloud_files_cached` to keep the Cloud Files shell while reusing the existing cached-download and async writeback flow, `cloud_files_direct` to keep the earlier direct-S3 hydration path for side-by-side testing, and `webdav` as the mapped-drive fallback.
+- Windows bucket mounts now default to the same WebDAV-backed mount model as macOS, while the optional Explorer `This PC` entry is disabled by default and can be enabled from Windows Settings.
+- The Windows desktop shell now keeps a native tray icon with show/exit actions, and the custom close button prompts to hide to tray or quit instead of exiting immediately.
+- Windows list rows now show hover and press feedback on click, and the bootstrap config-check card is smaller and less visually heavy during startup.
+- The Windows host shell now uses the same `云卷` app icon as macOS, drops the native title bar, and replaces it with app-owned top-right window controls plus a native bridge for drag/minimize/maximize/close actions.
+- Windows desktop startup now builds the Go FFI bridge with CGO enabled, compiles the shared mount package without macOS-only xattr code, and stages `remote_storage_bridge.dll` next to the runner so both `flutter run -d windows` and built executables can launch.
 - The settings page now keeps extra bottom breathing room below the final action row, so the lower section no longer feels visually stuck to the window edge when scrolled to the bottom.
 - Trash listing, restore, and permanent delete bridge calls now run off the Flutter UI isolate so opening the recycle bin no longer freezes the app while S3 metadata is scanned or retention cleanup runs.
 - The recycle-bin page now hides mount, upload, and new-folder actions so its action bar only shows controls relevant to trash browsing.

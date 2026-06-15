@@ -1,7 +1,10 @@
+//go:build darwin
+
 // System mount parsing tests keep stale-session detection stable.
 package mount
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -38,7 +41,8 @@ func TestMatchingBucketMountPaths(t *testing.T) {
 	if len(matches) != 3 {
 		t.Fatalf("expected 3 matching bucket mount paths, got %d: %+v", len(matches), matches)
 	}
-	if matches[0] != "/Volumes/云卷-demo" || matches[2] != "/Volumes/云卷-demo-2" {
+	if matches[0] != filepath.FromSlash("/Volumes/云卷-demo") ||
+		matches[2] != filepath.FromSlash("/Volumes/云卷-demo-2") {
 		t.Fatalf("unexpected matching mount paths: %+v", matches)
 	}
 }

@@ -1,10 +1,11 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 
 	storageconfig "remote-storage/go/config"
-	s3ops "remote-storage/go/s3"
+	storageops "remote-storage/go/storage"
 )
 
 // Object transfer bridge methods expose tracked copy/move operations to Flutter.
@@ -22,8 +23,8 @@ func copyObject(args json.RawMessage) (any, error) {
 	if err := decodeArgs(args, &input); err != nil {
 		return nil, err
 	}
-	if err := s3ops.CopyObject(
-		input.Config,
+	if err := storageops.ForConfig(input.Config).CopyObject(
+		context.Background(),
 		input.Bucket,
 		input.SourceKey,
 		input.TargetKey,
@@ -40,8 +41,8 @@ func moveObject(args json.RawMessage) (any, error) {
 	if err := decodeArgs(args, &input); err != nil {
 		return nil, err
 	}
-	if err := s3ops.MoveObjectWithTask(
-		input.Config,
+	if err := storageops.ForConfig(input.Config).MoveObject(
+		context.Background(),
 		input.Bucket,
 		input.SourceKey,
 		input.TargetKey,

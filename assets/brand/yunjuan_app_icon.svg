@@ -1,19 +1,13 @@
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="bg" x1="180" y1="150" x2="844" y2="874" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#7CCBFF"/>
-      <stop offset="100%" stop-color="#2563EB"/>
-    </linearGradient>
-    <linearGradient id="cloud" x1="268" y1="252" x2="694" y2="658" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#A5E7FF"/>
-      <stop offset="100%" stop-color="#FFFFFF"/>
+    <linearGradient id="cloud" x1="191" y1="250" x2="857" y2="718" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6B95F1"/>
+      <stop offset="100%" stop-color="#225BE3"/>
     </linearGradient>
   </defs>
-  <rect x="170" y="148" width="684" height="684" rx="170" fill="#1E3A8A" opacity="0.10"/>
-  <rect x="160" y="128" width="704" height="704" rx="176" fill="url(#bg)"/>
   <path d="M600 672H348C255.8 672 191 609.2 191 529.75C191 456.2 247.84 395.44 321.34 388.58C349.76 304.3 430.12 250.4 524.2 250.4C635.92 250.4 727.06 332.72 737.84 439.54C808.4 452.28 857.4 506.18 857.4 573.8C857.4 629.66 810.36 672 749.56 672H681.2" fill="url(#cloud)"/>
-  <path d="M390 548H666C715 548 754 587 754 636C754 685 715 724 666 724H390C341 724 302 685 302 636C302 587 341 548 390 548Z" fill="#FFFFFF" opacity="0.96"/>
-  <circle cx="666" cy="636" r="44" fill="#2563EB"/>
-  <path d="M390 598H606" stroke="#2563EB" stroke-width="30" stroke-linecap="round"/>
-  <path d="M390 676H552" stroke="#60A5FA" stroke-width="30" stroke-linecap="round"/>
+  <path d="M390 548H666C715 548 754 587 754 636C754 685 715 724 666 724H390C341 724 302 685 302 636C302 587 341 548 390 548Z" fill="#FFFFFF" opacity="0.95"/>
+  <circle cx="666" cy="636" r="44" fill="#225BE3"/>
+  <path d="M390 598H606" stroke="#225BE3" stroke-width="30" stroke-linecap="round"/>
+  <path d="M390 676H552" stroke="#BED0F9" stroke-width="30" stroke-linecap="round"/>
 </svg>

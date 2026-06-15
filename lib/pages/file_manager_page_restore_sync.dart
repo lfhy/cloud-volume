@@ -4,6 +4,13 @@ part of 'file_manager_page.dart';
 
 // 文件列表恢复同步：监听回收站恢复事件，并静默刷新当前命中的对象列表缓存。
 
+class _PendingUploadRefresh {
+  const _PendingUploadRefresh({required this.bucketId, required this.prefix});
+
+  final String bucketId;
+  final String prefix;
+}
+
 extension _FileManagerPageRestoreSync on _FileManagerPageState {
   void _handleObjectListingMutation() {
     final event = ObjectListingNotifier.instance.latestEvent;
@@ -38,12 +45,12 @@ extension _FileManagerPageRestoreSync on _FileManagerPageState {
     }
     final prefix = _prefix;
     try {
-      final page = await widget.api.listObjectPage(
-        widget.config,
-        bucket,
+      final page = await _listObjectPageCached(
+        _activeBucketEntry!,
         prefix,
         '',
         _FileManagerPageState._listPageSize,
+        forceRefresh: true,
       );
       if (!mounted ||
           _activeBucket != bucket ||
@@ -63,5 +70,54 @@ extension _FileManagerPageRestoreSync on _FileManagerPageState {
     } catch (_) {
       // 静默刷新失败不打断当前页，用户仍可手动刷新重试。
     }
+  }
+
+  void _trackUploadTaskForRefresh(
+    String taskId,
+    String bucketId,
+    String prefix,
+  ) {
+    _invalidateObjectListingCache(bucketId: bucketId);
+    _pendingUploadRefreshes[taskId] = _PendingUploadRefresh(
+      bucketId: bucketId,
+      prefix: prefix,
+    );
+  }
+
+  void _handleUploadTaskRefresh() {
+    if (_pendingUploadRefreshes.isEmpty || _showTrash || _loading) {
+      return;
+    }
+    final queue = TransferQueue.instance;
+    final finishedIds = <String>[];
+    for (final entry in _pendingUploadRefreshes.entries) {
+      final task = queue.tasks
+          .where((candidate) => candidate.id == entry.key)
+          .firstOrNull;
+      if (task == null || !task.isFinished) {
+        continue;
+      }
+      finishedIds.add(entry.key);
+      if (_activeBucketId == entry.value.bucketId &&
+          _prefix == entry.value.prefix) {
+        unawaited(_refreshActiveObjectListingAfterUpload(entry.value));
+      }
+    }
+    for (final id in finishedIds) {
+      _pendingUploadRefreshes.remove(id);
+    }
+  }
+
+  Future<void> _refreshActiveObjectListingAfterUpload(
+    _PendingUploadRefresh refresh,
+  ) async {
+    final bucket = _activeBucketEntry;
+    if (bucket == null ||
+        bucket.id != refresh.bucketId ||
+        _prefix != refresh.prefix ||
+        _showTrash) {
+      return;
+    }
+    await _refreshActiveObjectListingAfterRestore();
   }
 }

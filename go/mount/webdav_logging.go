@@ -60,6 +60,9 @@ func shouldLogWebDAVRequest(r *http.Request, status int) bool {
 	if status >= http.StatusBadRequest {
 		return true
 	}
+	if shouldLogWebDAVRead(r, status) {
+		return true
+	}
 	if isTrashLikePath(r.URL.Path) || isTrashLikePath(r.Header.Get("Destination")) {
 		return true
 	}
@@ -86,11 +89,35 @@ func isExpectedProbeMiss(r *http.Request, status int) bool {
 		".metadata_never_index_unless_rootfs",
 		".ql_disablecache",
 		".ql_disablethumbnails",
-		".Spotlight-V100":
+		".Spotlight-V100",
+		"Contents":
 		return true
 	default:
 		return false
 	}
+}
+
+func shouldLogWebDAVRead(r *http.Request, status int) bool {
+	if status < 200 || status >= 400 {
+		return false
+	}
+	if isExpectedProbeRead(r) {
+		return true
+	}
+	switch r.Method {
+	case http.MethodGet, http.MethodHead:
+		return true
+	default:
+		return false
+	}
+}
+
+func isExpectedProbeRead(r *http.Request) bool {
+	name := path.Base(strings.TrimSpace(r.URL.Path))
+	if strings.HasPrefix(name, ".") {
+		return false
+	}
+	return strings.EqualFold(name, "Contents")
 }
 
 func isTrashLikePath(value string) bool {

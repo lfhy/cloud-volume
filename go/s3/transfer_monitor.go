@@ -13,17 +13,24 @@ import (
 
 // TransferSnapshot is polled by Flutter to render sidebar and transfers UI.
 type TransferSnapshot struct {
-	ID             string  `json:"id"`
-	Type           string  `json:"type"`
-	Bucket         string  `json:"bucket"`
-	Key            string  `json:"key"`
-	LocalPath      string  `json:"localPath"`
-	TargetPath     string  `json:"targetPath,omitempty"`
-	Status         string  `json:"status"`
-	BytesCompleted int64   `json:"bytesCompleted"`
-	TotalBytes     int64   `json:"totalBytes"`
-	SpeedBytes     float64 `json:"speedBytes"`
-	Error          string  `json:"error,omitempty"`
+	ID                        string  `json:"id"`
+	Type                      string  `json:"type"`
+	Bucket                    string  `json:"bucket"`
+	Key                       string  `json:"key"`
+	LocalPath                 string  `json:"localPath"`
+	TargetPath                string  `json:"targetPath,omitempty"`
+	Status                    string  `json:"status"`
+	StatusDetail              string  `json:"statusDetail,omitempty"`
+	CreatedAt                 string  `json:"createdAt,omitempty"`
+	BytesCompleted            int64   `json:"bytesCompleted"`
+	TotalBytes                int64   `json:"totalBytes"`
+	ItemsCompleted            int64   `json:"itemsCompleted,omitempty"`
+	TotalItems                int64   `json:"totalItems,omitempty"`
+	CurrentFileKey            string  `json:"currentFileKey,omitempty"`
+	CurrentFileBytesCompleted int64   `json:"currentFileBytesCompleted,omitempty"`
+	CurrentFileTotalBytes     int64   `json:"currentFileTotalBytes,omitempty"`
+	SpeedBytes                float64 `json:"speedBytes"`
+	Error                     string  `json:"error,omitempty"`
 }
 
 type transferState struct {
@@ -59,13 +66,15 @@ func startTransfer(
 
 	globalTransferMonitor.tasks[id] = &transferState{
 		snapshot: TransferSnapshot{
-			ID:         id,
-			Type:       kind,
-			Bucket:     bucket,
-			Key:        key,
-			LocalPath:  localPath,
-			Status:     "running",
-			TotalBytes: totalBytes,
+			ID:           id,
+			Type:         kind,
+			Bucket:       bucket,
+			Key:          key,
+			LocalPath:    localPath,
+			Status:       "running",
+			StatusDetail: "uploading",
+			CreatedAt:    now.Format(time.RFC3339),
+			TotalBytes:   totalBytes,
 		},
 		startedAt: now,
 		updatedAt: now,
@@ -98,13 +107,15 @@ func QueueTransfer(
 	if !ok {
 		globalTransferMonitor.tasks[id] = &transferState{
 			snapshot: TransferSnapshot{
-				ID:         id,
-				Type:       kind,
-				Bucket:     bucket,
-				Key:        key,
-				LocalPath:  localPath,
-				Status:     "pending",
-				TotalBytes: totalBytes,
+				ID:           id,
+				Type:         kind,
+				Bucket:       bucket,
+				Key:          key,
+				LocalPath:    localPath,
+				Status:       "pending",
+				StatusDetail: "queued",
+				CreatedAt:    now.Format(time.RFC3339),
+				TotalBytes:   totalBytes,
 			},
 			startedAt: now,
 			updatedAt: now,
@@ -117,9 +128,23 @@ func QueueTransfer(
 	task.snapshot.LocalPath = localPath
 	task.snapshot.TotalBytes = totalBytes
 	task.snapshot.Status = "pending"
+	task.snapshot.StatusDetail = "queued"
 	task.snapshot.Error = ""
 	task.snapshot.SpeedBytes = 0
 	task.updatedAt = now
+}
+
+// SetTransferStatusDetail refines a task's current phase without changing its main status.
+func SetTransferStatusDetail(id, detail string) {
+	globalTransferMonitor.mu.Lock()
+	defer globalTransferMonitor.mu.Unlock()
+
+	task, ok := globalTransferMonitor.tasks[id]
+	if !ok {
+		return
+	}
+	task.snapshot.StatusDetail = detail
+	task.updatedAt = time.Now()
 }
 
 // StartQueuedTransfer switches a previously queued task into the running state.
@@ -152,6 +177,54 @@ func setTransferTotal(id string, totalBytes int64) {
 	task.updatedAt = time.Now()
 }
 
+// AddTransferTotal grows a task's total work as directory scanning discovers files.
+func AddTransferTotal(id string, deltaBytes int64) {
+	if deltaBytes <= 0 {
+		return
+	}
+	globalTransferMonitor.mu.Lock()
+	defer globalTransferMonitor.mu.Unlock()
+
+	task, ok := globalTransferMonitor.tasks[id]
+	if !ok {
+		return
+	}
+	task.snapshot.TotalBytes += deltaBytes
+	task.updatedAt = time.Now()
+}
+
+// AddTransferItems grows a task's item count as directory scanning discovers files.
+func AddTransferItems(id string, deltaItems int64) {
+	if deltaItems <= 0 {
+		return
+	}
+	globalTransferMonitor.mu.Lock()
+	defer globalTransferMonitor.mu.Unlock()
+
+	task, ok := globalTransferMonitor.tasks[id]
+	if !ok {
+		return
+	}
+	task.snapshot.TotalItems += deltaItems
+	task.updatedAt = time.Now()
+}
+
+// AdvanceTransferItems increments the completed item count after file uploads finish.
+func AdvanceTransferItems(id string, deltaItems int64) {
+	if deltaItems <= 0 {
+		return
+	}
+	globalTransferMonitor.mu.Lock()
+	defer globalTransferMonitor.mu.Unlock()
+
+	task, ok := globalTransferMonitor.tasks[id]
+	if !ok {
+		return
+	}
+	task.snapshot.ItemsCompleted += deltaItems
+	task.updatedAt = time.Now()
+}
+
 func setTransferTarget(id string, targetPath string) {
 	globalTransferMonitor.mu.Lock()
 	defer globalTransferMonitor.mu.Unlock()
@@ -162,6 +235,12 @@ func setTransferTarget(id string, targetPath string) {
 	}
 	task.snapshot.TargetPath = targetPath
 	task.updatedAt = time.Now()
+}
+
+// SetTransferTarget updates the task subtitle target, such as a copy destination
+// or the current byte range being streamed by a mounted WebDAV file.
+func SetTransferTarget(id string, targetPath string) {
+	setTransferTarget(id, targetPath)
 }
 
 func advanceTransfer(id string, delta int64) {
@@ -192,6 +271,10 @@ func finishTransfer(id string, err error) {
 	task.updatedAt = time.Now()
 	task.cancel = nil
 	task.snapshot.SpeedBytes = 0
+	if task.snapshot.Status == "canceled" {
+		task.snapshot.Error = ""
+		return
+	}
 	if errors.Is(err, context.Canceled) {
 		task.snapshot.Status = "canceled"
 		task.snapshot.Error = ""
@@ -203,7 +286,7 @@ func finishTransfer(id string, err error) {
 		return
 	}
 	task.snapshot.Status = "done"
-	if task.snapshot.TotalBytes > 0 {
+	if task.snapshot.TotalBytes > 0 && task.snapshot.StatusDetail != "mount_read" {
 		task.snapshot.BytesCompleted = task.snapshot.TotalBytes
 	}
 }
@@ -233,6 +316,14 @@ func CancelTransfer(id string) bool {
 		cancel()
 	}
 	return true
+}
+
+// ForgetTransfer drops a task snapshot immediately so superseded mount writes do not stack in the UI.
+func ForgetTransfer(id string) {
+	globalTransferMonitor.mu.Lock()
+	defer globalTransferMonitor.mu.Unlock()
+	delete(globalTransferMonitor.tasks, id)
+	delete(globalTransferMonitor.pendingCancels, id)
 }
 
 // ListTransferSnapshots returns a recent-first list so the newest task stays visible.
@@ -272,6 +363,18 @@ func ListTransferSnapshots() []TransferSnapshot {
 		out = append(out, item.snapshot)
 	}
 	return out
+}
+
+// GetTransferSnapshot returns the current snapshot for a specific task when present.
+func GetTransferSnapshot(id string) (TransferSnapshot, bool) {
+	globalTransferMonitor.mu.Lock()
+	defer globalTransferMonitor.mu.Unlock()
+
+	task, ok := globalTransferMonitor.tasks[id]
+	if !ok {
+		return TransferSnapshot{}, false
+	}
+	return task.snapshot, true
 }
 
 type countingReader struct {

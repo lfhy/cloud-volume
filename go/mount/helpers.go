@@ -3,6 +3,7 @@ package mount
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 
 	s3ops "remote-storage/go/s3"
@@ -64,6 +65,27 @@ func isLocalMetadataPath(virtualPath string) bool {
 	}
 	switch name {
 	case ".DS_Store", ".localized":
+		return true
+	default:
+		return false
+	}
+}
+
+func isEphemeralMountFilePath(virtualPath string) bool {
+	name := strings.ToLower(filepath.Base(cleanVirtualPath(virtualPath)))
+	if name == "" {
+		return false
+	}
+	if strings.HasPrefix(name, "~$") {
+		return true
+	}
+	if strings.HasPrefix(name, "~wrl") && strings.HasSuffix(name, ".tmp") {
+		return true
+	}
+	switch {
+	case strings.HasPrefix(name, "~wr") && strings.HasSuffix(name, ".tmp"):
+		return true
+	case strings.HasPrefix(name, "~df") && strings.HasSuffix(name, ".tmp"):
 		return true
 	default:
 		return false

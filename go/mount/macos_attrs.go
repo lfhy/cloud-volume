@@ -1,3 +1,5 @@
+//go:build darwin
+
 // macOS mount attributes keep Desktop-visible mount points out of File Provider sync.
 package mount
 

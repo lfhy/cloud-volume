@@ -87,6 +87,88 @@ class DownloadDirectorySection extends StatelessWidget {
   }
 }
 
+class CacheDirectorySection extends StatelessWidget {
+  const CacheDirectorySection({
+    super.key,
+    required this.theme,
+    required this.displayPath,
+    required this.hasCustomPath,
+    required this.saving,
+    required this.errorText,
+    required this.onPickDirectory,
+    required this.onResetDirectory,
+  });
+
+  final ShadThemeData theme;
+  final String displayPath;
+  final bool hasCustomPath;
+  final bool saving;
+  final String? errorText;
+  final VoidCallback onPickDirectory;
+  final VoidCallback onResetDirectory;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasDisplayPath = displayPath.trim().isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '用于文件预览缓存和挂载读写缓存；未配置时使用工作路径下的 cache 目录。',
+          style: TextStyle(
+            fontSize: 12,
+            height: 1.6,
+            color: theme.colorScheme.mutedForeground,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.secondary,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: SelectableText(
+            hasDisplayPath ? displayPath : '工作路径/cache',
+            style: TextStyle(
+              fontSize: 12,
+              color: hasDisplayPath
+                  ? theme.colorScheme.foreground
+                  : theme.colorScheme.mutedForeground,
+            ),
+          ),
+        ),
+        if (errorText != null) ...[
+          const SizedBox(height: 10),
+          Text(
+            errorText!,
+            style: TextStyle(
+              fontSize: 12,
+              color: theme.colorScheme.destructive,
+            ),
+          ),
+        ],
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            ShadButton(
+              onPressed: saving ? null : onPickDirectory,
+              child: Text(saving ? '保存中...' : '选择目录'),
+            ),
+            const SizedBox(width: 10),
+            ShadButton.outline(
+              onPressed: saving || !hasCustomPath ? null : onResetDirectory,
+              child: const Text('恢复默认'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 class VisibilitySection extends StatelessWidget {
   const VisibilitySection({
     super.key,
@@ -166,6 +248,124 @@ class VisibilitySection extends StatelessWidget {
             ),
           ),
         ],
+      ],
+    );
+  }
+}
+
+class WebDavCredentialsSection extends StatefulWidget {
+  const WebDavCredentialsSection({
+    super.key,
+    required this.theme,
+    required this.username,
+    required this.hasPassword,
+    required this.saving,
+    required this.errorText,
+    required this.onSave,
+  });
+
+  final ShadThemeData theme;
+  final String username;
+  final bool hasPassword;
+  final bool saving;
+  final String? errorText;
+  final Future<void> Function(String username, String password) onSave;
+
+  @override
+  State<WebDavCredentialsSection> createState() =>
+      _WebDavCredentialsSectionState();
+}
+
+class _WebDavCredentialsSectionState extends State<WebDavCredentialsSection> {
+  late final TextEditingController _usernameController;
+  final TextEditingController _passwordController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _usernameController = TextEditingController(text: widget.username);
+  }
+
+  @override
+  void didUpdateWidget(covariant WebDavCredentialsSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.username != widget.username &&
+        _usernameController.text != widget.username) {
+      _usernameController.text = widget.username;
+    }
+  }
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Web 端使用这组账号密码做浏览器登录，标准 WebDAV 客户端也使用同一组凭据连接服务端接口。',
+          style: TextStyle(
+            fontSize: 12,
+            height: 1.6,
+            color: widget.theme.colorScheme.mutedForeground,
+          ),
+        ),
+        const SizedBox(height: 14),
+        Text(
+          'WebDAV 账号',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: widget.theme.colorScheme.foreground,
+          ),
+        ),
+        const SizedBox(height: 6),
+        ShadInput(
+          controller: _usernameController,
+          placeholder: const Text('输入 WebDAV 登录账号'),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'WebDAV 密码',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: widget.theme.colorScheme.foreground,
+          ),
+        ),
+        const SizedBox(height: 6),
+        ShadInput(
+          controller: _passwordController,
+          obscureText: true,
+          placeholder: Text(
+            widget.hasPassword ? '留空则保留当前已保存的密码' : '输入 WebDAV 登录密码',
+          ),
+        ),
+        if (widget.errorText != null) ...[
+          const SizedBox(height: 10),
+          Text(
+            widget.errorText!,
+            style: TextStyle(
+              fontSize: 12,
+              color: widget.theme.colorScheme.destructive,
+            ),
+          ),
+        ],
+        const SizedBox(height: 12),
+        ShadButton(
+          onPressed: widget.saving
+              ? null
+              : () => widget.onSave(
+                  _usernameController.text.trim(),
+                  _passwordController.text,
+                ),
+          child: Text(widget.saving ? '保存中...' : '保存 WebDAV 凭据'),
+        ),
       ],
     );
   }

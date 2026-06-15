@@ -48,7 +48,16 @@ class FileManagerBreadcrumbBar extends StatelessWidget {
     final entries = _entries();
     return LayoutBuilder(
       builder: (context, constraints) {
-        final layout = _resolveLayout(constraints.maxWidth, entries);
+        final labelStyle = DefaultTextStyle.of(context).style.merge(
+          const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        );
+        final layout = _resolveLayout(
+          constraints.maxWidth,
+          entries,
+          labelStyle,
+          Directionality.of(context),
+          MediaQuery.textScalerOf(context),
+        );
         return Align(
           alignment: Alignment.centerLeft,
           child: SizedBox(
@@ -73,7 +82,12 @@ class FileManagerBreadcrumbBar extends StatelessWidget {
                     Expanded(child: _buildCrumb(layout.visibleCrumbs[i], true))
                   else
                     SizedBox(
-                      width: _labelWidth(layout.visibleCrumbs[i].label),
+                      width: _labelWidth(
+                        layout.visibleCrumbs[i].label,
+                        labelStyle,
+                        Directionality.of(context),
+                        MediaQuery.textScalerOf(context),
+                      ),
                       child: _buildCrumb(layout.visibleCrumbs[i], false),
                     ),
                 ],
@@ -94,13 +108,36 @@ class FileManagerBreadcrumbBar extends StatelessWidget {
     ];
   }
 
-  _BreadcrumbLayout _resolveLayout(double maxWidth, List<_CrumbEntry> entries) {
+  _BreadcrumbLayout _resolveLayout(
+    double maxWidth,
+    List<_CrumbEntry> entries,
+    TextStyle labelStyle,
+    TextDirection textDirection,
+    TextScaler textScaler,
+  ) {
     if (entries.isEmpty || !maxWidth.isFinite) {
       return _BreadcrumbLayout(hiddenCrumbs: const [], visibleCrumbs: entries);
     }
-    for (int hiddenCount = 0; hiddenCount < entries.length; hiddenCount++) {
+    if (_estimatedWidth(
+          entries,
+          false,
+          labelStyle,
+          textDirection,
+          textScaler,
+        ) <=
+        maxWidth) {
+      return _BreadcrumbLayout(hiddenCrumbs: const [], visibleCrumbs: entries);
+    }
+    for (int hiddenCount = 1; hiddenCount < entries.length; hiddenCount++) {
       final visible = entries.sublist(hiddenCount);
-      if (_estimatedWidth(visible, hiddenCount > 0) <= maxWidth) {
+      if (_estimatedWidth(
+            visible,
+            hiddenCount > 0,
+            labelStyle,
+            textDirection,
+            textScaler,
+          ) <=
+          maxWidth) {
         return _BreadcrumbLayout(
           hiddenCrumbs: entries.sublist(0, hiddenCount),
           visibleCrumbs: visible,
@@ -113,30 +150,41 @@ class FileManagerBreadcrumbBar extends StatelessWidget {
     );
   }
 
-  double _estimatedWidth(List<_CrumbEntry> visible, bool hasHiddenCrumbs) {
+  double _estimatedWidth(
+    List<_CrumbEntry> visible,
+    bool hasHiddenCrumbs,
+    TextStyle labelStyle,
+    TextDirection textDirection,
+    TextScaler textScaler,
+  ) {
     const homeWidth = 18.0;
     const chevronWidth = 22.0;
-    const hiddenWidth = 26.0;
+    const hiddenWidth = 40.0;
     var total = homeWidth;
     if (hasHiddenCrumbs) {
       total += chevronWidth + hiddenWidth;
     }
     for (final crumb in visible) {
-      total += chevronWidth + _labelWidth(crumb.label);
+      total +=
+          chevronWidth +
+          _labelWidth(crumb.label, labelStyle, textDirection, textScaler);
     }
     return total;
   }
 
-  double _labelWidth(String label) {
+  double _labelWidth(
+    String label,
+    TextStyle labelStyle,
+    TextDirection textDirection,
+    TextScaler textScaler,
+  ) {
     final painter = TextPainter(
-      text: TextSpan(
-        text: label,
-        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-      ),
+      text: TextSpan(text: label, style: labelStyle),
       maxLines: 1,
-      textDirection: TextDirection.ltr,
+      textDirection: textDirection,
+      textScaler: textScaler,
     )..layout();
-    return painter.width.clamp(28.0, 220.0);
+    return painter.width.clamp(28.0, double.infinity);
   }
 
   Widget _buildCrumb(_CrumbEntry crumb, bool isCurrent) {

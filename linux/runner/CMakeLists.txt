@@ -12,6 +12,8 @@ add_executable(${BINARY_NAME}
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
 )
 
+set(LINUX_RUNNER_RESOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/resources")
+
 # Apply the standard set of build settings. This can be removed for applications
 # that need different build settings.
 apply_standard_settings(${BINARY_NAME})
@@ -24,3 +26,9 @@ target_link_libraries(${BINARY_NAME} PRIVATE flutter)
 target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::GTK)
 
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
+
+# Install the Linux window icon into the bundle data directory so GTK can
+# resolve the same brand asset after packaging.
+install(FILES "${LINUX_RUNNER_RESOURCE_DIR}/app_icon.png"
+  DESTINATION "data"
+  COMPONENT Runtime)

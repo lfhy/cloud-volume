@@ -2,11 +2,12 @@
 
 import 'package:flutter/material.dart';
 import 'package:remote_storage/app/app_brand.dart';
-import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:remote_storage/pages/app_bootstrap_page.dart';
 import 'package:remote_storage/services/remote_storage_api.dart';
 import 'package:remote_storage/theme/app_theme.dart';
 import 'package:remote_storage/theme/theme_controller.dart';
+import 'package:remote_storage/widgets/desktop_window_controls.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 
 class RemoteStorageApp extends StatelessWidget {
   const RemoteStorageApp({
@@ -36,7 +37,12 @@ class _ThemeAwareShell extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       themeMode: ThemeMode.light,
       theme: buildAppTheme(accent),
-      home: AppBootstrapPage(apiFactory: apiFactory),
+      home: Stack(
+        children: [
+          AppBootstrapPage(apiFactory: apiFactory),
+          const DesktopWindowControls(),
+        ],
+      ),
     );
   }
 }

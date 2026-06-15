@@ -34,15 +34,18 @@ class FileCacheStore {
 
   static const _dbName = 'remote_storage_cache.db';
   static const _tableName = 'cached_files';
-  static const _cacheDirName = 'file_cache';
+  static const _cacheDirName = 'files';
 
   Database? _database;
   Directory? _cacheRoot;
+  String? _cacheRootPath;
 
   Future<String?> findUsableCachePath(
+    String cacheDirectory,
     String bucket,
     ObjectInfo remoteObject,
   ) async {
+    final root = await _cacheDirectory(cacheDirectory);
     final db = await _openDatabase();
     final rows = await db.query(
       _tableName,
@@ -58,7 +61,8 @@ class FileCacheStore {
     final file = File(record.localPath);
     final fileExists = await file.exists();
     final fileSize = fileExists ? await file.length() : -1;
-    if (!fileExists ||
+    if (!_isInsideRoot(root.path, record.localPath) ||
+        !fileExists ||
         !_matchesRemoteObject(record, remoteObject) ||
         fileSize != remoteObject.size) {
       await removeCacheRecord(
@@ -72,8 +76,12 @@ class FileCacheStore {
     return record.localPath;
   }
 
-  Future<String> cachePathFor(String bucket, String objectKey) async {
-    final root = await _cacheDirectory();
+  Future<String> cachePathFor(
+    String cacheDirectory,
+    String bucket,
+    String objectKey,
+  ) async {
+    final root = await _cacheDirectory(cacheDirectory);
     final segments = <String>[
       root.path,
       _safeSegment(bucket),
@@ -280,14 +288,19 @@ class FileCacheStore {
     return _database!;
   }
 
-  Future<Directory> _cacheDirectory() async {
-    if (_cacheRoot != null) {
+  Future<Directory> _cacheDirectory(String cacheDirectory) async {
+    final trimmedPath = cacheDirectory.trim();
+    if (trimmedPath.isEmpty) {
+      throw StateError('缓存目录未配置。');
+    }
+    final targetPath = path.join(trimmedPath, _cacheDirName);
+    if (_cacheRoot != null && _cacheRootPath == targetPath) {
       return _cacheRoot!;
     }
-    final supportDir = await getApplicationSupportDirectory();
-    final cacheDir = Directory(path.join(supportDir.path, _cacheDirName));
+    final cacheDir = Directory(targetPath);
     await cacheDir.create(recursive: true);
     _cacheRoot = cacheDir;
+    _cacheRootPath = targetPath;
     return cacheDir;
   }
 
@@ -314,5 +327,12 @@ class FileCacheStore {
     if (await file.exists()) {
       await file.delete();
     }
+  }
+
+  bool _isInsideRoot(String rootPath, String localPath) {
+    final normalizedRoot = path.normalize(rootPath);
+    final normalizedLocal = path.normalize(localPath);
+    return path.equals(normalizedRoot, normalizedLocal) ||
+        path.isWithin(normalizedRoot, normalizedLocal);
   }
 }

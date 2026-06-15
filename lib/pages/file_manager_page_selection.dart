@@ -8,7 +8,7 @@ extension _FileManagerPageSelection on _FileManagerPageState {
   List<ObjectInfo> get _visibleSelectableObjects {
     return filterVisibleObjects(
       _objects ?? const <ObjectInfo>[],
-      hideDotFiles: widget.config.hideDotFiles,
+      hideDotFiles: _activeConfig.hideDotFiles,
     );
   }
 
@@ -23,6 +23,33 @@ extension _FileManagerPageSelection on _FileManagerPageState {
       if (!_selectedObjectKeys.add(object.key)) {
         _selectedObjectKeys.remove(object.key);
       }
+    });
+  }
+
+  void _replaceSelectedObjects(Set<String> keys) {
+    final visibleKeys = _filteredVisibleObjects
+        .map((object) => object.key)
+        .toSet();
+    final normalized = keys.where(visibleKeys.contains).toSet();
+    if (_selectedObjectKeys.length == normalized.length &&
+        _selectedObjectKeys.containsAll(normalized)) {
+      return;
+    }
+    setState(() {
+      _selectedObjectKeys
+        ..clear()
+        ..addAll(normalized);
+    });
+  }
+
+  void _selectObjectsForContextMenu(ObjectInfo object) {
+    if (_selectedObjectKeys.contains(object.key)) {
+      return;
+    }
+    setState(() {
+      _selectedObjectKeys
+        ..clear()
+        ..add(object.key);
     });
   }
 
@@ -58,12 +85,45 @@ extension _FileManagerPageSelection on _FileManagerPageState {
     if (_activeBucket == null) {
       return;
     }
-    final files = _selectedObjects.where((object) => !object.isDir).toList();
-    if (files.isEmpty) {
+    final selected = _selectedObjects;
+    if (selected.isEmpty) {
+      return;
+    }
+    if (widget.api.capabilities.supportsBrowserTransfers) {
+      final files = selected.where((object) => !object.isDir).toList();
+      if (files.isEmpty) {
+        return;
+      }
+      try {
+        final requests = <FileAccessTransferRequest>[];
+        final directoryLister = _downloadDirectoryLister();
+        for (final object in files) {
+          requests.add(
+            await FileAccessService.instance.prepareDownloadObjectToPath(
+              api: widget.api,
+              config: _activeConfig,
+              bucket: _activeBucket!,
+              object: object,
+              savePath: object.displayName,
+              directoryLister: directoryLister,
+            ),
+          );
+        }
+        _clearSelection();
+        for (final request in requests) {
+          _watchDownloadRequest(request);
+        }
+        await _showDownloadProgressDialogForTasks(_tasksForRequests(requests));
+      } catch (error) {
+        if (!mounted) {
+          return;
+        }
+        _showPageError(error);
+      }
       return;
     }
     final targetDirectory = await resolveDefaultDownloadDirectory(
-      widget.config.defaultDownloadDirectory,
+      _activeConfig.defaultDownloadDirectory,
     );
     if (targetDirectory == null || targetDirectory.isEmpty) {
       if (!mounted) {
@@ -74,18 +134,25 @@ extension _FileManagerPageSelection on _FileManagerPageState {
     }
 
     try {
-      for (final object in files) {
-        unawaited(
-          FileAccessService.instance.downloadObjectToPath(
+      final requests = <FileAccessTransferRequest>[];
+      final directoryLister = _downloadDirectoryLister();
+      for (final object in selected) {
+        requests.add(
+          await FileAccessService.instance.prepareDownloadObjectToPath(
             api: widget.api,
-            config: widget.config,
+            config: _activeConfig,
             bucket: _activeBucket!,
             object: object,
             savePath: path.join(targetDirectory, object.displayName),
+            directoryLister: directoryLister,
           ),
         );
       }
       _clearSelection();
+      for (final request in requests) {
+        _watchDownloadRequest(request);
+      }
+      await _showDownloadProgressDialogForTasks(_tasksForRequests(requests));
     } catch (error) {
       if (!mounted) {
         return;
@@ -98,11 +165,16 @@ extension _FileManagerPageSelection on _FileManagerPageState {
     if (!mounted || _activeBucket == null || _selectedObjectKeys.isEmpty) {
       return;
     }
+    if (!_currentBucketWritable) {
+      _ensureCurrentDirectoryWritable();
+      return;
+    }
     final selected = _selectedObjects;
     final confirmed = await showDeleteObjectsDialog(context, selected.length);
     if (!confirmed) {
       return;
     }
-    _queueObjectDeletes(selected);
+    final tasks = _queueObjectDeletes(selected);
+    await _showDeleteProgressDialogForTasks(tasks);
   }
 }

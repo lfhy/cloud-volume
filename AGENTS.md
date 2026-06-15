@@ -45,6 +45,6 @@
 ## Validation
 
 - After each meaningful refactor batch, run the narrowest useful validation first.
-- Before finishing, run `go test ./...`, `flutter analyze`, and a final `make run` smoke validation.
-- The final validation must confirm the app launches and renders correctly on macOS.
-  `flutter analyze` or `flutter build macos` alone is not sufficient.
+- Before finishing, run `go test ./...` and `flutter analyze` unless the user explicitly asks for a different validation scope.
+- Do not use screenshots as smoke-validation evidence.
+- Do not run a local smoke test by default; after implementation, hand off app-level verification to the user unless they explicitly ask you to run it.

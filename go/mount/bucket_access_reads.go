@@ -13,6 +13,14 @@ func (a *bucketAccess) listDirectory(
 	ctx context.Context,
 	virtualPrefix string,
 ) ([]s3ops.ObjectInfo, error) {
+	return a.listDirectoryWithPrefetch(ctx, virtualPrefix, true)
+}
+
+func (a *bucketAccess) listDirectoryWithPrefetch(
+	ctx context.Context,
+	virtualPrefix string,
+	allowPrefetch bool,
+) ([]s3ops.ObjectInfo, error) {
 	if err := a.hiddenTrashError(virtualPrefix); err != nil {
 		return nil, err
 	}
@@ -23,7 +31,9 @@ func (a *bucketAccess) listDirectory(
 		merged := a.filterTrashItems(
 			a.mergeOverlayItems(virtualPrefix, a.cache.mergeLocalFiles(virtualPrefix, items)),
 		)
-		a.prefetchChildren(merged)
+		if allowPrefetch {
+			a.prefetchChildren(merged)
+		}
 		return cloneObjects(merged), nil
 	}
 
@@ -42,7 +52,9 @@ func (a *bucketAccess) listDirectory(
 		return nil, err
 	}
 	items, _ := value.([]s3ops.ObjectInfo)
-	a.prefetchChildren(items)
+	if allowPrefetch {
+		a.prefetchChildren(items)
+	}
 	return cloneObjects(items), nil
 }
 
@@ -167,4 +179,30 @@ func (a *bucketAccess) mergeOverlayItems(
 		merged = append(merged, item)
 	}
 	return merged
+}
+
+func (a *bucketAccess) localReadablePath(
+	virtualPath string,
+	info s3ops.ObjectInfo,
+) (string, bool) {
+	if item, ok := a.cache.localFile(virtualPath); ok && isUsableLocalFile(item.localPath, info.Size) {
+		return item.localPath, true
+	}
+	localPath := a.cachePathFor(cleanVirtualPath(virtualPath))
+	reconcileDownloadArtifacts(localPath, info)
+	if isCompleteDownloadUsable(localPath, info) {
+		return localPath, true
+	}
+	return "", false
+}
+
+func (a *bucketAccess) readRemoteRange(
+	ctx context.Context,
+	virtualPath string,
+	offset,
+	length int64,
+) ([]byte, error) {
+	timeoutCtx, cancel := a.withTransferTimeout(ctx)
+	defer cancel()
+	return a.backend.ReadObjectRange(timeoutCtx, a.bucket, a.remoteKey(virtualPath), offset, length)
 }

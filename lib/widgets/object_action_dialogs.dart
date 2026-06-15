@@ -7,26 +7,92 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 enum FileObjectAction { open, download, share, copy, move, rename, delete }
 
+enum FileSelectionAction {
+  refresh,
+  upload,
+  createDirectory,
+  download,
+  copy,
+  move,
+  delete,
+}
+
 List<Widget> buildObjectActionMenuItems({
   required ObjectInfo object,
   required VoidCallback onOpen,
-  required VoidCallback onCopy,
-  required VoidCallback onMove,
-  required VoidCallback onRename,
-  required VoidCallback onDelete,
-  required VoidCallback onShare,
+  required VoidCallback? onCopy,
+  required VoidCallback? onMove,
+  required VoidCallback? onRename,
+  required VoidCallback? onDelete,
+  VoidCallback? onShare,
   VoidCallback? onDownload,
 }) {
   return <Widget>[
-    ShadContextMenuItem(onPressed: onOpen, child: const Text('打开')),
-    if (!object.isDir && onDownload != null)
+    ShadContextMenuItem(
+      onPressed: onOpen,
+      child: Text(object.isDir ? '打开' : '预览'),
+    ),
+    if (onDownload != null)
       ShadContextMenuItem(onPressed: onDownload, child: const Text('下载')),
-    if (!object.isDir)
+    if (!object.isDir && onShare != null)
       ShadContextMenuItem(onPressed: onShare, child: const Text('创建分享')),
-    ShadContextMenuItem(onPressed: onCopy, child: const Text('复制到...')),
-    ShadContextMenuItem(onPressed: onMove, child: const Text('移动到...')),
-    ShadContextMenuItem(onPressed: onRename, child: const Text('重命名')),
-    ShadContextMenuItem(onPressed: onDelete, child: const Text('删除')),
+    if (onCopy != null)
+      ShadContextMenuItem(onPressed: onCopy, child: const Text('复制到...')),
+    if (onMove != null)
+      ShadContextMenuItem(onPressed: onMove, child: const Text('移动到...')),
+    if (onRename != null)
+      ShadContextMenuItem(onPressed: onRename, child: const Text('重命名')),
+    if (onDelete != null)
+      ShadContextMenuItem(onPressed: onDelete, child: const Text('删除')),
+  ];
+}
+
+List<Widget> buildSelectionActionMenuItems({
+  required int selectedCount,
+  VoidCallback? onRefresh,
+  VoidCallback? onUpload,
+  VoidCallback? onCreateDirectory,
+  VoidCallback? onDownload,
+  VoidCallback? onCopy,
+  VoidCallback? onMove,
+  VoidCallback? onDelete,
+}) {
+  final items = <Widget>[
+    if (onCreateDirectory != null)
+      ShadContextMenuItem(
+        onPressed: onCreateDirectory,
+        child: const Text('新建目录'),
+      ),
+    if (onRefresh != null)
+      ShadContextMenuItem(onPressed: onRefresh, child: const Text('刷新')),
+    if (onUpload != null)
+      ShadContextMenuItem(onPressed: onUpload, child: const Text('上传')),
+  ];
+  if (selectedCount <= 0) {
+    return items;
+  }
+  return <Widget>[
+    ...items,
+    if (onDownload != null)
+      ShadContextMenuItem(
+        onPressed: onDownload,
+        child: Text(selectedCount == 1 ? '下载' : '批量下载'),
+      ),
+    if (onCopy != null)
+      ShadContextMenuItem(
+        onPressed: onCopy,
+        child: Text(selectedCount == 1 ? '复制到...' : '批量复制到...'),
+      ),
+    if (onMove != null)
+      ShadContextMenuItem(
+        onPressed: onMove,
+        child: Text(selectedCount == 1 ? '移动到...' : '批量移动到...'),
+      ),
+    if (onDelete != null)
+      ShadContextMenuItem(
+        onPressed: onDelete,
+        child: Text(selectedCount == 1 ? '删除' : '批量删除'),
+      ),
   ];
 }
 
@@ -275,6 +341,34 @@ Future<bool> showDeleteTrashItemsDialog(BuildContext context, int count) async {
                       child: const Text('彻底删除'),
                     ),
                   ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ) ??
+      false;
+}
+
+Future<bool> showClearTrashDialog(BuildContext context, String bucket) async {
+  return await showShadDialog<bool>(
+        context: context,
+        builder: (dialogContext) => ShadDialog(
+          title: const Text('清空回收站'),
+          description: Text('将彻底删除「$bucket」回收站中的所有项目，之后无法恢复。'),
+          child: SizedBox(
+            width: 380,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                ShadButton.outline(
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  child: const Text('取消'),
+                ),
+                const SizedBox(width: 10),
+                ShadButton.destructive(
+                  onPressed: () => Navigator.of(dialogContext).pop(true),
+                  child: const Text('清空回收站'),
                 ),
               ],
             ),

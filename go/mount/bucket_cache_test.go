@@ -75,6 +75,25 @@ func TestBucketCacheRenameLocalTree(t *testing.T) {
 	}
 }
 
+func TestPathForVirtualKeyUsesStableHashedLayout(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	first := pathForVirtualKey(root, "alpha/note.txt")
+	second := pathForVirtualKey(root, "alpha/note.txt")
+	other := pathForVirtualKey(root, "alpha/other.txt")
+
+	if first != second {
+		t.Fatalf("expected stable path, got %q and %q", first, second)
+	}
+	if first == other {
+		t.Fatalf("expected distinct hashed paths, got %q", first)
+	}
+	if filepath.Dir(first) == root {
+		t.Fatalf("expected sharded subdirectory under root, got %q", first)
+	}
+}
+
 func createTempFile(t *testing.T, root, name, body string) string {
 	t.Helper()
 

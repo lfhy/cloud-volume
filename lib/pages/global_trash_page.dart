@@ -110,6 +110,7 @@ class _GlobalTrashPageState extends State<GlobalTrashPage> {
       final buckets = await widget.api.listBuckets(widget.config);
       final bucketNames = buckets
           .map((bucket) => bucket.name)
+          .where(widget.config.bucketTrashEnabled)
           .toList(growable: false);
       if (!mounted) {
         return;
@@ -371,6 +372,39 @@ class _GlobalTrashPageState extends State<GlobalTrashPage> {
         await _reloadBucket(_activeBucket!, resetScroll: false);
       }
     });
+  }
+
+  Future<void> _clearActiveBucketTrash() async {
+    final bucket = _activeBucket;
+    if (bucket == null || _entries.isEmpty) {
+      return;
+    }
+    final confirmed = await showClearTrashDialog(context, bucket);
+    if (!confirmed) {
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+      _busyEntries.clear();
+      _selectedIds.clear();
+    });
+    try {
+      await widget.api.clearTrash(widget.config, bucket);
+      if (!mounted) {
+        return;
+      }
+      await _reloadBucket(bucket, resetScroll: false);
+      _showPageSnack('已清空 $bucket 的回收站');
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = error.toString();
+        _loading = false;
+      });
+    }
   }
 
   Future<void> _runBusy(

@@ -68,6 +68,10 @@ extension _GlobalTrashPageView on _GlobalTrashPageState {
                 onRefresh: () => unawaited(_loadInitialBucket()),
                 onRestoreSelected: () => unawaited(_restoreSelected()),
                 onDeleteSelected: () => unawaited(_deleteSelected()),
+                onClearTrash:
+                    _activeBucket == null || _entries.isEmpty || _loading
+                    ? null
+                    : () => unawaited(_clearActiveBucketTrash()),
                 onClearSelection: () => setState(() => _selectedIds.clear()),
               ),
             ],

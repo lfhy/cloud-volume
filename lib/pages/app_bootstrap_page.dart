@@ -4,10 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'package:remote_storage/widgets/app_loading_indicator.dart';
+import 'package:remote_storage/models/auth_session_state.dart';
 import 'package:remote_storage/models/bootstrap_state.dart';
 import 'package:remote_storage/pages/config_setup_page.dart';
+import 'package:remote_storage/pages/login_page.dart';
 import 'package:remote_storage/pages/main_layout_page.dart';
 import 'package:remote_storage/services/remote_storage_api.dart';
+import 'package:remote_storage/utils/bridge_error_text.dart';
 
 class AppBootstrapPage extends StatefulWidget {
   const AppBootstrapPage({super.key, required this.apiFactory});
@@ -21,6 +24,7 @@ class AppBootstrapPage extends StatefulWidget {
 class _AppBootstrapPageState extends State<AppBootstrapPage> {
   late Future<_BootstrapSession> _sessionFuture;
   bool _showSetupAnyway = false;
+  SidebarItem _selectedSidebarItem = SidebarItem.fileManager;
 
   @override
   void initState() {
@@ -30,8 +34,9 @@ class _AppBootstrapPageState extends State<AppBootstrapPage> {
 
   Future<_BootstrapSession> _loadSession() async {
     final api = await widget.apiFactory();
+    final auth = await api.loadAuthSession();
     final state = await api.loadBootstrapState();
-    return _BootstrapSession(api: api, state: state);
+    return _BootstrapSession(api: api, state: state, auth: auth);
   }
 
   void _reload() {
@@ -49,7 +54,7 @@ class _AppBootstrapPageState extends State<AppBootstrapPage> {
         if (snapshot.connectionState != ConnectionState.done) {
           return const _BootstrapMessageView(
             title: '正在检查配置',
-            description: '正在读取 ~/.remote-storage/config.toml 并准备远程存储环境。',
+            description: '正在读取默认配置文件并准备远程存储环境。',
             loading: true,
           );
         }
@@ -57,7 +62,7 @@ class _AppBootstrapPageState extends State<AppBootstrapPage> {
         if (snapshot.hasError) {
           return _BootstrapMessageView(
             title: '启动失败',
-            description: snapshot.error.toString(),
+            description: describeBridgeError(snapshot.error!),
             actionLabel: '重试',
             onAction: _reload,
           );
@@ -73,9 +78,22 @@ class _AppBootstrapPageState extends State<AppBootstrapPage> {
           );
         }
 
+        if (session.api.capabilities.supportsSessionLogin &&
+            session.auth.loginRequired &&
+            !session.auth.authenticated) {
+          return LoginPage(
+            api: session.api,
+            configPath: session.state.configPath,
+            onLoggedIn: _reload,
+          );
+        }
+
         return MainLayoutPage(
           state: session.state,
           api: session.api,
+          selectedItem: _selectedSidebarItem,
+          onSelectedItemChanged: (item) =>
+              setState(() => _selectedSidebarItem = item),
           onEditConfig: () => setState(() => _showSetupAnyway = true),
           onRefresh: _reload,
         );
@@ -85,10 +103,15 @@ class _AppBootstrapPageState extends State<AppBootstrapPage> {
 }
 
 class _BootstrapSession {
-  const _BootstrapSession({required this.api, required this.state});
+  const _BootstrapSession({
+    required this.api,
+    required this.state,
+    required this.auth,
+  });
 
   final RemoteStorageGateway api;
   final BootstrapState state;
+  final AuthSessionState auth;
 }
 
 class _BootstrapMessageView extends StatelessWidget {
@@ -112,29 +135,35 @@ class _BootstrapMessageView extends StatelessWidget {
     return Scaffold(
       backgroundColor: theme.colorScheme.background,
       body: Padding(
-        padding: const EdgeInsets.only(top: 40),
+        padding: const EdgeInsets.only(top: 24),
         child: Center(
           child: ShadCard(
-            width: 480,
-            padding: const EdgeInsets.all(32),
+            width: 360,
+            padding: const EdgeInsets.fromLTRB(22, 20, 22, 18),
             title: Text(title),
             description: Text(
               description,
               style: TextStyle(
-                color: theme.colorScheme.mutedForeground,
-                fontSize: 14,
-                height: 1.5,
+                color: theme.colorScheme.mutedForeground.withValues(alpha: 0.9),
+                fontSize: 12.5,
+                height: 1.45,
               ),
             ),
             child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (loading)
                   const Padding(
-                    padding: EdgeInsets.only(bottom: 16),
-                    child: AppLoadingIndicator(),
+                    padding: EdgeInsets.only(bottom: 12),
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: AppLoadingIndicator(strokeWidth: 2),
+                    ),
                   ),
                 if (actionLabel != null && onAction != null) ...[
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 12),
                   Align(
                     alignment: Alignment.centerLeft,
                     child: ShadButton(

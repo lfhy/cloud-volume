@@ -60,6 +60,9 @@ func newBucketCache(ttl, prefetchTTL time.Duration) *bucketCache {
 }
 
 func (c *bucketCache) cachedList(virtualPrefix string) ([]s3ops.ObjectInfo, bool) {
+	if c.ttl <= 0 {
+		return nil, false
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -81,6 +84,9 @@ func (c *bucketCache) cachedObject(virtualPath string) (s3ops.ObjectInfo, bool) 
 	if item, ok := c.localEntries[clean]; ok {
 		return item.info, true
 	}
+	if c.ttl <= 0 {
+		return s3ops.ObjectInfo{}, false
+	}
 	item, ok := c.objectCache[clean]
 	if !ok || time.Now().After(item.expiresAt) {
 		return s3ops.ObjectInfo{}, false
@@ -97,6 +103,9 @@ func (c *bucketCache) localFile(virtualPath string) (localFile, bool) {
 }
 
 func (c *bucketCache) storeList(virtualPrefix string, items []s3ops.ObjectInfo) {
+	if c.ttl <= 0 {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -107,6 +116,9 @@ func (c *bucketCache) storeList(virtualPrefix string, items []s3ops.ObjectInfo) 
 }
 
 func (c *bucketCache) storeObject(virtualPath string, info s3ops.ObjectInfo) {
+	if c.ttl <= 0 {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -382,6 +394,9 @@ func (c *bucketCache) mergeLocalFiles(
 }
 
 func (c *bucketCache) shouldPrefetch(virtualPrefix string) bool {
+	if c.prefetchTTL <= 0 {
+		return false
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

@@ -7,6 +7,7 @@ import "C"
 
 import (
 	"encoding/json"
+	"log"
 	"strings"
 	"unsafe"
 )
@@ -28,6 +29,7 @@ func RemoteStorageInvoke(method *C.char, args *C.char) *C.char {
 
 	result, err := invokeBridgeMethod(methodName, json.RawMessage(rawArgs))
 	if err != nil {
+		log.Printf("[bridge/invoke] method=%q error=%v", methodName, err)
 		return C.CString(buildErrorPayload(err))
 	}
 	return C.CString(buildSuccessPayload(result))

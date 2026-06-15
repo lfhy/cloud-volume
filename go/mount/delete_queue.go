@@ -165,17 +165,11 @@ func (q *deleteQueue) cancelDescendantsLocked(clean string) {
 }
 
 func (q *deleteQueue) runDelete(ctx context.Context, entry *pendingDelete) error {
-	deleteFunc := s3ops.DeleteObjectContext
+	deleteFunc := q.access.backend.DeleteObject
 	if entry.hardDelete {
-		deleteFunc = s3ops.DeleteObjectHardContext
+		deleteFunc = q.access.backend.DeleteObjectHard
 	}
-	err := deleteFunc(
-		ctx,
-		q.access.config,
-		q.access.bucket,
-		q.access.remoteKeyForMutation(entry.virtualPath, entry.isDir),
-		entry.isDir,
-	)
+	err := deleteFunc(ctx, q.access.bucket, q.access.remoteKeyForMutation(entry.virtualPath, entry.isDir), entry.isDir, entry.taskID)
 	if err == nil || entry.isDir || entry.hardDelete || !isRetryableCopySourceError(err) {
 		return err
 	}
@@ -185,13 +179,7 @@ func (q *deleteQueue) runDelete(ctx context.Context, entry *pendingDelete) error
 			return err
 		case <-time.After(750 * time.Millisecond):
 		}
-		retryErr := deleteFunc(
-			ctx,
-			q.access.config,
-			q.access.bucket,
-			q.access.remoteKeyForMutation(entry.virtualPath, entry.isDir),
-			entry.isDir,
-		)
+		retryErr := deleteFunc(ctx, q.access.bucket, q.access.remoteKeyForMutation(entry.virtualPath, entry.isDir), entry.isDir, entry.taskID)
 		if retryErr == nil {
 			return nil
 		}

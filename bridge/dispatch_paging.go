@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 
 	storageconfig "remote-storage/go/config"
-	s3ops "remote-storage/go/s3"
+	bucketmount "remote-storage/go/mount"
+	storageops "remote-storage/go/storage"
 )
 
 // Paging bridge methods expose continuation-token listing for long directories and trash views.
@@ -28,8 +30,19 @@ func listObjectPage(args json.RawMessage) (any, error) {
 	if err := decodeArgs(args, &input); err != nil {
 		return nil, err
 	}
-	return s3ops.ListObjectsPage(
-		input.Config,
+	if input.Config.Normalized().StorageType != storageconfig.StorageTypeWebDAV {
+		if page, handled, err := bucketmount.ListMountedObjectPage(
+			input.Config,
+			input.Bucket,
+			input.Prefix,
+			input.NextToken,
+			input.PageSize,
+		); handled || err != nil {
+			return page, err
+		}
+	}
+	return storageops.ForConfig(input.Config).ListObjectsPage(
+		context.Background(),
 		input.Bucket,
 		input.Prefix,
 		input.NextToken,
@@ -42,8 +55,8 @@ func listTrashPage(args json.RawMessage) (any, error) {
 	if err := decodeArgs(args, &input); err != nil {
 		return nil, err
 	}
-	return s3ops.ListTrashPage(
-		input.Config,
+	return storageops.ForConfig(input.Config).ListTrashPage(
+		context.Background(),
 		input.Bucket,
 		input.NextToken,
 		input.PageSize,

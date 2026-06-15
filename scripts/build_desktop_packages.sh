@@ -179,12 +179,14 @@ build_macos_flutter() {
   if [[ -n "$excluded" ]]; then
     FLUTTER_XCODE_EXCLUDED_ARCHS="$excluded" \
       flutter build macos --release \
+      --dart-define APP_VERSION_LABEL=$VERSION \
       --build-name "$VERSION" \
       --build-number "$BUILD_NUMBER"
     return
   fi
 
   flutter build macos --release \
+    --dart-define APP_VERSION_LABEL=$VERSION \
     --build-name "$VERSION" \
     --build-number "$BUILD_NUMBER"
 }
@@ -203,9 +205,13 @@ package_macos_zip() {
 package_macos_dmg() {
   local app_bundle="$1"
   local dmg_path="$2"
-  local stage_dir
+  local stage_dir fix_script
   stage_dir="$(mktemp -d)"
+  fix_script="$ROOT_DIR/packaging/macos/双击修复已损坏问题.command"
   ditto "$app_bundle" "$stage_dir/$(basename "$app_bundle")"
+  [[ -f "$fix_script" ]] || fail "Missing macOS quarantine helper: $fix_script"
+  cp "$fix_script" "$stage_dir/$(basename "$fix_script")"
+  chmod +x "$stage_dir/$(basename "$fix_script")"
   ln -s /Applications "$stage_dir/Applications"
   rm -f "$dmg_path"
   hdiutil create \
@@ -214,6 +220,19 @@ package_macos_dmg() {
     -ov \
     -format UDZO \
     "$dmg_path" >/dev/null
+  rm -rf "$stage_dir"
+}
+
+package_linux_tarball() {
+  local bundle_dir="$1"
+  local archive_path="$2"
+  local root_name="$ARTIFACT_PREFIX-linux-$ARCH"
+  local stage_dir
+  stage_dir="$(mktemp -d)"
+  mkdir -p "$stage_dir/$root_name"
+  cp -R "$bundle_dir"/. "$stage_dir/$root_name/"
+  rm -f "$archive_path"
+  tar -C "$stage_dir" -czf "$archive_path" "$root_name"
   rm -rf "$stage_dir"
 }
 
@@ -284,17 +303,29 @@ build_windows_installer() {
   if [[ "$ARCH" == "arm64" ]]; then
     installer_arch="arm64"
   fi
+  local sign_tool sign_pfx sign_password sign_timestamp sign_subject
+  sign_tool="${WINDOWS_SIGNTOOL_PATH:-}"
+  sign_pfx="${WINDOWS_SIGN_PFX_PATH:-}"
+  sign_password="${WINDOWS_SIGN_PFX_PASSWORD:-}"
+  sign_timestamp="${WINDOWS_SIGN_TIMESTAMP_URL:-http://timestamp.digicert.com}"
+  sign_subject="${WINDOWS_SIGN_SUBJECT:-}"
 
   powershell.exe -NoProfile -Command \
     "& '$compiler_win' /Qp \
       /DAppName='$APP_NAME' \
       /DAppVersion='$VERSION' \
       /DAppPublisher='云卷' \
+      /DAppInstallDirName='Cloud Volume' \
       /DSourceDir='$source_dir_win' \
       /DOutputDir='$output_dir_win' \
       /DOutputBaseFilename='$installer_base' \
       /DArchitecturesAllowed='$installer_arch' \
       /DArchitecturesInstallIn64BitMode='$installer_arch' \
+      /DSignTool='$sign_tool' \
+      /DSignPfxPath='$(to_windows_path "$sign_pfx")' \
+      /DSignPfxPassword='$sign_password' \
+      /DSignTimestampUrl='$sign_timestamp' \
+      /DSignSubject='$sign_subject' \
       '$(to_windows_path "$ROOT_DIR/scripts/windows_installer.iss")'" >/dev/null
 }
 
@@ -310,6 +341,7 @@ build_windows() {
     fi
     go build -buildmode=c-shared -o bin/bridge/remote_storage_bridge.dll ./bridge
     flutter build windows --release \
+      --dart-define APP_VERSION_LABEL=$VERSION \
       --build-name "$VERSION" \
       --build-number "$BUILD_NUMBER"
   )
@@ -388,6 +420,7 @@ build_linux() {
       go build -buildmode=c-shared -o "$bridge_so" ./bridge
     flutter build linux --release \
       --target-platform "$flutter_target" \
+      --dart-define APP_VERSION_LABEL=$VERSION \
       --build-name "$VERSION" \
       --build-number "$BUILD_NUMBER"
   )
@@ -396,7 +429,7 @@ build_linux() {
   [[ -d "$bundle_dir" ]] || fail "Linux bundle directory not found: $bundle_dir"
   cp "$bridge_so" "$bundle_dir/libremote_storage_bridge.so"
 
-  local temp_dir app_dir tool_path appimage_path
+  local temp_dir app_dir tool_path appimage_path tarball_path
   temp_dir="$(mktemp -d)"
   app_dir="$temp_dir/${APP_NAME}.AppDir"
   mkdir -p "$app_dir"
@@ -404,6 +437,9 @@ build_linux() {
   cp "$ROOT_DIR/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_512.png" "$app_dir/yunjuan.png"
   write_linux_apprun "$app_dir/AppRun"
   write_linux_desktop_file "$app_dir/yunjuan.desktop"
+
+  tarball_path="$OUTPUT_DIR/$ARTIFACT_PREFIX-linux-$ARCH.tar.gz"
+  package_linux_tarball "$bundle_dir" "$tarball_path"
 
   tool_path="$temp_dir/appimagetool.AppImage"
   download_appimagetool "$ARCH" "$tool_path"

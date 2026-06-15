@@ -4,16 +4,52 @@ package mount
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	storageconfig "remote-storage/go/config"
 	s3ops "remote-storage/go/s3"
 )
 
+const (
+	writebackRetryBaseDelay = 15 * time.Second
+	writebackRetryMaxDelay  = 2 * time.Minute
+)
+
+func (q *writebackQueue) setQuietPeriod(config storageconfig.RemoteStorageConfig) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.quiet = time.Duration(config.Normalized().WritebackQuietSeconds) * time.Second
+}
+
+func (q *writebackQueue) quietPeriod() time.Duration {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.quietPeriodLocked()
+}
+
+func (q *writebackQueue) quietPeriodLocked() time.Duration {
+	if q.quiet <= 0 {
+		return 10 * time.Second
+	}
+	return q.quiet
+}
+
 func (q *writebackQueue) enqueue(virtualPath, localPath string, size int64) {
+	var modTimeUnixNano int64
+	info, err := os.Stat(localPath)
+	if err == nil && info.IsDir() {
+		return
+	}
+	if err == nil {
+		size = info.Size()
+		modTimeUnixNano = info.ModTime().UnixNano()
+	}
+
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -28,40 +64,135 @@ func (q *writebackQueue) enqueue(virtualPath, localPath string, size int64) {
 		}
 		taskID = existing.taskID
 	}
+	q.supersedeRunningLocked(clean, localPath)
 	entry := &pendingWriteback{
-		taskID:      taskID,
-		virtualPath: clean,
-		localPath:   localPath,
-		size:        size,
+		taskID:          taskID,
+		virtualPath:     clean,
+		localPath:       localPath,
+		size:            size,
+		modTimeUnixNano: modTimeUnixNano,
 	}
-	s3ops.QueueTransfer(
-		entry.taskID,
-		"upload",
-		q.access.bucket,
+	q.armTimerLocked(entry, q.quietPeriodLocked())
+	q.entries[clean] = entry
+	q.persistEntryLocked(entry)
+	log.Printf(
+		"[mount/writeback] enqueue bucket=%q path=%q local_path=%q size=%d due_at=%s",
+		q.bucketName(),
 		entry.virtualPath,
 		entry.localPath,
 		entry.size,
+		entry.dueAt.Format(time.RFC3339Nano),
 	)
-	entry.timer = time.AfterFunc(writebackQuietPeriod, func() {
-		q.flush(clean)
-	})
-	q.entries[clean] = entry
+	s3opsQueueTransferForEntry(q.currentAccess(), entry)
+	s3ops.SetTransferStatusDetail(entry.taskID, "sync_wait")
+	q.projectSyncState(entry.virtualPath, false)
 }
 
-func (q *writebackQueue) flush(virtualPath string) {
+func (q *writebackQueue) supersedeRunningLocked(virtualPath, localPath string) {
+	for taskID, entry := range q.running {
+		if entry.virtualPath != virtualPath {
+			continue
+		}
+		entry.discard = true
+		s3ops.CancelTransfer(taskID)
+		s3ops.ForgetTransfer(taskID)
+		if entry.localPath != "" {
+			access := q.currentAccess()
+			if access != nil {
+				_ = s3ops.DiscardResumableUpload(access.config, entry.localPath)
+			}
+		}
+		break
+	}
+}
+
+func (q *writebackQueue) dispatch() {
+	defer q.wg.Done()
+	for entry := range q.queue {
+		if entry == nil {
+			continue
+		}
+		q.wg.Add(1)
+		err := q.pool.Submit(func() {
+			defer q.wg.Done()
+			q.flush(entry)
+		})
+		if err == nil {
+			continue
+		}
+		q.wg.Done()
+		log.Printf(
+			"[mount/writeback] pool-submit bucket=%q path=%q error=%v",
+			q.bucketName(),
+			entry.virtualPath,
+			err,
+		)
+		q.requeue(entry, writebackRetryBaseDelay)
+	}
+}
+
+func (q *writebackQueue) armTimerLocked(
+	entry *pendingWriteback,
+	delay time.Duration,
+) {
+	if entry.timer != nil {
+		entry.timer.Stop()
+	}
+	entry.dueAt = time.Now().Add(delay)
+	entry.timer = time.AfterFunc(delay, func() {
+		q.enqueueReady(entry.virtualPath)
+	})
+}
+
+func (q *writebackQueue) enqueueReady(virtualPath string) {
 	q.mu.Lock()
 	if q.closed {
 		q.mu.Unlock()
 		return
 	}
 	entry, ok := q.entries[cleanVirtualPath(virtualPath)]
-	if !ok {
+	if !ok || entry.queued {
 		q.mu.Unlock()
 		return
 	}
-	delete(q.entries, entry.virtualPath)
-	q.running[entry.taskID] = entry
+	entry.queued = true
+	s3ops.SetTransferStatusDetail(entry.taskID, "upload_wait")
+	queue := q.queue
 	q.mu.Unlock()
+	log.Printf(
+		"[mount/writeback] ready bucket=%q path=%q local_path=%q",
+		q.bucketName(),
+		entry.virtualPath,
+		entry.localPath,
+	)
+	queue <- entry
+}
+
+func (q *writebackQueue) claim(entry *pendingWriteback) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	current, ok := q.entries[entry.virtualPath]
+	if !ok || current.taskID != entry.taskID || !current.queued {
+		return false
+	}
+	current.queued = false
+	delete(q.entries, current.virtualPath)
+	q.running[current.taskID] = current
+	return true
+}
+
+func (q *writebackQueue) flush(entry *pendingWriteback) {
+	if !q.claim(entry) {
+		return
+	}
+	log.Printf(
+		"[mount/writeback] flush-start bucket=%q path=%q local_path=%q size=%d",
+		q.bucketName(),
+		entry.virtualPath,
+		entry.localPath,
+		entry.size,
+	)
 
 	err := q.flushNow(entry)
 	q.mu.Lock()
@@ -69,269 +200,191 @@ func (q *writebackQueue) flush(virtualPath string) {
 	discard := entry.discard
 	q.mu.Unlock()
 	if err != nil && !discard && !errors.Is(err, context.Canceled) {
-		q.enqueue(entry.virtualPath, entry.localPath, entry.size)
+		q.recordDrainError(err)
+		log.Printf(
+			"[mount/writeback] flush-error bucket=%q path=%q local_path=%q error=%v",
+			q.bucketName(),
+			entry.virtualPath,
+			entry.localPath,
+			err,
+		)
+		q.requeue(entry, nextWritebackRetryDelay(entry.retryCount+1))
+		return
 	}
+	if discard {
+		log.Printf("[mount/writeback] flush-discard bucket=%q path=%q", q.bucketName(), entry.virtualPath)
+		return
+	}
+	log.Printf("[mount/writeback] flush-done bucket=%q path=%q", q.bucketName(), entry.virtualPath)
+}
+
+func (q *writebackQueue) requeue(entry *pendingWriteback, delay time.Duration) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if q.closed || entry.discard {
+		return
+	}
+	entry.retryCount++
+	entry.queued = false
+	q.entries[entry.virtualPath] = entry
+	q.armTimerLocked(entry, delay)
+	q.persistEntryLocked(entry)
+	s3opsQueueTransferForEntry(q.currentAccess(), entry)
+	s3ops.SetTransferStatusDetail(entry.taskID, "sync_wait")
+	q.projectSyncState(entry.virtualPath, false)
 }
 
 func (q *writebackQueue) flushNow(entry *pendingWriteback) error {
-	err := s3ops.UploadFileContextResumable(
-		context.Background(),
-		q.access.config,
-		q.access.bucket,
-		q.access.remoteKey(entry.virtualPath),
-		entry.localPath,
-		entry.taskID,
-	)
+	access := q.currentAccess()
+	if access == nil {
+		return fmt.Errorf("missing writeback access")
+	}
+	info, err := os.Stat(entry.localPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			access.cache.removeLocalFile(entry.virtualPath, false)
+			access.cache.invalidatePath(entry.virtualPath)
+			_ = q.store.delete(entry.virtualPath)
+			log.Printf(
+				"[mount/writeback] flush-missing bucket=%q path=%q local_path=%q",
+				q.bucketName(),
+				entry.virtualPath,
+				entry.localPath,
+			)
+			return nil
+		}
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("writeback source became directory: %s", entry.localPath)
+	}
+	if q.shouldRefreshEntry(entry, info) {
+		return q.refreshEntryFromDisk(entry, info, q.quietPeriod())
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err = access.backend.UploadFile(ctx, access.bucket, access.remoteKey(entry.virtualPath), entry.localPath, entry.taskID)
 	if err != nil {
 		return err
 	}
-	if info, statErr := os.Stat(entry.localPath); statErr == nil {
-		q.access.cache.clearLocalFileMarker(entry.virtualPath)
-		q.access.cache.storeObject(entry.virtualPath, s3ops.ObjectInfo{
+	if !q.isSuperseded(entry) {
+		access.cache.clearLocalFileMarker(entry.virtualPath)
+		access.cache.storeObject(entry.virtualPath, s3ops.ObjectInfo{
 			Key:          entry.virtualPath,
 			Size:         info.Size(),
 			LastModified: info.ModTime().Format("2006-01-02 15:04:05"),
 			IsDir:        false,
 		})
+		access.cache.invalidatePath(entry.virtualPath)
+		access.projectSyncState(entry.virtualPath, true)
+		_ = q.store.delete(entry.virtualPath)
 	}
-	q.access.cache.invalidatePath(entry.virtualPath)
 	return nil
 }
 
-func (q *writebackQueue) cancel(virtualPath string) bool {
+func (q *writebackQueue) shouldRefreshEntry(entry *pendingWriteback, info os.FileInfo) bool {
+	return entry.size != info.Size() || entry.modTimeUnixNano != info.ModTime().UnixNano()
+}
+
+func (q *writebackQueue) refreshEntryFromDisk(
+	entry *pendingWriteback,
+	info os.FileInfo,
+	delay time.Duration,
+) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	clean := cleanVirtualPath(virtualPath)
-	if entry, ok := q.entries[clean]; ok {
-		if entry.timer != nil {
-			entry.timer.Stop()
-		}
-		delete(q.entries, clean)
-		entry.discard = true
-		s3ops.CancelTransfer(entry.taskID)
-		q.discardEntryLocalState(entry)
-		return true
-	}
-	for _, entry := range q.running {
-		if entry.virtualPath != clean {
-			continue
-		}
-		entry.discard = true
-		s3ops.CancelTransfer(entry.taskID)
-		q.discardEntryLocalState(entry)
-		return true
-	}
-	return false
-}
-
-func (q *writebackQueue) cancelAtOrBelow(virtualPath string, isDir bool) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	clean := cleanVirtualPath(virtualPath)
-	if !isDir {
-		if entry, ok := q.entries[clean]; ok {
-			if entry.timer != nil {
-				entry.timer.Stop()
-			}
-			entry.discard = true
-			q.discardEntryLocalState(entry)
-			s3ops.CancelTransfer(entry.taskID)
-			delete(q.entries, clean)
-		}
-		for _, entry := range q.running {
-			if entry.virtualPath != clean {
-				continue
-			}
-			entry.discard = true
-			q.discardEntryLocalState(entry)
-			s3ops.CancelTransfer(entry.taskID)
-		}
-		return
-	}
-	prefix := ensureDirSuffix(clean)
-	for key, entry := range q.entries {
-		if strings.HasPrefix(key, prefix) {
-			if entry.timer != nil {
-				entry.timer.Stop()
-			}
-			entry.discard = true
-			q.discardEntryLocalState(entry)
-			s3ops.CancelTransfer(entry.taskID)
-			delete(q.entries, key)
-		}
-	}
-	for _, entry := range q.running {
-		if strings.HasPrefix(entry.virtualPath, prefix) {
-			entry.discard = true
-			q.discardEntryLocalState(entry)
-			s3ops.CancelTransfer(entry.taskID)
-		}
-	}
-}
-
-func (q *writebackQueue) rename(oldVirtualPath, newVirtualPath string, isDir bool) bool {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	oldClean := cleanVirtualPath(oldVirtualPath)
-	newClean := cleanVirtualPath(newVirtualPath)
-	renamed := false
-	if !isDir {
-		entry, ok := q.entries[oldClean]
-		if !ok {
-			return false
-		}
-		if entry.timer != nil {
-			entry.timer.Stop()
-		}
-		delete(q.entries, oldClean)
-		entry.virtualPath = newClean
-		entry.timer = time.AfterFunc(writebackQuietPeriod, func() {
-			q.flush(newClean)
-		})
-		q.entries[newClean] = entry
-		return true
-	}
-
-	oldPrefix := ensureDirSuffix(oldClean)
-	newPrefix := ensureDirSuffix(newClean)
-	for key, entry := range q.entries {
-		if !strings.HasPrefix(key, oldPrefix) {
-			continue
-		}
-		if entry.timer != nil {
-			entry.timer.Stop()
-		}
-		delete(q.entries, key)
-		entry.virtualPath = newPrefix + strings.TrimPrefix(key, oldPrefix)
-		nextKey := entry.virtualPath
-		entry.timer = time.AfterFunc(writebackQuietPeriod, func() {
-			q.flush(nextKey)
-		})
-		q.entries[nextKey] = entry
-		renamed = true
-	}
-	return renamed
-}
-
-func (q *writebackQueue) hasPendingAtOrBelow(virtualPath string, isDir bool) bool {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	clean := cleanVirtualPath(virtualPath)
-	if !isDir {
-		_, ok := q.entries[clean]
-		return ok
-	}
-	prefix := ensureDirSuffix(clean)
-	for key := range q.entries {
-		if strings.HasPrefix(key, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-func (q *writebackQueue) cancelTask(taskID string) bool {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	for key, entry := range q.entries {
-		if entry.taskID != taskID {
-			continue
-		}
-		if entry.timer != nil {
-			entry.timer.Stop()
-		}
-		delete(q.entries, key)
-		entry.discard = true
-		s3ops.CancelTransfer(entry.taskID)
-		q.discardEntryLocalState(entry)
-		return true
-	}
-	if entry, ok := q.running[taskID]; ok {
-		entry.discard = true
-		s3ops.CancelTransfer(entry.taskID)
-		q.discardEntryLocalState(entry)
-		return true
-	}
-	return false
-}
-
-func (q *writebackQueue) triggerTask(taskID string) bool {
-	q.mu.Lock()
-	if q.closed {
-		q.mu.Unlock()
-		return false
-	}
-	var entry *pendingWriteback
-	for key, candidate := range q.entries {
-		if candidate.taskID != taskID {
-			continue
-		}
-		entry = candidate
-		if entry.timer != nil {
-			entry.timer.Stop()
-		}
-		delete(q.entries, key)
-		break
-	}
-	q.mu.Unlock()
-	if entry == nil {
-		return false
-	}
-	q.mu.Lock()
-	q.running[entry.taskID] = entry
-	q.mu.Unlock()
-	go func(item *pendingWriteback) {
-		if err := q.flushNow(item); err != nil {
-			q.mu.Lock()
-			delete(q.running, item.taskID)
-			discard := item.discard
-			q.mu.Unlock()
-			if discard || errors.Is(err, context.Canceled) {
-				return
-			}
-			q.enqueue(item.virtualPath, item.localPath, item.size)
-			return
-		}
-		q.mu.Lock()
-		delete(q.running, item.taskID)
-		q.mu.Unlock()
-	}(entry)
-	return true
-}
-
-func (q *writebackQueue) shutdown() error {
-	q.mu.Lock()
-	if q.closed {
-		q.mu.Unlock()
+	if q.closed || entry.discard {
 		return nil
 	}
-	q.closed = true
-	entries := make([]*pendingWriteback, 0, len(q.entries))
-	for key, entry := range q.entries {
-		if entry.timer != nil {
-			entry.timer.Stop()
-		}
-		entries = append(entries, entry)
-		delete(q.entries, key)
+	current, ok := q.running[entry.taskID]
+	if !ok || current != entry {
+		return nil
 	}
-	q.mu.Unlock()
-
-	for _, entry := range entries {
-		if entry == nil {
-			continue
-		}
-		_ = q.flushNow(entry)
+	refreshed := &pendingWriteback{
+		taskID:          entry.taskID,
+		virtualPath:     entry.virtualPath,
+		localPath:       entry.localPath,
+		size:            info.Size(),
+		modTimeUnixNano: info.ModTime().UnixNano(),
+		retryCount:      0,
 	}
+	delete(q.running, entry.taskID)
+	q.entries[entry.virtualPath] = refreshed
+	q.armTimerLocked(refreshed, delay)
+	q.persistEntryLocked(refreshed)
+	s3opsQueueTransferForEntry(q.currentAccess(), refreshed)
+	q.projectSyncState(refreshed.virtualPath, false)
 	return nil
 }
 
-func (q *writebackQueue) discardEntryLocalState(entry *pendingWriteback) {
-	q.access.cache.removeLocalFile(entry.virtualPath, false)
-	q.access.cache.invalidatePath(entry.virtualPath)
-	_ = s3ops.DiscardResumableUpload(q.access.config, entry.localPath)
+func (q *writebackQueue) isSuperseded(entry *pendingWriteback) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if entry.discard {
+		return true
+	}
+	current, ok := q.entries[entry.virtualPath]
+	return ok && current.taskID != entry.taskID
+}
+
+func (q *writebackQueue) persistEntryLocked(entry *pendingWriteback) {
+	if entry == nil {
+		return
+	}
+	if err := q.store.upsert(entry); err != nil {
+		log.Printf(
+			"[mount/writeback] persist bucket=%q path=%q error=%v",
+			q.bucketName(),
+			entry.virtualPath,
+			err,
+		)
+	}
+}
+
+func (q *writebackQueue) bucketName() string {
+	access := q.currentAccess()
+	if access == nil {
+		return ""
+	}
+	return access.bucket
+}
+
+func (q *writebackQueue) projectSyncState(virtualPath string, inSync bool) {
+	access := q.currentAccess()
+	if access == nil {
+		return
+	}
+	access.projectSyncState(virtualPath, inSync)
+}
+
+func (q *writebackQueue) recordDrainError(err error) {
+	if err == nil {
+		return
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if !q.draining || q.drainErr != nil {
+		return
+	}
+	q.drainErr = err
+}
+
+func s3opsQueueTransferForEntry(access *bucketAccess, entry *pendingWriteback) {
+	if access == nil || entry == nil {
+		return
+	}
+	s3ops.QueueTransfer(
+		entry.taskID,
+		"upload",
+		access.bucket,
+		entry.virtualPath,
+		entry.localPath,
+		entry.size,
+	)
+	s3ops.SetTransferStatusDetail(entry.taskID, "sync_wait")
 }

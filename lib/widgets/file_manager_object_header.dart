@@ -1,7 +1,9 @@
 // 文件列表表头：负责名称/大小/修改时间列，以及多选模式下的全选勾选控件。
 
 import 'package:flutter/material.dart';
+import 'package:remote_storage/widgets/file_manager_drag_selection.dart';
 import 'package:remote_storage/widgets/file_list_tile.dart';
+import 'package:remote_storage/widgets/list_selection_controls.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 class FileManagerObjectHeader extends StatelessWidget {
@@ -12,6 +14,7 @@ class FileManagerObjectHeader extends StatelessWidget {
     required this.allSelected,
     required this.partiallySelected,
     required this.onToggleSelectAll,
+    this.showSyncStatus = false,
   });
 
   final ShadThemeData theme;
@@ -19,6 +22,7 @@ class FileManagerObjectHeader extends StatelessWidget {
   final bool allSelected;
   final bool partiallySelected;
   final VoidCallback onToggleSelectAll;
+  final bool showSyncStatus;
 
   @override
   Widget build(BuildContext context) {
@@ -38,10 +42,12 @@ class FileManagerObjectHeader extends StatelessWidget {
       child: Row(
         children: [
           if (showSelectionControl) ...[
-            _HeaderSelectionIndicator(
-              allSelected: allSelected,
-              partiallySelected: partiallySelected,
-              onTap: onToggleSelectAll,
+            FileManagerBlankTapRegion(
+              child: ListSelectionControl(
+                selected: allSelected,
+                partiallySelected: partiallySelected,
+                onTap: onToggleSelectAll,
+              ),
             ),
             const SizedBox(width: 10),
           ],
@@ -53,54 +59,23 @@ class FileManagerObjectHeader extends StatelessWidget {
             width: FileListTile.sizeColumnWidth,
             child: Text('大小', textAlign: TextAlign.right, style: labelStyle),
           ),
+          if (showSyncStatus) ...[
+            const SizedBox(width: 16),
+            SizedBox(
+              width: FileListTile.statusColumnWidth,
+              child: Text(
+                '同步状态',
+                textAlign: TextAlign.right,
+                style: labelStyle,
+              ),
+            ),
+          ],
           const SizedBox(width: 16),
           SizedBox(
             width: FileListTile.modifiedColumnWidth,
             child: Text('修改时间', textAlign: TextAlign.right, style: labelStyle),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _HeaderSelectionIndicator extends StatelessWidget {
-  const _HeaderSelectionIndicator({
-    required this.allSelected,
-    required this.partiallySelected,
-    required this.onTap,
-  });
-
-  final bool allSelected;
-  final bool partiallySelected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-    final accent = theme.colorScheme.primary;
-
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: Container(
-        width: 18,
-        height: 18,
-        decoration: BoxDecoration(
-          color: allSelected || partiallySelected ? accent : Colors.transparent,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: allSelected || partiallySelected
-                ? accent
-                : theme.colorScheme.border.withValues(alpha: 0.9),
-            width: 1.2,
-          ),
-        ),
-        child: allSelected
-            ? const Icon(Icons.check, size: 12, color: Colors.white)
-            : partiallySelected
-            ? const Icon(Icons.remove, size: 12, color: Colors.white)
-            : null,
       ),
     );
   }

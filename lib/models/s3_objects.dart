@@ -52,3 +52,23 @@ class ObjectInfo {
     return '${(size / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 }
+
+class DirectoryAccess {
+  const DirectoryAccess({
+    required this.writable,
+    required this.known,
+    this.reason = '',
+  });
+
+  factory DirectoryAccess.fromJson(Map<String, dynamic> json) {
+    return DirectoryAccess(
+      writable: json['writable'] == true,
+      known: json['known'] == true,
+      reason: (json['reason'] ?? '').toString(),
+    );
+  }
+
+  final bool writable;
+  final bool known;
+  final String reason;
+}

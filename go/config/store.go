@@ -20,7 +20,7 @@ func NewStore(configPath string) Store {
 	return Store{configPath: configPath}
 }
 
-// NewDefaultStore targets ~/.remote-storage/config.toml for normal app usage.
+// NewDefaultStore targets the platform default config.toml for normal app usage.
 func NewDefaultStore() (Store, error) {
 	configPath, err := DefaultConfigPath()
 	if err != nil {
@@ -35,10 +35,14 @@ func (s Store) LoadBootstrapState() (BootstrapState, error) {
 	if err != nil {
 		return BootstrapState{}, err
 	}
+	publicConfig, err := config.WithResolvedCacheDirectory()
+	if err != nil {
+		return BootstrapState{}, err
+	}
 	return BootstrapState{
 		ConfigPath: s.configPath,
 		Configured: config.IsConfigured(),
-		Config:     config,
+		Config:     publicConfig,
 	}, nil
 }
 
@@ -71,8 +75,18 @@ func (s Store) Save(config RemoteStorageConfig) error {
 		return err
 	}
 
-	normalized := config.Normalized()
+	existing, err := s.Load()
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	normalized := config.MergeStoredSecrets(existing).WithDefaultWebDAVCredentials()
 	if !normalized.IsConfigured() {
+		if normalized.StorageType == StorageTypeBaiduPan {
+			return errors.New("请先完成百度网盘授权登录")
+		}
+		if normalized.StorageType == StorageTypeWebDAV {
+			return errors.New("WebDAV 地址、用户名和密码为必填项")
+		}
 		return errors.New("端点地址、访问密钥 ID 和访问密钥为必填项")
 	}
 	if err := os.MkdirAll(filepath.Dir(s.configPath), 0o700); err != nil {

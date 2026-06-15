@@ -2,5 +2,5 @@
 
 const appBrandName = '云卷';
 const appBrandSubtitle = '远程硬盘卷';
-const appBrandTagline = '管理远程文件，也可挂载为本地虚拟盘。';
-const appBrandDescription = '统一浏览 S3 兼容存储，后续可直接挂载成桌面里的远程卷。';
+const appBrandTagline = '云端存储，本地体验。';
+const appBrandDescription = '像使用本地硬盘一样，无缝管理 S3 及主流云端存储。\n一键挂载为虚拟盘，让远程文件触手可及。';

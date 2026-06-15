@@ -45,6 +45,7 @@ Future<void> loadPersistedTransferQueueStateData(TransferQueue queue) async {
       return;
     }
     queue._tasks.clear();
+    queue._tasksById.clear();
     for (final item in decoded) {
       if (item is! Map) {
         continue;
@@ -57,10 +58,12 @@ Future<void> loadPersistedTransferQueueStateData(TransferQueue queue) async {
         task.error = _interruptedTaskMessage;
       }
       queue._tasks.add(task);
+      queue._tasksById[task.id] = task;
     }
   } catch (_) {
     await prefs.remove(_storageKey);
     queue._tasks.clear();
+    queue._tasksById.clear();
     return;
   }
 }

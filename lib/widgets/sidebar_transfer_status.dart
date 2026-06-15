@@ -1,9 +1,10 @@
-// 侧边栏传输状态入口：显示对象操作速度、运行动画和 hover 悬浮任务列表。
+// 侧边栏传输状态入口：显示聚合速度、最近任务和快速取消能力。
 
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:remote_storage/state/transfer_queue.dart';
+import 'package:remote_storage/utils/transfer_format.dart';
 import 'package:remote_storage/widgets/app_tooltip.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
@@ -26,7 +27,7 @@ class SidebarTransferStatus extends StatefulWidget {
 class _SidebarTransferStatusState extends State<SidebarTransferStatus>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
-  final LayerLink _layerLink = LayerLink();
+  Timer? _hideTimer;
   bool _hovered = false;
 
   @override
@@ -42,190 +43,138 @@ class _SidebarTransferStatusState extends State<SidebarTransferStatus>
 
   @override
   void dispose() {
+    _hideTimer?.cancel();
     TransferQueue.instance.removeListener(_syncAnimation);
     _controller.dispose();
     super.dispose();
   }
 
+  void _showHoverCard() {
+    _hideTimer?.cancel();
+    if (!_hovered) {
+      setState(() => _hovered = true);
+    }
+  }
+
+  void _scheduleHideHoverCard() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(milliseconds: 420), () {
+      if (!mounted) return;
+      setState(() => _hovered = false);
+    });
+  }
+
   void _syncAnimation() {
-    if (!mounted) return;
-    if (TransferQueue.instance.hasRunning) {
+    if (!mounted) {
+      return;
+    }
+    if (TransferQueue.instance.hasSidebarRunning) {
       _controller.repeat(reverse: true);
     } else {
       _controller.stop();
       _controller.value = 0;
     }
-    setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final queue = TransferQueue.instance;
-    final foreground = queue.hasRunning ? widget.accent : widget.muted;
-    final badgeCount = queue.runningCount;
-
+    final foreground = queue.hasSidebarRunning ? widget.accent : widget.muted;
     return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: CompositedTransformTarget(
-        link: _layerLink,
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            if (_hovered)
-              Positioned(
-                left: 10,
-                right: 10,
-                bottom: 58,
-                child: IgnorePointer(
-                  ignoring: false,
-                  child: _TransferHoverCard(theme: theme),
-                ),
-              ),
-            AnimatedBuilder(
-              animation: queue,
-              builder: (context, _) {
-                return GestureDetector(
-                  onTap: widget.onTap,
-                  child: Container(
-                    margin: const EdgeInsets.fromLTRB(10, 0, 10, 14),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      color: queue.hasRunning
-                          ? widget.accent.withValues(alpha: 0.08)
-                          : Colors.white.withValues(alpha: 0.34),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: queue.hasRunning
-                            ? widget.accent.withValues(alpha: 0.18)
-                            : theme.colorScheme.border.withValues(alpha: 0.45),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            ScaleTransition(
-                              scale: Tween<double>(begin: 1, end: 1.08).animate(
-                                CurvedAnimation(
-                                  parent: _controller,
-                                  curve: Curves.easeInOut,
-                                ),
-                              ),
-                              child: Opacity(
-                                opacity: queue.hasRunning ? 1 : 0.9,
-                                child: Icon(
-                                  LucideIcons.arrowLeftRight,
-                                  size: 16,
-                                  color: foreground,
-                                ),
-                              ),
-                            ),
-                            if (badgeCount > 0)
-                              Positioned(
-                                right: -9,
-                                top: -8,
-                                child: _TransferTaskBadge(
-                                  count: badgeCount,
-                                  accent: widget.accent,
-                                ),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    '对象传输',
-                                    style: TextStyle(
-                                      fontSize: 12.5,
-                                      fontWeight: FontWeight.w600,
-                                      color: foreground,
-                                    ),
-                                  ),
-                                  if (badgeCount > 0) ...[
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      '$badgeCount 项',
-                                      style: TextStyle(
-                                        fontSize: 10.5,
-                                        fontWeight: FontWeight.w600,
-                                        color: widget.accent,
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                queue.speedSummary,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 10.5,
-                                  color: theme.colorScheme.mutedForeground,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
+      onEnter: (_) => _showHoverCard(),
+      onExit: (_) => _scheduleHideHoverCard(),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          if (_hovered) ...[
+            Positioned(
+              left: 10,
+              right: 10,
+              bottom: 58,
+              child: _TransferHoverCard(theme: theme),
+            ),
+            const Positioned(
+              left: 10,
+              right: 10,
+              bottom: 50,
+              height: 12,
+              child: SizedBox(),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TransferTaskBadge extends StatelessWidget {
-  const _TransferTaskBadge({required this.count, required this.accent});
-
-  final int count;
-  final Color accent;
-
-  @override
-  Widget build(BuildContext context) {
-    final label = count > 99 ? '99+' : '$count';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-      constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
-      decoration: BoxDecoration(
-        color: accent,
-        borderRadius: BorderRadius.circular(999),
-        boxShadow: [
-          BoxShadow(
-            color: accent.withValues(alpha: 0.28),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
+          AnimatedBuilder(
+            animation: queue,
+            builder: (context, _) {
+              return GestureDetector(
+                onTap: widget.onTap,
+                child: Container(
+                  margin: const EdgeInsets.fromLTRB(10, 0, 10, 14),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: queue.hasSidebarRunning
+                        ? widget.accent.withValues(alpha: 0.08)
+                        : Colors.white.withValues(alpha: 0.34),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: queue.hasSidebarRunning
+                          ? widget.accent.withValues(alpha: 0.18)
+                          : theme.colorScheme.border.withValues(alpha: 0.45),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      ScaleTransition(
+                        scale: Tween<double>(begin: 1, end: 1.08).animate(
+                          CurvedAnimation(
+                            parent: _controller,
+                            curve: Curves.easeInOut,
+                          ),
+                        ),
+                        child: Opacity(
+                          opacity: queue.hasSidebarRunning ? 1 : 0.9,
+                          child: Icon(
+                            LucideIcons.arrowLeftRight,
+                            size: 16,
+                            color: foreground,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '对象传输',
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                                color: foreground,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              queue.sidebarSpeedSummary,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                color: theme.colorScheme.mutedForeground,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
         ],
-      ),
-      child: Center(
-        child: Text(
-          label,
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 9.5,
-            fontWeight: FontWeight.w700,
-            height: 1,
-          ),
-        ),
       ),
     );
   }
@@ -238,7 +187,7 @@ class _TransferHoverCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tasks = TransferQueue.instance.tasks.take(6).toList();
+    final tasks = TransferQueue.instance.recentSidebarTasks();
     return Container(
       constraints: const BoxConstraints(maxHeight: 300),
       padding: const EdgeInsets.all(10),
@@ -311,16 +260,7 @@ class _TransferHoverRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final color = _colorFor(task);
-    final detail = task.status == TransferStatus.failed
-        ? (task.error ?? '${task.typeLabel}失败')
-        : task.status == TransferStatus.canceled
-        ? '${task.typeLabel}已取消'
-        : (task.isCopy || task.isMove) && task.targetPath.isNotEmpty
-        ? '${task.typeLabel}到 ${task.targetPath}'
-        : task.totalBytes > 0
-        ? '${formatBytes(task.bytesCompleted)} / ${formatBytes(task.totalBytes)}'
-        : task.typeLabel;
-
+    final detail = _detailFor(task);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
@@ -359,16 +299,7 @@ class _TransferHoverRow extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                switch (task.status) {
-                  TransferStatus.pending => '等待',
-                  TransferStatus.running =>
-                    task.speedBytes > 0
-                        ? formatBytesPerSecond(task.speedBytes)
-                        : '${task.typeLabel}中',
-                  TransferStatus.done => '完成',
-                  TransferStatus.failed => '失败',
-                  TransferStatus.canceled => '已取消',
-                },
+                _statusLabelFor(task),
                 style: TextStyle(
                   fontSize: 10.5,
                   fontWeight: FontWeight.w600,
@@ -398,6 +329,47 @@ class _TransferHoverRow extends StatelessWidget {
     );
   }
 
+  String _detailFor(TransferTask task) {
+    final createdAtLabel = formatTransferCreatedAt(task.createdAt);
+    if (task.status == TransferStatus.failed) {
+      return _joinHoverParts([
+        task.error ?? '${task.typeLabel}失败',
+        createdAtLabel,
+      ]);
+    }
+    if (task.status == TransferStatus.canceled) {
+      return _joinHoverParts(['${task.typeLabel}已取消', createdAtLabel]);
+    }
+    if ((task.isCopy || task.isMove) && task.targetPath.isNotEmpty) {
+      return _joinHoverParts([
+        '${task.typeLabel}到 ${task.targetPath}',
+        createdAtLabel,
+      ]);
+    }
+    if (task.totalBytes > 0) {
+      return _joinHoverParts([
+        '${formatBytes(task.bytesCompleted)} / ${formatBytes(task.totalBytes)}',
+        task.progressTargetLabel,
+        createdAtLabel,
+      ]);
+    }
+    return _joinHoverParts([task.typeLabel, createdAtLabel]);
+  }
+
+  String _statusLabelFor(TransferTask task) {
+    return switch (task.status) {
+      TransferStatus.pending =>
+        task.isUpload ? (task.isUploadWaiting ? '等待上传' : '等待同步') : '等待中',
+      TransferStatus.running =>
+        task.speedBytes > 0
+            ? formatBytesPerSecond(task.speedBytes)
+            : '${task.typeLabel}中',
+      TransferStatus.done => '完成',
+      TransferStatus.failed => '失败',
+      TransferStatus.canceled => '已取消',
+    };
+  }
+
   IconData _iconFor(TransferTask task) {
     if (task.isUpload) return LucideIcons.upload;
     if (task.isDownload) return LucideIcons.download;
@@ -413,4 +385,8 @@ class _TransferHoverRow extends StatelessWidget {
     if (task.isDelete) return const Color(0xffdc2626);
     return const Color(0xffc2410c);
   }
+}
+
+String _joinHoverParts(List<String> parts) {
+  return parts.where((part) => part.trim().isNotEmpty).join('  ·  ');
 }

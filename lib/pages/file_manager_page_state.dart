@@ -3,23 +3,34 @@ part of 'file_manager_page.dart';
 // 文件管理页派生状态：把筛选和当前视图相关计算单独拆出，避免主文件过长。
 
 extension _FileManagerPageDerivedState on _FileManagerPageState {
-  BucketMountStatus? get _activeMountStatus =>
-      _activeBucket == null ? null : _bucketMountStatuses[_activeBucket!];
+  String? get _activeBucket => _activeBucketEntry?.bucket.name;
 
-  bool get _activeMountBusy =>
-      _activeBucket != null && _mountBusyBuckets.contains(_activeBucket!);
+  String? get _activeBucketId => _activeBucketEntry?.id;
+
+  RemoteStorageConfig get _activeConfig =>
+      _activeBucketEntry?.config ?? widget.config;
+
+  BucketMountStatus? get _activeMountStatus =>
+      _activeBucketId == null ? null : _bucketMountStatuses[_activeBucketId!];
 
   bool get _isTrashHome => widget.homeView == FileManagerHomeView.trash;
 
+  bool get _acceptsFileTransferInput =>
+      !_loading && !_showTrash && _activeBucket != null;
+
   bool get _hasSearchQuery => _searchText.isNotEmpty;
 
-  List<BucketInfo> get _filteredBuckets {
-    final buckets = _buckets ?? const <BucketInfo>[];
+  List<FileManagerBucketEntry> get _filteredBuckets {
+    final buckets = _buckets ?? const <FileManagerBucketEntry>[];
     if (!_hasSearchQuery) {
       return buckets;
     }
     return buckets
-        .where((bucket) => bucket.name.toLowerCase().contains(_searchText))
+        .where(
+          (bucket) =>
+              bucket.bucket.name.toLowerCase().contains(_searchText) ||
+              bucket.sourceLabel.toLowerCase().contains(_searchText),
+        )
         .toList(growable: false);
   }
 

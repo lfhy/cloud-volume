@@ -6,23 +6,35 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	s3ops "remote-storage/go/s3"
 )
 
+const webDAVRangeChunkSize int64 = 512 * 1024
+
 type readableWebDAVFile struct {
-	ctx      context.Context
-	access   *bucketAccess
-	path     string
-	file     *os.File
-	dirInfos []os.FileInfo
-	dirPos   int
-	info     os.FileInfo
+	ctx               context.Context
+	access            *bucketAccess
+	path              string
+	file              *os.File
+	dirInfos          []os.FileInfo
+	dirPos            int
+	info              os.FileInfo
+	objectInfo        s3ops.ObjectInfo
+	offset            int64
+	rangeData         []byte
+	rangeOffset       int64
+	transferTaskID    string
+	transferCancel    context.CancelFunc
+	transferCompleted int64
 }
 
 type writableWebDAVFile struct {
@@ -59,21 +71,22 @@ func newReadableWebDAVFile(
 		return newDirectoryHandle(access, virtualPath), nil
 	}
 
-	localPath, _, err := access.ensureLocalFile(ctx, virtualPath)
-	if err != nil {
-		return nil, pathError("open", virtualPath, err)
+	readable := &readableWebDAVFile{
+		ctx:        ctx,
+		access:     access,
+		path:       virtualPath,
+		info:       fileInfoFromObject(info),
+		objectInfo: info,
 	}
-	file, err := os.Open(localPath)
-	if err != nil {
-		return nil, pathError("open", virtualPath, err)
+	if localPath, ok := access.localReadablePath(virtualPath, info); ok {
+		file, fileErr := os.Open(localPath)
+		if fileErr == nil {
+			readable.file = file
+			return readable, nil
+		}
+		log.Printf("[mount/webdav-read] local-open-error path=%q local_path=%q err=%v", virtualPath, localPath, fileErr)
 	}
-	return &readableWebDAVFile{
-		ctx:    ctx,
-		access: access,
-		path:   virtualPath,
-		file:   file,
-		info:   fileInfoFromObject(info),
-	}, nil
+	return readable, nil
 }
 
 func newWritableWebDAVFile(
@@ -165,24 +178,59 @@ func newDirectoryHandle(access *bucketAccess, virtualPath string) *readableWebDA
 }
 
 func (f *readableWebDAVFile) Close() error {
+	var err error
 	if f.file != nil {
-		return f.file.Close()
+		err = f.file.Close()
 	}
-	return nil
+	f.finishTransferTask(err)
+	return err
 }
 
 func (f *readableWebDAVFile) Read(p []byte) (int, error) {
-	if f.file == nil {
+	if f.file != nil {
+		return f.file.Read(p)
+	}
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if f.info.IsDir() {
 		return 0, io.EOF
 	}
-	return f.file.Read(p)
+	if f.offset >= f.objectInfo.Size {
+		return 0, io.EOF
+	}
+	if err := f.ensureRange(); err != nil {
+		return 0, pathError("read", f.path, err)
+	}
+	start := f.offset - f.rangeOffset
+	if start < 0 || start >= int64(len(f.rangeData)) {
+		return 0, io.EOF
+	}
+	n := copy(p, f.rangeData[start:])
+	f.offset += int64(n)
+	return n, nil
 }
 
 func (f *readableWebDAVFile) Seek(offset int64, whence int) (int64, error) {
-	if f.file == nil {
-		return 0, nil
+	if f.file != nil {
+		return f.file.Seek(offset, whence)
 	}
-	return f.file.Seek(offset, whence)
+	var next int64
+	switch whence {
+	case io.SeekStart:
+		next = offset
+	case io.SeekCurrent:
+		next = f.offset + offset
+	case io.SeekEnd:
+		next = f.objectInfo.Size + offset
+	default:
+		return 0, fmt.Errorf("invalid whence")
+	}
+	if next < 0 {
+		return 0, fmt.Errorf("negative seek offset")
+	}
+	f.offset = next
+	return next, nil
 }
 
 func (f *readableWebDAVFile) Readdir(count int) ([]os.FileInfo, error) {
@@ -235,6 +283,88 @@ func (f *readableWebDAVFile) listDir() ([]os.FileInfo, error) {
 		return infos[i].Name() < infos[j].Name()
 	})
 	return infos, nil
+}
+
+func (f *readableWebDAVFile) startTransferTask() {
+	if f.file != nil || f.transferTaskID != "" || f.info.IsDir() {
+		return
+	}
+	_, transferCancel := context.WithCancel(context.Background())
+	taskID := "mount-read-" + uuid.NewString()
+	f.transferTaskID = taskID
+	f.transferCancel = transferCancel
+	s3ops.StartQueuedTransfer(
+		taskID,
+		"download",
+		f.access.bucket,
+		f.access.remoteKey(f.path),
+		"",
+		f.objectInfo.Size,
+		transferCancel,
+	)
+	s3ops.SetTransferStatusDetail(taskID, "mount_read")
+	s3ops.SetTransferTarget(taskID, "等待范围请求")
+}
+
+func (f *readableWebDAVFile) updateTransferRange(offset, length int64) {
+	if f.transferTaskID == "" || length <= 0 {
+		return
+	}
+	end := offset + length - 1
+	if end >= f.objectInfo.Size {
+		end = f.objectInfo.Size - 1
+	}
+	if end < offset {
+		end = offset
+	}
+	s3ops.SetTransferTarget(f.transferTaskID, fmt.Sprintf("bytes=%d-%d", offset, end))
+}
+
+func (f *readableWebDAVFile) advanceTransfer(bytesRead int) {
+	if f.transferTaskID == "" || bytesRead <= 0 {
+		return
+	}
+	f.transferCompleted += int64(bytesRead)
+	s3ops.AdvanceTransfer(f.transferTaskID, int64(bytesRead))
+}
+
+func (f *readableWebDAVFile) finishTransferTask(err error) {
+	if f.transferTaskID == "" {
+		return
+	}
+	if f.transferCancel != nil {
+		f.transferCancel()
+		f.transferCancel = nil
+	}
+	s3ops.FinishQueuedTransfer(f.transferTaskID, err)
+	f.transferTaskID = ""
+}
+
+func (f *readableWebDAVFile) ensureRange() error {
+	if len(f.rangeData) > 0 &&
+		f.offset >= f.rangeOffset &&
+		f.offset < f.rangeOffset+int64(len(f.rangeData)) {
+		return nil
+	}
+	remaining := f.objectInfo.Size - f.offset
+	if remaining <= 0 {
+		f.rangeData = nil
+		return nil
+	}
+	length := webDAVRangeChunkSize
+	if remaining < length {
+		length = remaining
+	}
+	f.startTransferTask()
+	f.updateTransferRange(f.offset, length)
+	data, err := f.access.readRemoteRange(f.ctx, f.path, f.offset, length)
+	if err != nil {
+		return err
+	}
+	f.advanceTransfer(len(data))
+	f.rangeData = data
+	f.rangeOffset = f.offset
+	return nil
 }
 
 func (f *writableWebDAVFile) Close() error {
@@ -318,9 +448,5 @@ func pathError(op, virtualPath string, err error) error {
 	if _, ok := err.(*os.PathError); ok {
 		return err
 	}
-	pathValue := "/" + cleanVirtualPath(virtualPath)
-	if pathValue == "/" {
-		pathValue = "."
-	}
-	return &os.PathError{Op: op, Path: pathValue, Err: err}
+	return &os.PathError{Op: op, Path: virtualPath, Err: err}
 }

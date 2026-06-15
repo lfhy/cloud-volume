@@ -3,6 +3,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:remote_storage/models/bootstrap_state.dart';
+import 'package:remote_storage/pages/cloud_storage_page.dart';
 import 'package:remote_storage/pages/file_manager_page.dart';
 import 'package:remote_storage/pages/global_trash_page.dart';
 import 'package:remote_storage/pages/share_management_page.dart';
@@ -16,19 +17,23 @@ import 'package:remote_storage/widgets/sidebar_transfer_status.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 /// 侧边栏菜单项。
-enum SidebarItem { fileManager, trash, shares, transfers, settings }
+enum SidebarItem { fileManager, storage, trash, shares, transfers, settings }
 
 class MainLayoutPage extends StatefulWidget {
   const MainLayoutPage({
     super.key,
     required this.state,
     required this.api,
+    required this.selectedItem,
+    required this.onSelectedItemChanged,
     required this.onEditConfig,
     required this.onRefresh,
   });
 
   final BootstrapState state;
   final RemoteStorageGateway api;
+  final SidebarItem selectedItem;
+  final ValueChanged<SidebarItem> onSelectedItemChanged;
   final VoidCallback onEditConfig;
   final VoidCallback onRefresh;
 
@@ -37,7 +42,14 @@ class MainLayoutPage extends StatefulWidget {
 }
 
 class _MainLayoutPageState extends State<MainLayoutPage> {
-  SidebarItem _selected = SidebarItem.fileManager;
+  bool get _sharesAvailable => widget.state.config.supportsShareLinks;
+
+  SidebarItem get _effectiveSelectedItem {
+    if (!_sharesAvailable && widget.selectedItem == SidebarItem.shares) {
+      return SidebarItem.fileManager;
+    }
+    return widget.selectedItem;
+  }
 
   @override
   void initState() {
@@ -72,7 +84,7 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
     final muted = Color.lerp(const Color(0xff64748b), ac, 0.06)!;
 
     return Container(
-      width: 220,
+      width: 236,
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
@@ -114,14 +126,7 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
                   padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const AppBrandMark(height: 42, width: 172),
-                      const SizedBox(height: 6),
-                      Text(
-                        '面向远程卷的本地管理器',
-                        style: TextStyle(fontSize: 11, color: muted),
-                      ),
-                    ],
+                    children: [const AppBrandMark(height: 42, width: 210)],
                   ),
                 ),
                 Padding(
@@ -151,19 +156,27 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
                   muted,
                 ),
                 _navItem(
+                  LucideIcons.cloudCog,
+                  '账号管理',
+                  SidebarItem.storage,
+                  ac,
+                  muted,
+                ),
+                _navItem(
                   LucideIcons.trash2,
                   '回收站',
                   SidebarItem.trash,
                   ac,
                   muted,
                 ),
-                _navItem(
-                  LucideIcons.share2,
-                  '分享管理',
-                  SidebarItem.shares,
-                  ac,
-                  muted,
-                ),
+                if (_sharesAvailable)
+                  _navItem(
+                    LucideIcons.share2,
+                    '分享管理',
+                    SidebarItem.shares,
+                    ac,
+                    muted,
+                  ),
                 _navItem(
                   LucideIcons.arrowLeftRight,
                   '任务队列',
@@ -183,7 +196,7 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
                   accent: ac,
                   muted: muted,
                   onTap: () =>
-                      setState(() => _selected = SidebarItem.transfers),
+                      widget.onSelectedItemChanged(SidebarItem.transfers),
                 ),
               ],
             ),
@@ -208,7 +221,7 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
     Color ac,
     Color muted,
   ) {
-    final selected = _selected == item;
+    final selected = _effectiveSelectedItem == item;
     final bg = selected ? ac.withValues(alpha: 0.1) : Colors.transparent;
     final fg = selected ? ac : muted;
     final border = selected
@@ -218,7 +231,7 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
       child: GestureDetector(
-        onTap: () => setState(() => _selected = item),
+        onTap: () => widget.onSelectedItemChanged(item),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
@@ -250,21 +263,38 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
   }
 
   Widget _buildContent() {
-    final index = switch (_selected) {
+    final index = switch (widget.selectedItem) {
+      SidebarItem.shares when !_sharesAvailable => 0,
       SidebarItem.fileManager => 0,
-      SidebarItem.trash => 1,
-      SidebarItem.shares => 2,
-      SidebarItem.transfers => 3,
-      SidebarItem.settings => 4,
+      SidebarItem.storage => 1,
+      SidebarItem.trash => 2,
+      SidebarItem.shares => 3,
+      SidebarItem.transfers => 4,
+      SidebarItem.settings => 5,
     };
 
     return IndexedStack(
       index: index,
       children: [
-        FileManagerPage(api: widget.api, config: widget.state.config),
+        FileManagerPage(
+          api: widget.api,
+          config: widget.state.config,
+          profiles: widget.state.profiles,
+          onEditConfig: widget.onEditConfig,
+          onRefresh: widget.onRefresh,
+        ),
+        CloudStoragePage(
+          state: widget.state,
+          api: widget.api,
+          onRefresh: widget.onRefresh,
+        ),
         GlobalTrashPage(api: widget.api, config: widget.state.config),
         ShareManagementPage(api: widget.api, config: widget.state.config),
-        TransfersPage(api: widget.api, config: widget.state.config),
+        TransfersPage(
+          api: widget.api,
+          config: widget.state.config,
+          active: _effectiveSelectedItem == SidebarItem.transfers,
+        ),
         SettingsPage(
           state: widget.state,
           api: widget.api,

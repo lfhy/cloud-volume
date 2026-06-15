@@ -1,10 +1,9 @@
 import 'package:flutter/widgets.dart';
-import 'package:remote_storage/app/remote_storage_app.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:remote_storage/app/app_entry.dart';
+import 'package:remote_storage/platform/platform_bootstrap.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
-  sqfliteFfiInit();
-  databaseFactory = databaseFactoryFfi;
-  runApp(const RemoteStorageApp());
+  await initializePlatformServices();
+  await runRemoteStorageEntry(args);
 }

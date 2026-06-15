@@ -1,23 +1,17 @@
-# Builds the tagged desktop release matrix and publishes all packaged assets to
-# the matching GitHub Release page.
+# Builds the tagged desktop release matrix and publishes the release assets.
 name: release-desktop
 
 on:
   push:
     tags:
-      - "v*"
+      - "v*.*.*"
   workflow_dispatch:
-    inputs:
-      tag_name:
-        description: "Release tag to publish"
-        required: true
-        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-desktop-${{ github.event.inputs.tag_name || github.ref_name }}
+  group: release-desktop-${{ github.ref_name }}
   cancel-in-progress: false
 
 defaults:
@@ -28,14 +22,103 @@ env:
   FLUTTER_VERSION: "3.44.0"
 
 jobs:
-  macos-amd64:
-    name: macos-amd64
-    runs-on: macos-13
+  cli:
+    name: cli-${{ matrix.variant }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: lite
+            goos: linux
+            goarch: amd64
+          - variant: lite
+            goos: linux
+            goarch: arm64
+          - variant: lite
+            goos: darwin
+            goarch: amd64
+          - variant: lite
+            goos: darwin
+            goarch: arm64
+          - variant: lite
+            goos: windows
+            goarch: amd64
+          - variant: full
+            goos: linux
+            goarch: amd64
+          - variant: full
+            goos: linux
+            goarch: arm64
+          - variant: full
+            goos: darwin
+            goarch: amd64
+          - variant: full
+            goos: darwin
+            goarch: arm64
+          - variant: full
+            goos: windows
+            goarch: amd64
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.inputs.tag_name || github.ref }}
+          ref: ${{ github.ref }}
+
+      - name: Mark scripts executable
+        run: chmod +x scripts/*.sh
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Flutter
+        if: ${{ matrix.variant == 'full' }}
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install CLI packaging helpers
+        run: sudo apt-get update && sudo apt-get install -y zip
+
+      - name: Build CLI release assets
+        env:
+          VERSION_NAME: ${{ github.ref_name }}
+        run: |
+          ./scripts/build_cli_packages.sh \
+            --goos "${{ matrix.goos }}" \
+            --goarch "${{ matrix.goarch }}" \
+            --variant "${{ matrix.variant }}" \
+            --version "${VERSION_NAME#v}" \
+            --output-dir dist/cli
+
+      - name: Upload CLI assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: yunjuan-cli-${{ matrix.variant }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/cli/*
+          if-no-files-found: error
+
+  macos:
+    name: macos-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: universal
+            runner: macos-14
+          - arch: arm64
+            runner: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref }}
 
       - name: Mark scripts executable
         run: chmod +x scripts/*.sh
@@ -56,130 +139,34 @@ jobs:
       - name: Enable macOS desktop
         run: flutter config --enable-macos-desktop
 
-      - name: Build macOS amd64 packages
+      - name: Build macOS release assets
         env:
-          RAW_TAG: ${{ github.event.inputs.tag_name || github.ref_name }}
+          VERSION_NAME: ${{ github.ref_name }}
+          BUILD_NUMBER: ${{ github.run_number }}
         run: |
-          VERSION_NAME="${RAW_TAG#v}"
           flutter pub get
           ./scripts/build_desktop_packages.sh \
             --platform macos \
-            --arch amd64 \
-            --version "$VERSION_NAME" \
-            --build-number "${GITHUB_RUN_NUMBER}" \
-            --output-dir dist/macos-amd64
+            --arch "${{ matrix.arch }}" \
+            --version "${VERSION_NAME#v}" \
+            --build-number "$BUILD_NUMBER" \
+            --output-dir dist/macos-${{ matrix.arch }}
 
-      - name: Upload macOS amd64 assets
+      - name: Upload macOS assets
         uses: actions/upload-artifact@v4
         with:
-          name: yunjuan-macos-amd64
-          path: dist/macos-amd64/*
+          name: yunjuan-macos-${{ matrix.arch }}
+          path: dist/macos-${{ matrix.arch }}/*
           if-no-files-found: error
 
-  macos-arm64:
-    name: macos-arm64
-    runs-on: macos-14
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          ref: ${{ github.event.inputs.tag_name || github.ref }}
-
-      - name: Mark scripts executable
-        run: chmod +x scripts/*.sh
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
-          cache: true
-
-      - name: Enable macOS desktop
-        run: flutter config --enable-macos-desktop
-
-      - name: Build macOS arm64 packages
-        env:
-          RAW_TAG: ${{ github.event.inputs.tag_name || github.ref_name }}
-        run: |
-          VERSION_NAME="${RAW_TAG#v}"
-          flutter pub get
-          ./scripts/build_desktop_packages.sh \
-            --platform macos \
-            --arch arm64 \
-            --version "$VERSION_NAME" \
-            --build-number "${GITHUB_RUN_NUMBER}" \
-            --output-dir dist/macos-arm64
-
-      - name: Upload macOS arm64 assets
-        uses: actions/upload-artifact@v4
-        with:
-          name: yunjuan-macos-arm64
-          path: dist/macos-arm64/*
-          if-no-files-found: error
-
-  macos-universal:
-    name: macos-universal
-    runs-on: macos-14
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          ref: ${{ github.event.inputs.tag_name || github.ref }}
-
-      - name: Mark scripts executable
-        run: chmod +x scripts/*.sh
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
-          cache: true
-
-      - name: Enable macOS desktop
-        run: flutter config --enable-macos-desktop
-
-      - name: Build macOS universal packages
-        env:
-          RAW_TAG: ${{ github.event.inputs.tag_name || github.ref_name }}
-        run: |
-          VERSION_NAME="${RAW_TAG#v}"
-          flutter pub get
-          ./scripts/build_desktop_packages.sh \
-            --platform macos \
-            --arch universal \
-            --version "$VERSION_NAME" \
-            --build-number "${GITHUB_RUN_NUMBER}" \
-            --output-dir dist/macos-universal
-
-      - name: Upload macOS universal assets
-        uses: actions/upload-artifact@v4
-        with:
-          name: yunjuan-macos-universal
-          path: dist/macos-universal/*
-          if-no-files-found: error
-
-  windows-amd64:
+  windows:
     name: windows-amd64
     runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.inputs.tag_name || github.ref }}
+          ref: ${{ github.ref }}
 
       - name: Mark scripts executable
         run: chmod +x scripts/*.sh
@@ -205,6 +192,14 @@ jobs:
           install: >-
             mingw-w64-ucrt-x86_64-gcc
 
+      - name: Resolve Windows GCC path
+        shell: pwsh
+        run: |
+          $gccPath = (Get-Command gcc -ErrorAction Stop).Source
+          $gxxPath = (Get-Command g++ -ErrorAction Stop).Source
+          "BRIDGE_CC=$gccPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "BRIDGE_CXX=$gxxPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress -y
@@ -212,35 +207,38 @@ jobs:
       - name: Enable Windows desktop
         run: flutter config --enable-windows-desktop
 
-      - name: Build Windows amd64 packages
+      - name: Build Windows release assets
         env:
-          RAW_TAG: ${{ github.event.inputs.tag_name || github.ref_name }}
-          BRIDGE_CC: C:\msys64\ucrt64\bin\gcc.exe
+          VERSION_NAME: ${{ github.ref_name }}
+          BUILD_NUMBER: ${{ github.run_number }}
         run: |
-          VERSION_NAME="${RAW_TAG#v}"
           flutter pub get
           ./scripts/build_desktop_packages.sh \
             --platform windows \
             --arch amd64 \
-            --version "$VERSION_NAME" \
-            --build-number "${GITHUB_RUN_NUMBER}" \
+            --version "${VERSION_NAME#v}" \
+            --build-number "$BUILD_NUMBER" \
             --output-dir dist/windows-amd64
 
-      - name: Upload Windows amd64 assets
+      - name: Upload Windows assets
         uses: actions/upload-artifact@v4
         with:
           name: yunjuan-windows-amd64
           path: dist/windows-amd64/*
           if-no-files-found: error
 
-  windows-arm64:
-    name: windows-arm64
-    runs-on: windows-11-arm
+  web:
+    name: web-linux-${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goarch: [amd64, arm64]
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.inputs.tag_name || github.ref }}
+          ref: ${{ github.ref }}
 
       - name: Mark scripts executable
         run: chmod +x scripts/*.sh
@@ -258,50 +256,36 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Install Windows arm64 toolchain
-        uses: msys2/setup-msys2@v2
-        with:
-          update: true
-          msystem: CLANGARM64
-          install: >-
-            mingw-w64-clang-aarch64-toolchain
-
-      - name: Install Inno Setup
-        shell: pwsh
-        run: choco install innosetup --no-progress -y
-
-      - name: Enable Windows desktop
-        run: flutter config --enable-windows-desktop
-
-      - name: Build Windows arm64 packages
+      - name: Build Web release assets
         env:
-          RAW_TAG: ${{ github.event.inputs.tag_name || github.ref_name }}
-          BRIDGE_CC: C:\msys64\clangarm64\bin\aarch64-w64-mingw32-gcc.exe
+          VERSION_NAME: ${{ github.ref_name }}
         run: |
-          VERSION_NAME="${RAW_TAG#v}"
-          flutter pub get
-          ./scripts/build_desktop_packages.sh \
-            --platform windows \
-            --arch arm64 \
-            --version "$VERSION_NAME" \
-            --build-number "${GITHUB_RUN_NUMBER}" \
-            --output-dir dist/windows-arm64
+          ./scripts/build_web_release.sh \
+            --goarch "${{ matrix.goarch }}" \
+            --version "${VERSION_NAME#v}" \
+            --output-dir dist/web
 
-      - name: Upload Windows arm64 assets
+      - name: Upload Web assets
         uses: actions/upload-artifact@v4
         with:
-          name: yunjuan-windows-arm64
-          path: dist/windows-arm64/*
+          name: yunjuan-web-linux-${{ matrix.goarch }}
+          path: dist/web/*
           if-no-files-found: error
 
-  linux-amd64:
-    name: linux-amd64
-    runs-on: ubuntu-24.04
+  linux:
+    name: linux-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.inputs.tag_name || github.ref }}
+          ref: ${{ github.ref }}
 
       - name: Mark scripts executable
         run: chmod +x scripts/*.sh
@@ -333,105 +317,48 @@ jobs:
       - name: Enable Linux desktop
         run: flutter config --enable-linux-desktop
 
-      - name: Build Linux amd64 AppImage
+      - name: Build Linux release assets
         env:
-          RAW_TAG: ${{ github.event.inputs.tag_name || github.ref_name }}
+          VERSION_NAME: ${{ github.ref_name }}
+          BUILD_NUMBER: ${{ github.run_number }}
         run: |
-          VERSION_NAME="${RAW_TAG#v}"
           flutter pub get
           ./scripts/build_desktop_packages.sh \
             --platform linux \
-            --arch amd64 \
-            --version "$VERSION_NAME" \
-            --build-number "${GITHUB_RUN_NUMBER}" \
-            --output-dir dist/linux-amd64
+            --arch "${{ matrix.arch }}" \
+            --version "${VERSION_NAME#v}" \
+            --build-number "$BUILD_NUMBER" \
+            --output-dir dist/linux-${{ matrix.arch }}
 
-      - name: Upload Linux amd64 assets
+      - name: Upload Linux assets
         uses: actions/upload-artifact@v4
         with:
-          name: yunjuan-linux-amd64
-          path: dist/linux-amd64/*
-          if-no-files-found: error
-
-  linux-arm64:
-    name: linux-arm64
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          ref: ${{ github.event.inputs.tag_name || github.ref }}
-
-      - name: Mark scripts executable
-        run: chmod +x scripts/*.sh
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
-          cache: true
-
-      - name: Install Linux desktop dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            clang \
-            cmake \
-            libgtk-3-dev \
-            liblzma-dev \
-            ninja-build \
-            pkg-config
-
-      - name: Enable Linux desktop
-        run: flutter config --enable-linux-desktop
-
-      - name: Build Linux arm64 AppImage
-        env:
-          RAW_TAG: ${{ github.event.inputs.tag_name || github.ref_name }}
-        run: |
-          VERSION_NAME="${RAW_TAG#v}"
-          flutter pub get
-          ./scripts/build_desktop_packages.sh \
-            --platform linux \
-            --arch arm64 \
-            --version "$VERSION_NAME" \
-            --build-number "${GITHUB_RUN_NUMBER}" \
-            --output-dir dist/linux-arm64
-
-      - name: Upload Linux arm64 assets
-        uses: actions/upload-artifact@v4
-        with:
-          name: yunjuan-linux-arm64
-          path: dist/linux-arm64/*
+          name: yunjuan-linux-${{ matrix.arch }}
+          path: dist/linux-${{ matrix.arch }}/*
           if-no-files-found: error
 
   publish:
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && always() }}
     name: publish
     runs-on: ubuntu-latest
     needs:
-      - macos-amd64
-      - macos-arm64
-      - macos-universal
-      - windows-amd64
-      - windows-arm64
-      - linux-amd64
-      - linux-arm64
+      - cli
+      - web
+      - macos
+      - windows
+      - linux
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          ref: ${{ github.event.inputs.tag_name || github.ref }}
+          ref: ${{ github.ref }}
 
       - name: Mark scripts executable
         run: chmod +x scripts/*.sh
+
+      - name: Prepare release staging directory
+        run: mkdir -p dist/release
 
       - name: Download packaged artifacts
         uses: actions/download-artifact@v4
@@ -439,31 +366,27 @@ jobs:
           path: dist/release
           merge-multiple: true
 
+      - name: Verify staged release assets
+        run: |
+          asset_count="$(find dist/release -maxdepth 1 -type f | wc -l | tr -d ' ')"
+          if [[ "$asset_count" == "0" ]]; then
+            printf 'Error: no packaged artifacts were produced by upstream jobs.\n' >&2
+            exit 1
+          fi
+          printf 'Staged %s release asset(s).\n' "$asset_count"
+
       - name: Generate release body
         env:
-          TARGET_TAG: ${{ github.event.inputs.tag_name || github.ref_name }}
+          TARGET_TAG: ${{ github.ref_name }}
           ASSET_DIR: dist/release
           OUTPUT_FILE: dist/release-body.md
         run: ./scripts/generate_release_body.sh
 
-      - name: Show collected assets
-        run: find dist/release -maxdepth 1 -type f | sort
-
-      - name: Detect available assets
-        id: assets
-        run: |
-          if find dist/release -maxdepth 1 -type f | grep -q .; then
-            echo "has_files=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_files=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Publish release
-        if: steps.assets.outputs.has_files == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
-          name: 云卷 ${{ github.event.inputs.tag_name || github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          name: 云卷 ${{ github.ref_name }}
           body_path: dist/release-body.md
           files: dist/release/*
           fail_on_unmatched_files: true

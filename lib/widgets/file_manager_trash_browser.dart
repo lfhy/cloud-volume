@@ -5,6 +5,7 @@ import 'package:remote_storage/models/trash_item.dart';
 import 'package:remote_storage/widgets/desktop_context_menu_region.dart';
 import 'package:remote_storage/widgets/file_grid_item.dart';
 import 'package:remote_storage/widgets/file_list_tile.dart';
+import 'package:remote_storage/widgets/trash_row_actions.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'package:remote_storage/widgets/app_loading_indicator.dart';
@@ -12,6 +13,8 @@ import 'package:remote_storage/widgets/app_loading_indicator.dart';
 const String _trashContextMenuGroup = 'file_manager_trash_browser';
 
 class FileManagerTrashBrowser extends StatelessWidget {
+  static const double _gridChildAspectRatio = 0.9;
+
   const FileManagerTrashBrowser({
     super.key,
     required this.items,
@@ -51,7 +54,7 @@ class FileManagerTrashBrowser extends StatelessWidget {
           crossAxisCount: crossAxisCount,
           mainAxisSpacing: 6,
           crossAxisSpacing: 6,
-          childAspectRatio: 0.92,
+          childAspectRatio: _gridChildAspectRatio,
           children: [
             ...items.map(
               (item) => _wrapWithContextMenu(
@@ -174,6 +177,15 @@ class FileManagerTrashBrowser extends StatelessWidget {
                     style: headerTextStyle,
                   ),
                 ),
+                const SizedBox(width: 16),
+                SizedBox(
+                  width: TrashRowActions.actionColumnWidth,
+                  child: Text(
+                    '操作',
+                    textAlign: TextAlign.right,
+                    style: headerTextStyle,
+                  ),
+                ),
               ],
             ),
           ),
@@ -201,6 +213,12 @@ class FileManagerTrashBrowser extends StatelessWidget {
                     modifiedLabel: item.deletedAt,
                     onTap: () => onRestore(item),
                     showDivider: index != items.length - 1 || loadingMore,
+                    trailing: TrashRowActions(
+                      deletedLabel: item.deletedAt,
+                      busy: false,
+                      onRestore: () => onRestore(item),
+                      onDeletePermanently: () => onDeletePermanently(item),
+                    ),
                   ),
                 );
               },

@@ -118,6 +118,7 @@ class RemoteStorageBridge {
     final executableDir = File(Platform.resolvedExecutable).absolute.parent;
     final candidates = <String>[
       path.join(executableDir.path, libraryName),
+      if (Platform.isLinux) path.join(executableDir.path, 'lib', libraryName),
       if (Platform.isMacOS)
         path.normalize(
           path.join(executableDir.path, '..', 'Frameworks', libraryName),

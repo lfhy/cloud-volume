@@ -51,9 +51,7 @@ func HeadObjectContext(
 		Size:  aws.ToInt64(out.ContentLength),
 		IsDir: false,
 	}
-	if out.LastModified != nil {
-		info.LastModified = out.LastModified.Format("2006-01-02 15:04:05")
-	}
+	info.LastModified = formatObjectLastModified(out.LastModified)
 	return info, nil
 }
 
@@ -69,17 +67,25 @@ func ListObjectsContext(
 	bucket,
 	prefix string,
 ) ([]ObjectInfo, error) {
+	if ctx == nil {
+		ctx = Ctx()
+	}
 	nextToken := ""
 	result := make([]ObjectInfo, 0)
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		pageCtx, cancel := pageRequestContext(ctx)
 		page, err := ListObjectsPageContext(
-			ctx,
+			pageCtx,
 			cfg,
 			bucket,
 			prefix,
 			nextToken,
 			1000,
 		)
+		cancel()
 		if err != nil {
 			return nil, err
 		}
@@ -93,6 +99,14 @@ func ListObjectsContext(
 		return []ObjectInfo{}, nil
 	}
 	return result, nil
+}
+
+func pageRequestContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = Ctx()
+	}
+	base := context.WithoutCancel(parent)
+	return context.WithTimeout(base, objectListTimeout)
 }
 
 func isRootTrashKey(cfg storageconfig.RemoteStorageConfig, key string) bool {

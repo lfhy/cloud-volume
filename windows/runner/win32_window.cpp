@@ -2,6 +2,7 @@
 
 #include <dwmapi.h>
 #include <flutter_windows.h>
+#include <windowsx.h>
 
 #include "resource.h"
 
@@ -14,6 +15,19 @@ namespace {
 /// See: https://docs.microsoft.com/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
+#endif
+
+// Rounded-corner support is available on Windows 11 and ignored on older
+// systems, so the host can request softer chrome without branching by OS.
+#ifndef DWMWA_WINDOW_CORNER_PREFERENCE
+#define DWMWA_WINDOW_CORNER_PREFERENCE 33
+#endif
+
+#ifndef DWMWCP_ROUND
+#define DWMWCP_DEFAULT 0
+#define DWMWCP_DONOTROUND 1
+#define DWMWCP_ROUND 2
+#define DWMWCP_ROUNDSMALL 3
 #endif
 
 constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
@@ -35,6 +49,11 @@ using EnableNonClientDpiScaling = BOOL __stdcall(HWND hwnd);
 // scale factor
 int Scale(int source, double scale_factor) {
   return static_cast<int>(source * scale_factor);
+}
+
+DWORD GetBorderlessWindowStyle() {
+  return WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX |
+         WS_SYSMENU;
 }
 
 // Dynamically loads the |EnableNonClientDpiScaling| from the User32 module.
@@ -135,7 +154,7 @@ bool Win32Window::Create(const std::wstring& title,
   double scale_factor = dpi / 96.0;
 
   HWND window = CreateWindow(
-      window_class, title.c_str(), WS_OVERLAPPEDWINDOW,
+      window_class, title.c_str(), GetBorderlessWindowStyle(),
       Scale(origin.x, scale_factor), Scale(origin.y, scale_factor),
       Scale(size.width, scale_factor), Scale(size.height, scale_factor),
       nullptr, nullptr, GetModuleHandle(nullptr), this);
@@ -179,6 +198,29 @@ Win32Window::MessageHandler(HWND hwnd,
                             WPARAM const wparam,
                             LPARAM const lparam) noexcept {
   switch (message) {
+    case WM_NCCALCSIZE:
+      if (wparam == TRUE) {
+        auto* params = reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam);
+        if (params != nullptr && IsZoomed(hwnd)) {
+          const UINT dpi = GetDpiForWindow(hwnd);
+          const int frame_x = GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi) +
+                              GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+          const int frame_y = GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi) +
+                              GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+          params->rgrc[0].left += frame_x;
+          params->rgrc[0].right -= frame_x;
+          params->rgrc[0].bottom -= frame_y;
+        }
+        return 0;
+      }
+      break;
+
+    case WM_NCHITTEST:
+      return HitTestNonClientArea(hwnd, lparam);
+
+    case WM_NCACTIVATE:
+      return TRUE;
+
     case WM_DESTROY:
       window_handle_ = nullptr;
       Destroy();
@@ -263,6 +305,37 @@ void Win32Window::SetQuitOnClose(bool quit_on_close) {
   quit_on_close_ = quit_on_close;
 }
 
+void Win32Window::Minimize() {
+  if (window_handle_ != nullptr) {
+    ShowWindow(window_handle_, SW_MINIMIZE);
+  }
+}
+
+void Win32Window::MaximizeOrRestore() {
+  if (window_handle_ == nullptr) {
+    return;
+  }
+  ShowWindow(window_handle_, IsWindowMaximized() ? SW_RESTORE : SW_MAXIMIZE);
+}
+
+void Win32Window::Close() {
+  if (window_handle_ != nullptr) {
+    PostMessage(window_handle_, WM_CLOSE, 0, 0);
+  }
+}
+
+void Win32Window::StartDrag() {
+  if (window_handle_ == nullptr) {
+    return;
+  }
+  ReleaseCapture();
+  SendMessage(window_handle_, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+}
+
+bool Win32Window::IsWindowMaximized() const {
+  return window_handle_ != nullptr && ::IsZoomed(window_handle_);
+}
+
 bool Win32Window::OnCreate() {
   // No-op; provided for subclasses.
   return true;
@@ -285,4 +358,59 @@ void Win32Window::UpdateTheme(HWND const window) {
     DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE,
                           &enable_dark_mode, sizeof(enable_dark_mode));
   }
+
+  const int corner_preference = DWMWCP_ROUND;
+  DwmSetWindowAttribute(window, DWMWA_WINDOW_CORNER_PREFERENCE,
+                        &corner_preference, sizeof(corner_preference));
+}
+
+LRESULT Win32Window::HitTestNonClientArea(HWND hwnd,
+                                          LPARAM lparam) const noexcept {
+  POINT cursor_point = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+  ScreenToClient(hwnd, &cursor_point);
+
+  RECT window_rect;
+  GetClientRect(hwnd, &window_rect);
+
+  const UINT dpi = GetDpiForWindow(hwnd);
+  const int frame_x = GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi) +
+                      GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+  const int frame_y = GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi) +
+                      GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+
+  const bool resize_left = cursor_point.x >= window_rect.left &&
+                           cursor_point.x < window_rect.left + frame_x;
+  const bool resize_right = cursor_point.x < window_rect.right &&
+                            cursor_point.x >= window_rect.right - frame_x;
+  const bool resize_top = cursor_point.y >= window_rect.top &&
+                          cursor_point.y < window_rect.top + frame_y;
+  const bool resize_bottom = cursor_point.y < window_rect.bottom &&
+                             cursor_point.y >= window_rect.bottom - frame_y;
+
+  if (resize_top && resize_left) {
+    return HTTOPLEFT;
+  }
+  if (resize_top && resize_right) {
+    return HTTOPRIGHT;
+  }
+  if (resize_bottom && resize_left) {
+    return HTBOTTOMLEFT;
+  }
+  if (resize_bottom && resize_right) {
+    return HTBOTTOMRIGHT;
+  }
+  if (resize_left) {
+    return HTLEFT;
+  }
+  if (resize_right) {
+    return HTRIGHT;
+  }
+  if (resize_top) {
+    return HTTOP;
+  }
+  if (resize_bottom) {
+    return HTBOTTOM;
+  }
+
+  return HTCLIENT;
 }
