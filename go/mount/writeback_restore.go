@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	s3ops "remote-storage/go/s3"
 )
 
 func (q *writebackQueue) restorePersistedEntries() error {
@@ -28,6 +30,13 @@ func (q *writebackQueue) restorePersistedEntries() error {
 			continue
 		}
 		q.entries[entry.virtualPath] = entry
+		if access := q.currentAccess(); access != nil {
+			access.cache.storeLocalFile(entry.virtualPath, entry.localPath, s3ops.ObjectInfo{
+				Key:          entry.virtualPath,
+				Size:         entry.size,
+				LastModified: time.Unix(0, entry.modTimeUnixNano).Format("2006-01-02 15:04:05"),
+			})
+		}
 		s3opsQueueTransferForEntry(q.currentAccess(), entry)
 		delay := time.Until(entry.dueAt)
 		if entry.dueAt.IsZero() || delay < 0 {

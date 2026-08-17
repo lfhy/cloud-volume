@@ -12,6 +12,10 @@ import (
 // MaterializeDirectory synchronously lists one directory from the provider and
 // commits the resulting dirents/inodes in one transaction.
 func (s *Service) MaterializeDirectory(ctx context.Context, dirInode uint64) error {
+	directoryPath, err := s.Path(dirInode)
+	if err != nil {
+		return err
+	}
 	items, err := listProviderChildrenImpl(ctx, s.backendSnapshot(), s.store.namespace.Bucket, dirInode, s.Path)
 	if err != nil {
 		return err
@@ -44,7 +48,7 @@ func (s *Service) MaterializeDirectory(ctx context.Context, dirInode uint64) err
 		}
 		nextByKey := map[string]Dirent{}
 		for _, item := range items {
-			name, isDir, err := splitListedName(item.Key)
+			name, isDir, err := splitListedChild(directoryPath, item.Key)
 			if err != nil {
 				continue
 			}

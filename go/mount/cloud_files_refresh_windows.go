@@ -227,6 +227,9 @@ func (h *cloudFilesHydrator) preserveLocalProjection(
 	if clean == "" || h.access.cache.isMarkedDeleted(clean) {
 		return true
 	}
+	if _, local := h.access.cache.localEntry(clean); local {
+		return true
+	}
 	return h.access.writeback != nil && h.access.writeback.hasPendingAtOrBelow(clean, isDir)
 }
 

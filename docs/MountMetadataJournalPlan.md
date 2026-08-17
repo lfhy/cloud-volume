@@ -205,6 +205,13 @@ metadata.db
 - A pre-registration `CleanupStale`/`Start` failure closes access and metadata normally. The exception is a platform backend that has already left a live mount and rejects cleanup `Stop`: the manager registers that session with an error so a later unmount can retry rather than losing its durable queue.
 - The next M3 read batch must still merge metadata only as the remote base: overlay and tombstones before provider materialization, then local files, restored/queued writeback, and directory-marker state. Legacy writes remain outside the metadata journal until M6.
 
+### M3b mount read path (completed 2026-08-17)
+
+- `metadata.Service.ListDirectory(path)` and `RefreshDirectory(path)` hide root inode and page-cursor details from mount adapters. Provider keys are accepted as either directory-relative or view-relative, but deep descendants returned by a malformed one-level listing are rejected instead of being flattened into the wrong directory.
+- `bucketAccess.listDirectory`, `statPath`, `ensureLocalFile`, WebDAV/FUSE/WinFsp callers, Cloud Files remote placeholder enumeration/stat, and the bounded remote poller now use that persistent metadata tree whenever the mount has a `ProfileID`. The unscoped mount backend remains only for byte transfer after the metadata path has authorized the object.
+- Metadata is the remote base, not an overlay replacement: system overlay and mount-trash handling stay first; legacy tombstones hide both exact paths and descendants; local files, restored writeback records, and directory markers override the base. File/directory collision merging is keyed by normalized path, so `name` and `name/` cannot render twice. Restored durable uploads repopulate their local cache marker before the first read.
+- Remote polling re-materializes the persistent directory then gives Cloud Files its metadata-only remote base; placeholder refresh also preserves local directory markers as well as pending writeback and tombstones. Stable platform OID projection and Desired+journal writes remain M5/M6 work.
+
 ## 推荐实施顺序（锁定）
 
 **先完成本地 inode metadata + 页面/mount 统一视图，再做远端同步和跨设备 feed。** 远端 change feed 的 receiver 必须把事件应用到唯一的本地树，才能正确判断“本地 pending”与“远端已变”；在两套缓存并存时先做 feed，只会重新制造 `NotifyExternal*` 式旁路修补。
@@ -278,7 +285,7 @@ Phase 0 的止血修复可以并行落地，但不改变上述主线顺序。
 
 1. **M1 存储核心**：ProfileID、namespace registry、bbolt schema、inode allocator、dirent B+Tree、事务 API、reset guard、单元测试。
 2. **M2 物化与读 API**：远端 listing ingest、listing_state、ListPage/Stat/Path、stale cursor、分页 API。
-3. **M3 mount 读接入**：WebDAV/FUSE/WinFsp/Cloud Files readdir/stat 全部改读 metadata；本地 overlay 保持旁路。
+3. **M3 mount 读接入（已完成）**：WebDAV/FUSE/WinFsp/Cloud Files readdir/stat 全部改读 metadata；本地 overlay 保持旁路，轮询刷新同一持久远端基底。
 4. **M4 页面读接入**：bridge list/stat 改走 metadata；删除 ListMountedObjectPage 会话分支；页面分页适配 stale cursor。
 5. **M5 rename 事务与内部身份关联**：inode rename；各平台 adapter 保证展示文件号能稳定解析回 OID（Linux FUSE 可 `Ino=OID`，WinFsp/Cloud Files 可直用或查表，macOS WebDAV 保持内部映射）。
 6. **M6 写入口最小同步**：mount/page 写操作更新 Desired+journal；远端成功点 ingest Remote 状态。

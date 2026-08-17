@@ -101,6 +101,17 @@ func (c *bucketCache) localFile(virtualPath string) (localFile, bool) {
 	return item, ok
 }
 
+// localEntry returns only local-first state, never a TTL-bound remote object.
+// Metadata-backed mounts must not let a legacy remote cache shadow the durable
+// inode view, but staged files and directory markers still take precedence.
+func (c *bucketCache) localEntry(virtualPath string) (s3ops.ObjectInfo, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	item, ok := c.localEntries[cleanVirtualPath(virtualPath)]
+	return item.info, ok
+}
+
 func (c *bucketCache) isLocalDirectory(virtualPath string) bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -261,14 +272,14 @@ func (c *bucketCache) mergeLocalFiles(
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	byKey := map[string]s3ops.ObjectInfo{}
+	byPath := map[string]s3ops.ObjectInfo{}
 	cleanPrefix := cleanVirtualPath(virtualPrefix)
 	for _, item := range items {
-		key := cleanVirtualPath(strings.TrimSuffix(item.Key, "/"))
-		if c.hiddenByDeleteLocked(key) {
+		path := cleanVirtualPath(strings.TrimSuffix(item.Key, "/"))
+		if c.hiddenByDeleteLocked(path) {
 			continue
 		}
-		byKey[item.Key] = item
+		byPath[path] = item
 	}
 
 	for key, item := range c.localEntries {
@@ -278,11 +289,11 @@ func (c *bucketCache) mergeLocalFiles(
 		if c.hiddenByDeleteLocked(key) {
 			continue
 		}
-		byKey[item.info.Key] = item.info
+		byPath[cleanVirtualPath(strings.TrimSuffix(item.info.Key, "/"))] = item.info
 	}
 
-	out := make([]s3ops.ObjectInfo, 0, len(byKey))
-	for _, item := range byKey {
+	out := make([]s3ops.ObjectInfo, 0, len(byPath))
+	for _, item := range byPath {
 		out = append(out, item)
 	}
 	return out

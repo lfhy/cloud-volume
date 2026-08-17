@@ -240,15 +240,31 @@ func DecodeCursor(token string) (Cursor, error) {
 	return cursor, nil
 }
 
-func splitListedName(key string) (string, bool, error) {
-	trimmed := strings.Trim(strings.TrimSpace(key), "/")
-	if trimmed == "" {
+// splitListedChild accepts provider keys that are either directory-relative or
+// view-relative, while rejecting deep descendants from a misbehaving listing.
+// Flattening a nested key into its basename would create the child under the
+// wrong inode and make a later mount read disagree with the page view.
+func splitListedChild(parentPath, key string) (string, bool, error) {
+	rawKey := strings.TrimSpace(key)
+	isDir := strings.HasSuffix(rawKey, "/")
+	trimmedKey := strings.Trim(rawKey, "/")
+	if trimmedKey == "" {
 		return "", false, fmt.Errorf("metadata: empty listed key")
 	}
-	if index := strings.LastIndex(trimmed, "/"); index >= 0 {
-		trimmed = trimmed[index+1:]
+	parent := strings.Trim(strings.TrimSpace(parentPath), "/")
+	relative := trimmedKey
+	if parent != "" {
+		switch {
+		case trimmedKey == parent:
+			return "", false, fmt.Errorf("metadata: listing returned its parent")
+		case strings.HasPrefix(trimmedKey, parent+"/"):
+			relative = strings.TrimPrefix(trimmedKey, parent+"/")
+		}
 	}
-	return trimmed, strings.HasSuffix(strings.TrimSpace(key), "/"), nil
+	if relative == "" || strings.Contains(relative, "/") {
+		return "", false, fmt.Errorf("metadata: listing returned non-child key %q", key)
+	}
+	return relative, isDir, nil
 }
 
 func objectFromInode(record Inode, path string) Object {

@@ -3,6 +3,8 @@ package metadata
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
@@ -48,6 +50,60 @@ func TestManagerAcquirePreservesRootPrefixScope(t *testing.T) {
 	}
 	if got := scoped.Root(); got != "account/view" {
 		t.Fatalf("scoped backend root = %q, want account/view", got)
+	}
+}
+
+func TestMaterializeDirectoryUsesRootPrefixInProviderRequest(t *testing.T) {
+	paths := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != "PROPFIND" {
+			http.Error(writer, "expected PROPFIND", http.StatusMethodNotAllowed)
+			return
+		}
+		select {
+		case paths <- request.URL.EscapedPath():
+		default:
+		}
+		writer.Header().Set("Content-Type", "application/xml")
+		writer.WriteHeader(http.StatusMultiStatus)
+		_, _ = writer.Write([]byte(`<?xml version="1.0"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response><D:href>/archive/2026/</D:href><D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype><D:getcontentlength>0</D:getcontentlength></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>
+  <D:response><D:href>/archive/2026/report.txt</D:href><D:propstat><D:prop><D:resourcetype></D:resourcetype><D:getcontentlength>3</D:getcontentlength></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>
+</D:multistatus>`))
+	}))
+	defer server.Close()
+
+	manager := NewManager(filepath.Join(t.TempDir(), "metadata"))
+	defer manager.RemoveAllForTest()
+	config := storageconfig.RemoteStorageConfig{
+		ProfileID:      "scoped-webdav-profile",
+		StorageType:    storageconfig.StorageTypeWebDAV,
+		Endpoint:       server.URL,
+		WebDAVUsername: "user",
+		WebDAVPassword: "password",
+		RootPrefix:     "archive/2026",
+		CacheDirectory: t.TempDir(),
+	}
+	handle, err := manager.Acquire(config, "bucket")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer handle.Release()
+	items, err := handle.Service.ListDirectory(context.Background(), "")
+	if err != nil {
+		t.Fatalf("materialize root: %v", err)
+	}
+	select {
+	case got := <-paths:
+		if got != "/archive/2026/" {
+			t.Fatalf("provider path = %q, want /archive/2026/", got)
+		}
+	default:
+		t.Fatal("metadata materialization did not issue a provider request")
+	}
+	if len(items) != 1 || items[0].Key != "report.txt" {
+		t.Fatalf("scoped metadata result = %+v", items)
 	}
 }
 

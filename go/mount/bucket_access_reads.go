@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	s3ops "remote-storage/go/s3"
 )
@@ -29,6 +30,9 @@ func (a *bucketAccess) listDirectoryWithPrefetch(
 	}
 	if a.overlay.handles(virtualPrefix) {
 		return a.overlay.listDirectory(virtualPrefix)
+	}
+	if a.metadataService() != nil {
+		return a.listMetadataDirectory(ctx, virtualPrefix, allowPrefetch)
 	}
 	if items, ok := a.cache.cachedList(cleanVirtualPath(virtualPrefix)); ok {
 		merged := a.filterTrashItems(
@@ -82,14 +86,29 @@ func (a *bucketAccess) statPath(
 	if item, ok := a.cache.localFile(clean); ok {
 		return item.info, nil
 	}
-	if item, ok := a.cache.cachedObject(clean); ok {
+	if item, ok := a.cache.localEntry(clean); ok {
 		return item, nil
 	}
 	if a.cache.isMarkedDeleted(clean) {
 		return s3ops.ObjectInfo{}, os.ErrNotExist
 	}
-
 	parentPrefix := parentVirtualPrefix(clean)
+	if a.cache.isLocalDirectory(parentPrefix) {
+		// Children of a directory created in this mount are represented by the
+		// local overlay until writeback catches up, so an absent child is local.
+		return s3ops.ObjectInfo{}, os.ErrNotExist
+	}
+	if a.metadataService() != nil {
+		item, err := a.metadataStat(ctx, clean)
+		if err != nil {
+			return s3ops.ObjectInfo{}, err
+		}
+		return item.info, nil
+	}
+	if item, ok := a.cache.cachedObject(clean); ok {
+		return item, nil
+	}
+
 	if items, ok := a.cache.cachedList(parentPrefix); ok {
 		for _, item := range a.cache.mergeLocalFiles(parentPrefix, items) {
 			if item.Key == clean || item.Key == ensureDirSuffix(clean) {
@@ -102,12 +121,6 @@ func (a *bucketAccess) statPath(
 		// turn a many-small-file copy into one upstream Stat call per file.
 		return s3ops.ObjectInfo{}, os.ErrNotExist
 	}
-	if a.cache.isLocalDirectory(parentPrefix) {
-		// Children of a directory created in this mount are represented by the
-		// local overlay until writeback catches up, so an absent child is local.
-		return s3ops.ObjectInfo{}, os.ErrNotExist
-	}
-
 	flightKey := "stat:" + clean
 	value, err, _ := a.group.Do(flightKey, func() (any, error) {
 		info, err := a.fetchStat(ctx, clean)
@@ -147,14 +160,10 @@ func (a *bucketAccess) ensureLocalFile(
 		}
 	}
 
-	info, err := a.fetchStat(ctx, clean)
+	info, err := a.statPath(ctx, clean)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			a.cache.invalidatePath(clean)
-		}
 		return "", s3ops.ObjectInfo{}, err
 	}
-	a.cache.storeObject(clean, info)
 	if info.IsDir {
 		return "", s3ops.ObjectInfo{}, fmt.Errorf("%s is a directory", clean)
 	}
@@ -187,15 +196,15 @@ func (a *bucketAccess) mergeOverlayItems(
 	if err != nil || len(overlayItems) == 0 {
 		return items
 	}
-	byKey := make(map[string]s3ops.ObjectInfo, len(items)+len(overlayItems))
+	byPath := make(map[string]s3ops.ObjectInfo, len(items)+len(overlayItems))
 	for _, item := range items {
-		byKey[item.Key] = item
+		byPath[cleanVirtualPath(strings.TrimSuffix(item.Key, "/"))] = item
 	}
 	for _, item := range overlayItems {
-		byKey[item.Key] = item
+		byPath[cleanVirtualPath(strings.TrimSuffix(item.Key, "/"))] = item
 	}
-	merged := make([]s3ops.ObjectInfo, 0, len(byKey))
-	for _, item := range byKey {
+	merged := make([]s3ops.ObjectInfo, 0, len(byPath))
+	for _, item := range byPath {
 		merged = append(merged, item)
 	}
 	return merged
@@ -222,9 +231,18 @@ func (a *bucketAccess) readRemoteRange(
 	offset,
 	length int64,
 ) ([]byte, error) {
+	clean := cleanVirtualPath(virtualPath)
+	if a.cache.isMarkedDeleted(clean) {
+		return nil, os.ErrNotExist
+	}
+	if a.metadataService() != nil {
+		if _, err := a.metadataStat(ctx, clean); err != nil {
+			return nil, err
+		}
+	}
 	timeoutCtx, cancel := a.withTransferTimeout(ctx)
 	defer cancel()
-	data, err := a.backend.ReadObjectRange(timeoutCtx, a.bucket, a.remoteKey(virtualPath), offset, length)
+	data, err := a.backend.ReadObjectRange(timeoutCtx, a.bucket, a.remoteKey(clean), offset, length)
 	if err != nil && errors.Is(err, os.ErrNotExist) {
 		// Remote file was deleted while the metadata cache was still stale.
 		// Invalidate the cached entries so subsequent access re-fetches from remote.

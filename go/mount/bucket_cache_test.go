@@ -46,6 +46,18 @@ func TestBucketCacheMergeLocalEntriesAndTombstones(t *testing.T) {
 	}
 }
 
+func TestBucketCacheMergeNormalizesFileDirectoryCollision(t *testing.T) {
+	t.Parallel()
+
+	cache := newBucketCache(time.Minute, time.Minute)
+	localPath := createTempFile(t, t.TempDir(), "report", "draft")
+	cache.storeLocalFile("report", localPath, s3ops.ObjectInfo{Size: 5})
+	items := cache.mergeLocalFiles("", []s3ops.ObjectInfo{{Key: "report/", IsDir: true}})
+	if len(items) != 1 || items[0].Key != "report" || items[0].IsDir {
+		t.Fatalf("file/directory collision produced duplicate or wrong item: %+v", items)
+	}
+}
+
 func TestBucketCacheRenameLocalTree(t *testing.T) {
 	t.Parallel()
 

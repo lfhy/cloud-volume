@@ -277,6 +277,10 @@ func TestWritebackQueueRestoresPersistedEntries(t *testing.T) {
 	if reloaded.taskID != originalTaskID {
 		t.Fatalf("expected task %q after restore, got %q", originalTaskID, reloaded.taskID)
 	}
+	local, ok := access.cache.localFile(virtualPath)
+	if !ok || local.localPath != localPath || local.info.Size != int64(len("payload")) {
+		t.Fatalf("restored writeback did not restore local read marker: %+v ok=%t", local, ok)
+	}
 }
 
 func TestFlushNowReschedulesModifiedRunningEntry(t *testing.T) {
