@@ -218,6 +218,12 @@ metadata.db
 - WinFsp enables `use_ino`, carries OIDs through cached directory/open-file projections, and publishes them through `Stat_t.Ino`/Explorer's file-index path. The root also resolves to metadata inode 1 when a namespace is available.
 - Cloud Files encodes `cloud-volume:v1:<namespace>:<oid>` in `FileIdentity`. Its remote fingerprint is now separate, so a same-OID, same-size ETag/mtime overwrite still updates/dehydrates the placeholder. Poll callbacks preserve OID-bearing metadata objects instead of downcasting them before projection.
 
+### M6a path write facade (completed 2026-08-17)
+
+- `metadata.Service` now exposes `CreateDirectoryPath`, `WritePath`, `RenamePath`, and `DeletePath`, so a caller can make one durable Desired-tree/journal mutation without resolving inode IDs itself. Path-level mutations are ordered; a failed write-journal append releases the just-staged generation rather than leaking protected chunks.
+- A zero generation passed to `StageWriteForName` is reserved durably before chunks are staged. Rapid writes of one path therefore retain independent `ContentRef`s and journal generations.
+- Re-materializing a provider directory suppresses pending rename sources and tombstones, preventing a stale remote listing from recreating a path the local Desired tree has already removed or moved. Mount/page call sites remain M6b/M6c work.
+
 ## 推荐实施顺序（锁定）
 
 **先完成本地 inode metadata + 页面/mount 统一视图，再做远端同步和跨设备 feed。** 远端 change feed 的 receiver 必须把事件应用到唯一的本地树，才能正确判断“本地 pending”与“远端已变”；在两套缓存并存时先做 feed，只会重新制造 `NotifyExternal*` 式旁路修补。
@@ -294,7 +300,7 @@ Phase 0 的止血修复可以并行落地，但不改变上述主线顺序。
 3. **M3 mount 读接入（已完成）**：WebDAV/FUSE/WinFsp/Cloud Files readdir/stat 全部改读 metadata；本地 overlay 保持旁路，轮询刷新同一持久远端基底。
 4. **M4 页面读接入**：bridge list/stat 改走 metadata；删除 ListMountedObjectPage 会话分支；页面分页适配 stale cursor。
 5. **M5 rename 事务与内部身份关联（已完成）**：inode rename；各平台 adapter 保证 metadata-backed 项的展示文件号能稳定解析回 OID（Linux FUSE 直接用 `Ino=OID`，WinFsp/Cloud Files 直用 OID，macOS WebDAV 保持内部映射）。
-6. **M6 写入口最小同步**：mount/page 写操作更新 Desired+journal；远端成功点 ingest Remote 状态。
+6. **M6 写入口最小同步**：M6a path facade 已完成；mount/page 写操作仍需接入 Desired+journal，远端成功点仍需 ingest Remote 状态。
 7. **M7 一致性与验收**：双端视图一致性测试、rename 复杂度测试、重建测试、全量 `go test ./...` + `flutter analyze`。
 
 ### Phase 0 — 先止血（不依赖新架构）

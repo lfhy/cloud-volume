@@ -99,8 +99,30 @@ func (s *Service) StageWriteForName(parent uint64, name string, generation uint6
 	if err != nil {
 		return 0, ContentRef{}, err
 	}
+	if generation == 0 {
+		generation, err = s.reserveContentGeneration(inode)
+		if err != nil {
+			return 0, ContentRef{}, err
+		}
+	}
 	ref, err := s.stagePendingContent(inode, generation, source, size)
 	return inode, ref, err
+}
+
+// reserveContentGeneration gives concurrent path-level writes distinct chunk
+// reference keys before their content is staged outside the journal transaction.
+func (s *Service) reserveContentGeneration(inode uint64) (uint64, error) {
+	var generation uint64
+	err := s.store.update(func(tx boltTxT) error {
+		record, err := getInode(tx, inode)
+		if err != nil {
+			return err
+		}
+		generation = record.ContentGeneration + 1
+		record.ContentGeneration = generation
+		return putInode(tx, record)
+	})
+	return generation, err
 }
 
 func (s *Service) ensureWriteInode(parent uint64, name string) (uint64, error) {

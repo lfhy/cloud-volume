@@ -46,6 +46,7 @@ func (s *Service) MaterializeDirectory(ctx context.Context, dirInode uint64) err
 				priorByKey[key] = prior
 			}
 		}
+		suppressedRemoteKeys := pendingRemoteKeysToSuppress(tx, dirInode)
 		nextByKey := map[string]Dirent{}
 		for _, item := range items {
 			name, isDir, err := splitListedChild(directoryPath, item.Key)
@@ -53,6 +54,9 @@ func (s *Service) MaterializeDirectory(ctx context.Context, dirInode uint64) err
 				continue
 			}
 			nameKey := MakeNameKey(name)
+			if suppressedRemoteKeys[nameKey] {
+				continue
+			}
 			existing := remoteByKey[nameKey]
 			inode := existing.ChildID
 			if inode == 0 {
@@ -112,6 +116,31 @@ func (s *Service) MaterializeDirectory(ctx context.Context, dirInode uint64) err
 		}
 		return putListingState(tx, ListingState{Inode: dirInode, Materialized: true, Revision: parent.LocalRevision, VerifiedAtUnixNano: time.Now().UnixNano()})
 	})
+}
+
+// pendingRemoteKeysToSuppress keeps a remote listing from reviving the source
+// of a local rename or a tombstoned entry before its journal work confirms.
+func pendingRemoteKeysToSuppress(tx boltTx, parent uint64) map[string]bool {
+	suppressed := map[string]bool{}
+	inodes := tx.Bucket([]byte(bucketInodes))
+	if inodes == nil {
+		return suppressed
+	}
+	_ = inodes.ForEach(func(_, value []byte) error {
+		var record Inode
+		if decodeJSON(value, &record) != nil || record.RemoteParentID != parent || record.RemoteName == "" {
+			return nil
+		}
+		if record.State != StatePending && record.State != StateConflict && record.State != StateTombstone {
+			return nil
+		}
+		remoteKey := MakeNameKey(record.RemoteName)
+		if record.State == StateTombstone || record.DesiredParentID != parent || MakeNameKey(record.DesiredName) != remoteKey {
+			suppressed[remoteKey] = true
+		}
+		return nil
+	})
+	return suppressed
 }
 
 // StatPath resolves one desired-tree path, materializing ancestors as needed.

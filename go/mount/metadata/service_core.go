@@ -16,6 +16,7 @@ type Service struct {
 	quiet       time.Duration
 	readOnly    bool
 	operationMu sync.RWMutex
+	pathWriteMu sync.Mutex
 	chunkMu     sync.Mutex
 }
 
