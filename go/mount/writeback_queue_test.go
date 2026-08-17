@@ -433,8 +433,24 @@ func TestDrainContextRestoresEveryUnsentEntryAfterQueueBackpressure(t *testing.T
 	if err := queue.drainContext(ctx); err != context.DeadlineExceeded {
 		t.Fatalf("drain context error = %v, want deadline exceeded", err)
 	}
-	if first.queued || second.queued {
-		t.Fatalf("backpressured drain stranded queued entries: first=%t second=%t", first.queued, second.queued)
+	// Releasing the saturated dispatcher must let the canceled drain's due work
+	// enter the ordinary timer path again without another explicit drain call.
+	<-queue.queue
+	seen := map[string]bool{}
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	for len(seen) < 2 {
+		select {
+		case entry := <-queue.queue:
+			if entry != nil {
+				seen[entry.virtualPath] = true
+			}
+		case <-deadline.C:
+			t.Fatalf("canceled drain did not resume entries: %+v", seen)
+		}
+	}
+	if !seen["first.txt"] || !seen["second.txt"] {
+		t.Fatalf("canceled drain resumed the wrong entries: %+v", seen)
 	}
 }
 

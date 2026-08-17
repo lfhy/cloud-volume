@@ -70,7 +70,7 @@ func (q *writebackQueue) drainContext(ctx context.Context) error {
 			)
 			for index, entry := range ready {
 				if err := q.enqueueDrainEntry(ctx, entry); err != nil {
-					q.unqueueDrainEntries(ready[index:])
+					q.resumeUnsentDrainEntries(ready[index:])
 					return err
 				}
 			}
@@ -172,17 +172,20 @@ func (q *writebackQueue) enqueueDrainEntry(ctx context.Context, entry *pendingWr
 	case q.queue <- entry:
 		return nil
 	case <-ctx.Done():
-		q.unqueueDrainEntries([]*pendingWriteback{entry})
 		return ctx.Err()
 	case <-q.stop:
-		q.unqueueDrainEntries([]*pendingWriteback{entry})
 		return fmt.Errorf("writeback queue is closed")
 	}
 }
 
-func (q *writebackQueue) unqueueDrainEntries(entries []*pendingWriteback) {
+// resumeUnsentDrainEntries restores the normal timer path after a bounded
+// drain stops before every due entry reaches the dispatcher.
+func (q *writebackQueue) resumeUnsentDrainEntries(entries []*pendingWriteback) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	if q.closed {
+		return
+	}
 	for _, entry := range entries {
 		if entry == nil {
 			continue
@@ -190,6 +193,8 @@ func (q *writebackQueue) unqueueDrainEntries(entries []*pendingWriteback) {
 		current, ok := q.entries[entry.virtualPath]
 		if ok && current == entry {
 			current.queued = false
+			q.armTimerLocked(current, 0)
+			q.persistEntryLocked(current)
 		}
 	}
 }
