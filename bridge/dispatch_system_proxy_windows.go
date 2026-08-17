@@ -1,14 +1,17 @@
 //go:build windows
+
 // Windows-specific system proxy reader: parses the per-user Internet Settings
 // registry key written by Settings -> Network & Internet -> Proxy. This covers
 // the common manual-proxy case (ProxyEnable=1, ProxyServer="host:port"). PAC
 // auto-config URLs are reported as unavailable because the Dart HTTP stack
 // cannot evaluate proxy scripts.
 package main
+
 import (
-	"strings"
 	"golang.org/x/sys/windows/registry"
+	"strings"
 )
+
 func readSystemProxy() systemProxyResult {
 	k, err := registry.OpenKey(registry.CURRENT_USER,
 		`Software\Microsoft\Windows\CurrentVersion\Internet Settings`,
@@ -43,6 +46,7 @@ func readSystemProxy() systemProxyResult {
 		Port:      port,
 	}
 }
+
 // parseWindowsProxyServer extracts host/port/type from a Windows ProxyServer value.
 func parseWindowsProxyServer(server string) (host, port, ptype string) {
 	entries := strings.Split(server, ";")

@@ -32,13 +32,13 @@ func resolveInstallerDestPath(cfg storageconfig.RemoteStorageConfig, assetName s
 // downloadInstaller fetches the release asset with HTTP Range resume. A complete
 // cached file matching expectedSize is reused without network I/O.
 //
-// When expectedDigest is a non-empty ``sha256:<hex>`` string, the saved file is
+// When expectedDigest is a non-empty “sha256:<hex>“ string, the saved file is
 // re-read and hashed after the size check; this catches mirrors that return
 // same-length-but-wrong content where a size check alone would be fooled.
 //
 // Mirrors (especially ghproxy-style ones) frequently abort the HTTP/2 stream
-// mid-transfer with ``stream error: stream ID N; INTERNAL_ERROR; received from
-// peer``, which surfaces straight to the user as a failed update. The download
+// mid-transfer with “stream error: stream ID N; INTERNAL_ERROR; received from
+// peer“, which surfaces straight to the user as a failed update. The download
 // is retried with Range resume (up to maxFetchAttempts) so a mid-transfer reset
 // heals itself instead of failing the whole task.
 func downloadInstaller(
@@ -303,7 +303,7 @@ func verifyDownloadedSize(destPath string, expectedSize int64) error {
 }
 
 // verifyDownloadedDigest re-reads the saved file and compares its SHA-256
-// against the GitHub asset digest (``sha256:<hex>``). Size alone is not a
+// against the GitHub asset digest (“sha256:<hex>“). Size alone is not a
 // content check: some mirrors return a same-length but wrong payload. The
 // mismatched file is removed so the next attempt starts clean.
 func verifyDownloadedDigest(destPath, expectedDigest string) error {

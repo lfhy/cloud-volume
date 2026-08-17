@@ -23,6 +23,22 @@ type Manager struct {
 	services map[string]*managedService
 }
 
+// RemoveAllForTest stops and removes every open namespace; test helper.
+func (m *Manager) RemoveAllForTest() {
+	m.mu.Lock()
+	managed := make([]*managedService, 0, len(m.services))
+	for id, entry := range m.services {
+		managed = append(managed, entry)
+		delete(m.services, id)
+	}
+	m.mu.Unlock()
+	for _, entry := range managed {
+		entry.worker.Stop()
+		_ = entry.service.Close()
+	}
+	_ = os.RemoveAll(m.baseDir)
+}
+
 type managedService struct {
 	service *Service
 	worker  *Worker
@@ -102,6 +118,38 @@ func (m *Manager) Acquire(config storageconfig.RemoteStorageConfig, bucket strin
 		managed = service
 	}
 	return &AcquireHandle{Service: managed.service, manager: m}, nil
+}
+
+// AcquireWithBackend is Acquire with an explicit provider backend override,
+// used by tests and future injectable transport wiring.
+func (m *Manager) AcquireWithBackend(
+	config storageconfig.RemoteStorageConfig, bucket string, backend Backend,
+) (*AcquireHandle, error) {
+	normalized := config.Normalized()
+	if normalized.ProfileID == "" {
+		return nil, ErrNoProfileID
+	}
+	id := NamespaceID(normalized, bucket)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if existing, ok := m.services[id]; ok {
+		existing.refs++
+		return &AcquireHandle{Service: existing.service, manager: m}, nil
+	}
+	root := filepath.Join(m.baseDir, id)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return nil, err
+	}
+	store, err := OpenStore(Namespace{ID: id, Root: root, Config: normalized, Bucket: bucket})
+	if err != nil {
+		return nil, err
+	}
+	service := NewService(store, backend)
+	service.SetQuietPeriod(quietDuration(normalized))
+	service.SetReadOnly(normalized.BucketSettingsFor(bucket).ReadOnly)
+	managed := &managedService{service: service, worker: NewWorker(service), refs: 1}
+	m.services[id] = managed
+	return &AcquireHandle{Service: service, manager: m}, nil
 }
 
 func (m *Manager) openService(id string, normalized storageconfig.RemoteStorageConfig, bucket string) (*managedService, error) {

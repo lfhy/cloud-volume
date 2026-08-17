@@ -43,8 +43,8 @@ type configBackupTargetArgs struct {
 // differs from the target's stored BackupPassword (e.g. first-run restore on a
 // new machine where no local password is configured).
 type configBackupRestoreTargetArgs struct {
-	Target          storageconfig.ConfigBackupTarget `json:"target"`
-	Key             string                           `json:"key"`
+	Target           storageconfig.ConfigBackupTarget `json:"target"`
+	Key              string                           `json:"key"`
 	PasswordOverride string                           `json:"passwordOverride,omitempty"`
 }
 

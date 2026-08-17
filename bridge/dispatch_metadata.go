@@ -79,6 +79,36 @@ func resolveDirectoryInode(service *bucketmetadata.Service, prefix string) (uint
 	return parsed, nil
 }
 
+// metadataListFunc allows tests to substitute the manager/backend wiring.
+var metadataListFunc = listObjectPageFromMetadata
+
+func swapMetadataListFunc(next func(objectPageArgs) (objectPageWire, bool, error)) func(objectPageArgs) (objectPageWire, bool, error) {
+	previous := metadataListFunc
+	metadataListFunc = next
+	return previous
+}
+
+// metadataListViaHandle runs the listing pipeline against an acquired handle.
+func metadataListViaHandle(handle *bucketmetadata.AcquireHandle, input objectPageArgs) (objectPageWire, bool, error) {
+	dirInode, err := resolveDirectoryInode(handle.Service, input.Prefix)
+	if errors.Is(err, bucketmetadata.ErrNotFound) {
+		return objectPageWire{Items: []objectInfoWire{}, NextToken: ""}, true, nil
+	}
+	if err != nil {
+		return objectPageWire{}, true, err
+	}
+	if input.ForceRefresh {
+		if err := handle.Service.MaterializeDirectory(context.Background(), dirInode); err != nil {
+			return objectPageWire{}, true, err
+		}
+	}
+	page, err := listPageWithStaleRestart(handle.Service, dirInode, input.NextToken, input.PageSize)
+	if err != nil {
+		return objectPageWire{}, true, err
+	}
+	return objectPageAdapter(page), true, nil
+}
+
 // listObjectPageFromMetadata routes page listing through the persistent inode
 // view. Returns handled=false when the namespace cannot be acquired (missing
 // ProfileID) so callers can fall back to the provider-direct path.
@@ -93,24 +123,22 @@ func listObjectPageFromMetadata(input objectPageArgs) (objectPageWire, bool, err
 		if errors.Is(err, bucketmetadata.ErrNoProfileID) {
 			return objectPageWire{}, false, nil
 		}
+		log.Printf("[bridge/metadata] acquire-failed bucket=%q err=%v", input.Bucket, err)
 		return objectPageWire{}, true, err
 	}
 	defer manager.Release(handle)
-	dirInode, err := resolveDirectoryInode(handle.Service, input.Prefix)
-	if errors.Is(err, bucketmetadata.ErrNotFound) {
-		return objectPageWire{Items: []objectInfoWire{}, NextToken: ""}, true, nil
-	}
-	if err != nil {
-		return objectPageWire{}, true, err
-	}
-	page, err := handle.Service.ListPage(context.Background(), dirInode, input.NextToken, input.PageSize)
+	return metadataListViaHandle(handle, input)
+}
+
+// listPageWithStaleRestart transparently restarts pagination from page one
+// when the directory revision changed under the caller's token; until the
+// Dart side learns to reload on stale cursors this degrades to a reload.
+func listPageWithStaleRestart(service *bucketmetadata.Service, dirInode uint64, token string, pageSize int32) (bucketmetadata.Page, error) {
+	page, err := service.ListPage(context.Background(), dirInode, token, pageSize)
 	if errors.Is(err, bucketmetadata.ErrStaleCursor) {
-		return objectPageWire{}, true, staleCursorError{inner: err}
+		return service.ListPage(context.Background(), dirInode, "", pageSize)
 	}
-	if err != nil {
-		return objectPageWire{}, true, err
-	}
-	return objectPageAdapter(page), true, nil
+	return page, err
 }
 
 // staleCursorError marks a stale page token so callers reload from page one.
@@ -118,6 +146,8 @@ type staleCursorError struct{ inner error }
 
 func (e staleCursorError) Error() string { return e.inner.Error() }
 func (e staleCursorError) Unwrap() error { return e.inner }
+
+var _ = staleCursorError{} // retained for future Dart-side stale-cursor signaling
 
 // metadataStatusArgs mirror the page-listing config shape for diagnostics.
 type metadataStatusArgs struct {
