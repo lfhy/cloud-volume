@@ -43,6 +43,46 @@ func (s *Service) collectSubtreeInodes(root uint64) ([]uint64, error) {
 	return descendants, err
 }
 
+// pendingDescendantOp reports whether any descendant of root still has an
+// earlier unfinished journal op. A directory delete must not purge subtree
+// records while a descendant upload is still queued, or its staged content
+// would be destroyed and the orphaned op would retry forever.
+func pendingDescendantOp(tx boltTxT, root, beforeSeq uint64) (uint64, bool) {
+	var pendingInode uint64
+	found := false
+	_ = tx.Bucket([]byte(bucketInodes)).ForEach(func(key, _ []byte) error {
+		inode := decodeUint64(key)
+		if inode == rootInode || inode == root || found {
+			return nil
+		}
+		visited := map[uint64]bool{}
+		current := inode
+		for depth := 0; depth < 1024; depth++ {
+			if current == rootInode {
+				return nil
+			}
+			if current == root {
+				if pendingOpForInode(tx, inode, beforeSeq) {
+					pendingInode = inode
+					found = true
+				}
+				return nil
+			}
+			if visited[current] {
+				return nil
+			}
+			visited[current] = true
+			record, err := getInode(tx, current)
+			if err != nil {
+				return nil
+			}
+			current = record.DesiredParentID
+		}
+		return nil
+	})
+	return pendingInode, found
+}
+
 // purgeInodeRecords removes inode records, dirents, and pending content for a
 // list of inodes whose remote deletes are no longer tracked by journal ops.
 func (s *Service) purgeInodeRecords(inodes []uint64) error {

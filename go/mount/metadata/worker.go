@@ -180,9 +180,19 @@ func (w *Worker) claimDue() []Op {
 			}
 			// Dependency ordering: a write/mkdir must wait for an unfinished
 			// parent mkdir/rename, and any op must wait for a pending delete of
-			// its own inode recorded earlier in the journal.
-			if blocked, reason := w.blocked(tx, op); blocked {
-				_ = reason
+			// its own inode recorded earlier in the journal. Running is a
+			// transient in-process state; a process restart recovers ops that
+			// crashed mid-execution back into the pending queue.
+			if op.State == OpStateRunning {
+				previous := op
+				op.State = OpStatePending
+				op.NextAttemptUnixNano = now
+				if err := putOp(tx, op, previous); err != nil {
+					return err
+				}
+				continue
+			}
+			if blocked, _ := w.blocked(tx, op); blocked {
 				continue
 			}
 			w.running[op.InodeID] = struct{}{}
@@ -329,6 +339,18 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 		record, err := s.remoteTarget(op.InodeID)
 		if err != nil {
 			return err
+		}
+		if record.Kind == KindDirectory {
+			// Wait for queued descendant ops first: purging their staged
+			// content would orphan them into endless retries.
+			var blocked bool
+			_ = s.store.view(func(tx boltTxT) error {
+				_, blocked = pendingDescendantOp(tx, op.InodeID, op.Seq)
+				return nil
+			})
+			if blocked {
+				return fmt.Errorf("metadata worker: delete op %d waiting for pending descendant op", op.Seq)
+			}
 		}
 		if record.RemoteParentID != 0 {
 			if err := s.backend.DeleteObject(ctx, s.store.namespace.Bucket, record.RemoteName, record.Kind == KindDirectory, fmt.Sprintf("metadata-op-%d", op.Seq)); err != nil && !errors.Is(err, os.ErrNotExist) {
