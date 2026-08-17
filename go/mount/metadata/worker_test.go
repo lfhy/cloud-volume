@@ -45,6 +45,25 @@ func TestWorkerExecutesDueMkdir(t *testing.T) {
 	}
 }
 
+func TestConfirmRemoteUsesWorkerBackendSnapshot(t *testing.T) {
+	operationBackend := newFakeBackend()
+	operationBackend.objects["/file.txt"] = storageops.ObjectInfo{Key: "file.txt", Size: 3}
+	service := newTestService(t, operationBackend)
+	if _, err := service.ListPage(context.Background(), rootInode, "", 10); err != nil {
+		t.Fatal(err)
+	}
+	inode, err := service.Resolve(rootInode, "file.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.SetBackend(newFakeBackend())
+	if err := service.confirmRemote(
+		context.Background(), operationBackend, Op{InodeID: inode}, rootInode, "file.txt", true,
+	); err != nil {
+		t.Fatalf("confirmation used a refreshed backend instead of operation backend: %v", err)
+	}
+}
+
 type failingBackend struct {
 	*fakeBackend
 	failNext error

@@ -14,7 +14,8 @@
 - Fixed follow-up mount durability gaps: writeback scope now uses provider-specific stable principals (including FTP/SFTP port and Baidu refresh token), synchronous rename waits for matching running uploads before moving remote objects, and a failed local cache rename leaves the source queue record and bytes intact.
 - Mount sessions now retain their shared metadata namespace through the real platform lifecycle, so transient page reads cannot close a mounted bucket's metadata worker or database. Metadata policy updates are synchronized and release callbacks are idempotent.
 - A shared metadata namespace now refreshes its scoped provider transport when account credentials, access tokens, or proxy settings change, while an already-started remote request keeps a stable backend snapshot.
-- Failed mount startup now closes its access/metadata resources, and legacy rename serialization also gates concurrent mkdir/delete operations while rebasing queued delete targets to the destination path.
+- Failed mount startup now closes its access/metadata resources; if a partial platform start remains live and cleanup Stop fails, the manager retains that session for retry. Legacy rename serialization also gates concurrent mkdir/delete operations, and only rebases delete targets after the remote destination is confirmed.
+- Metadata worker confirmation now uses the same scoped provider snapshot as its preceding remote mutation, avoiding a credential-refresh race between upload/move and HEAD verification.
 
 - 修复 Windows Cloud Files 重挂载后客户端能看到文件、但 Explorer 中部分目录为空：复用缓存里的目录现在会重新启用按需枚举；如果目录已退化为普通 NTFS 目录，则原地转换回云占位目录并保留现有内容。并发目录枚举会传递真实失败结果，不再把一次失败误记为“已完整加载”。
 - 修复 Windows Cloud Files 目录改名竞态：`go/mount/dir_sync_queue.go` 的 `rebaseAndFence` 现在把目录创建请求与远端改名统一排进同一个 fence；`bucket_access_writes.go` 在远端源已确认缺失时复用已改名的目标，绝不再向严格后端发送一次“源不存在”的 `MoveObject`。

@@ -226,13 +226,13 @@ func (q *writebackQueue) reconcileQueuedRename(
 	access.mutationMu.Lock()
 	defer access.mutationMu.Unlock()
 	record := op.record
-	if access.deletes != nil {
-		access.deletes.rebase(record.OldVirtualPath, record.NewVirtualPath, record.IsDirectory)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), access.requestTimeout)
 	defer cancel()
 	err := access.reconcileRemoteMove(ctx, record)
 	if err == nil {
+		if access.deletes != nil {
+			access.deletes.rebase(record.OldVirtualPath, record.NewVirtualPath, record.IsDirectory)
+		}
 		if err := access.applyMutationSuccess(record); err != nil {
 			err = fmt.Errorf("apply local rename state: %w", err)
 		} else {

@@ -19,3 +19,17 @@ func TestDeleteQueueRebaseMovesPendingAndRunningTargets(t *testing.T) {
 		t.Fatalf("running delete target = %q, want new/nested/item.txt", running.virtualPath)
 	}
 }
+
+func TestDeleteQueueRebaseDoesNotRewriteStartedDelete(t *testing.T) {
+	running := &pendingDelete{
+		taskID:          "running",
+		virtualPath:     "old/item.txt",
+		providerStarted: true,
+	}
+	queue := &deleteQueue{running: map[string]*pendingDelete{running.taskID: running}}
+
+	queue.rebase("old", "new", true)
+	if running.virtualPath != "old/item.txt" {
+		t.Fatalf("started delete target = %q, want old/item.txt", running.virtualPath)
+	}
+}

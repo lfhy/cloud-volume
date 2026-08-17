@@ -187,3 +187,39 @@ func TestRenameGatesConcurrentDirectoryCreateAndDelete(t *testing.T) {
 		}
 	}
 }
+
+func TestRenameFailureKeepsPendingDeleteAtSource(t *testing.T) {
+	access := newTestBucketAccess(t)
+	backend := newMutationMoveTestBackend()
+	backend.files["old.txt"] = true
+	backend.files["new.txt"] = true
+	backend.moveFails = 1
+	access.backend = backend
+	pending := &pendingDelete{taskID: "delete", virtualPath: "old.txt"}
+	access.deletes = &deleteQueue{entries: map[string]*pendingDelete{"old.txt": pending}}
+	t.Cleanup(func() { access.deletes = nil })
+
+	if err := access.renamePath(context.Background(), "old.txt", "new.txt", false); err == nil {
+		t.Fatal("rename unexpectedly succeeded")
+	}
+	if access.deletes.entries["old.txt"] != pending || access.deletes.entries["new.txt"] != nil {
+		t.Fatalf("failed rename rewrote pending delete: %+v", access.deletes.entries)
+	}
+}
+
+func TestRenameSuccessRebasesPendingDeleteAtDestination(t *testing.T) {
+	access := newTestBucketAccess(t)
+	backend := newMutationMoveTestBackend()
+	backend.files["old.txt"] = true
+	access.backend = backend
+	pending := &pendingDelete{taskID: "delete", virtualPath: "old.txt"}
+	access.deletes = &deleteQueue{entries: map[string]*pendingDelete{"old.txt": pending}}
+	t.Cleanup(func() { access.deletes = nil })
+
+	if err := access.renamePath(context.Background(), "old.txt", "new.txt", false); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if access.deletes.entries["new.txt"] != pending || access.deletes.entries["old.txt"] != nil {
+		t.Fatalf("successful rename did not rebase pending delete: %+v", access.deletes.entries)
+	}
+}

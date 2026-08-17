@@ -323,7 +323,7 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 		if err := backend.CreateDirectory(ctx, s.store.namespace.Bucket, parentPrefix(path), name); err != nil && !strings.Contains(strings.ToLower(err.Error()), "exists") {
 			return err
 		}
-		return s.confirmRemote(ctx, op, parentID, name, false)
+		return s.confirmRemote(ctx, backend, op, parentID, name, false)
 	case OpWrite:
 		record, ref, err := s.pendingWrite(op.InodeID, op.ContentGeneration)
 		if err != nil {
@@ -342,7 +342,7 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 			s3ops.FinishQueuedTransfer(taskID, err)
 			return err
 		}
-		if err := s.confirmRemote(ctx, op, record.DesiredParentID, record.DesiredName, true); err != nil {
+		if err := s.confirmRemote(ctx, backend, op, record.DesiredParentID, record.DesiredName, true); err != nil {
 			s3ops.FinishQueuedTransfer(taskID, err)
 			return err
 		}
@@ -403,7 +403,7 @@ func (w *Worker) executeMove(ctx context.Context, op Op, backend Backend) error 
 			if err := backend.CreateDirectory(ctx, w.service.store.namespace.Bucket, parentPrefix(desiredPath), filepath.Base(desiredPath)); err != nil {
 				return err
 			}
-			return w.service.confirmRemote(ctx, op, record.DesiredParentID, record.DesiredName, false)
+			return w.service.confirmRemote(ctx, backend, op, record.DesiredParentID, record.DesiredName, false)
 		}
 		_, ref, refErr := w.service.pendingWrite(op.InodeID, op.ContentGeneration)
 		if refErr != nil {
@@ -418,7 +418,7 @@ func (w *Worker) executeMove(ctx context.Context, op Op, backend Backend) error 
 		if err := backend.UploadFile(ctx, w.service.store.namespace.Bucket, desiredPath, localPath, taskID); err != nil {
 			return err
 		}
-		if err := w.service.confirmRemote(ctx, op, record.DesiredParentID, record.DesiredName, true); err != nil {
+		if err := w.service.confirmRemote(ctx, backend, op, record.DesiredParentID, record.DesiredName, true); err != nil {
 			return err
 		}
 		return w.service.retireContent(op.InodeID, ref.Generation)
@@ -429,13 +429,13 @@ func (w *Worker) executeMove(ctx context.Context, op Op, backend Backend) error 
 		return err
 	}
 	if source == target {
-		return w.service.confirmRemote(ctx, op, record.DesiredParentID, record.DesiredName, record.Kind == KindDirectory)
+		return w.service.confirmRemote(ctx, backend, op, record.DesiredParentID, record.DesiredName, record.Kind == KindDirectory)
 	}
 	taskID := fmt.Sprintf("metadata-op-%d", op.Seq)
 	if err := backend.MoveObject(ctx, w.service.store.namespace.Bucket, source, target, record.Kind == KindDirectory, taskID); err != nil {
 		return err
 	}
-	return w.service.confirmRemote(ctx, op, record.DesiredParentID, record.DesiredName, record.Kind == KindDirectory)
+	return w.service.confirmRemote(ctx, backend, op, record.DesiredParentID, record.DesiredName, record.Kind == KindDirectory)
 }
 
 var errConflict = errors.New("metadata: remote fingerprint conflict")

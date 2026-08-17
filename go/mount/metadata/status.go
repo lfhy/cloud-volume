@@ -130,7 +130,17 @@ func (s *Service) pendingWrite(inode, generation uint64) (Inode, ContentRef, err
 	return record, ref, err
 }
 
-func (s *Service) confirmRemote(ctx context.Context, op Op, parent uint64, name string, isFile bool) error {
+func (s *Service) confirmRemote(
+	ctx context.Context,
+	backend Backend,
+	op Op,
+	parent uint64,
+	name string,
+	isFile bool,
+) error {
+	if backend == nil {
+		return fmt.Errorf("metadata: missing backend for remote confirmation")
+	}
 	inode := op.InodeID
 	if _, err := s.remoteTarget(inode); err != nil {
 		return err
@@ -141,7 +151,7 @@ func (s *Service) confirmRemote(ctx context.Context, op Op, parent uint64, name 
 	if pathErr != nil {
 		target = name
 	}
-	info, headErr := s.backendSnapshot().HeadObject(ctx, s.store.namespace.Bucket, RemoteKey(target))
+	info, headErr := backend.HeadObject(ctx, s.store.namespace.Bucket, RemoteKey(target))
 	if headErr != nil {
 		if errors.Is(headErr, os.ErrNotExist) && !isFile {
 			// Providers without explicit directory markers may legitimately

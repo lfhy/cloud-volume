@@ -53,6 +53,15 @@ func (b *startFailureMountBackend) Stop(*mountSession) error {
 func (*startFailureMountBackend) IsActive(*mountSession) (bool, error) { return false, nil }
 func (*startFailureMountBackend) CleanupStale(*mountSession) error     { return nil }
 
+type retainedStartFailureMountBackend struct{ startFailureMountBackend }
+
+func (b *retainedStartFailureMountBackend) Stop(session *mountSession) error {
+	b.stopCalls++
+	session.mounted = true
+	session.stopping = false
+	return errors.New("injected cleanup stop failure")
+}
+
 func TestMountConfigChangeKeepsSessionWhenStopFails(t *testing.T) {
 	access := newTestBucketAccess(t)
 	config := storageconfig.RemoteStorageConfig{Endpoint: "https://old.example", Bucket: "bucket"}.Normalized()
@@ -180,4 +189,37 @@ func TestStartMountSessionStopsPartialStartAndReleasesAccess(t *testing.T) {
 	if session.access != nil || len(manager.List()) != 0 {
 		t.Fatalf("partial start leaked access or metadata: access=%v services=%+v", session.access, manager.List())
 	}
+}
+
+func TestStartMountSessionRetainsAccessWhenPartialStartStopFails(t *testing.T) {
+	manager := metadata.NewManager(filepath.Join(t.TempDir(), "metadata"))
+	defer manager.RemoveAllForTest()
+	config := storageconfig.RemoteStorageConfig{
+		ProfileID:      "retained-start-profile",
+		CacheDirectory: t.TempDir(),
+	}
+	handle, err := manager.AcquireWithBackend(config, "bucket", mountTestBackend{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	access := &bucketAccess{metadataHandle: handle}
+	backend := &retainedStartFailureMountBackend{}
+	session := &mountSession{bucket: "bucket", access: access, backend: backend}
+
+	if err := startMountSession(session); err == nil {
+		t.Fatal("start unexpectedly succeeded")
+	}
+	if backend.stopCalls != 1 {
+		t.Fatalf("partial start Stop calls = %d, want 1", backend.stopCalls)
+	}
+	if session.access != access || !session.mounted || session.stopping {
+		t.Fatalf("partial-start stop failure did not retain live session: %+v", session)
+	}
+	if len(manager.List()) != 1 {
+		t.Fatalf("retained session lost metadata namespace: %+v", manager.List())
+	}
+	if session.lastError == "" {
+		t.Fatal("retained session did not expose cleanup failure")
+	}
+	_ = session.access.close()
 }

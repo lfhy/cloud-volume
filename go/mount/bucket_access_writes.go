@@ -188,9 +188,6 @@ func (a *bucketAccess) renamePath(
 	// the desired-path rename before the provider sees this remote mutation.
 	a.mutationMu.Lock()
 	defer a.mutationMu.Unlock()
-	if a.deletes != nil {
-		a.deletes.rebase(oldClean, newClean, isDir)
-	}
 	hadPendingWriteback, err := a.writeback.rename(oldClean, newClean, isDir)
 	if err != nil {
 		return err
@@ -207,6 +204,9 @@ func (a *bucketAccess) renamePath(
 			}
 			if !exists {
 				return fmt.Errorf("directory %q is absent after marker rebase", newClean)
+			}
+			if a.deletes != nil {
+				a.deletes.rebase(oldClean, newClean, isDir)
 			}
 			if !hadPendingWriteback {
 				if err := a.applyRenamedLocalState(oldClean, newClean, true); err != nil {
@@ -235,6 +235,9 @@ func (a *bucketAccess) renamePath(
 		taskID,
 	); err != nil {
 		return err
+	}
+	if a.deletes != nil {
+		a.deletes.rebase(oldClean, newClean, isDir)
 	}
 	if err := a.applyRenamedLocalState(oldClean, newClean, isDir); err != nil {
 		return err
@@ -335,9 +338,6 @@ func (a *bucketAccess) completeRebasedDirectoryRename(ctx context.Context, oldCl
 	defer a.writebackMu.Unlock()
 	a.mutationMu.Lock()
 	defer a.mutationMu.Unlock()
-	if a.deletes != nil {
-		a.deletes.rebase(oldClean, newClean, true)
-	}
 	if err := a.createRemoteDirectory(ctx, newClean); err != nil {
 		return err
 	}
@@ -347,6 +347,9 @@ func (a *bucketAccess) completeRebasedDirectoryRename(ctx context.Context, oldCl
 	}
 	if !exists {
 		return fmt.Errorf("directory %q is absent after create", newClean)
+	}
+	if a.deletes != nil {
+		a.deletes.rebase(oldClean, newClean, true)
 	}
 	if err := a.cache.renameLocalFile(oldClean, newClean, true, a.cacheRoot); err != nil {
 		return err
