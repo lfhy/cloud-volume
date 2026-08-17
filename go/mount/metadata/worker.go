@@ -1,18 +1,11 @@
-// The remote worker drains journal operations after the local quiet period.
+// Worker scheduling claims due journal operations and enforces their ordering.
 package metadata
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log"
-	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
-
-	s3ops "remote-storage/go/s3"
 )
 
 const (
@@ -190,11 +183,8 @@ func (w *Worker) claimDue() []Op {
 			if _, busy := w.running[op.InodeID]; busy {
 				continue
 			}
-			// Dependency ordering: a write/mkdir must wait for an unfinished
-			// parent mkdir/rename, and any op must wait for a pending delete of
-			// its own inode recorded earlier in the journal. Running is a
-			// transient in-process state; a process restart recovers ops that
-			// crashed mid-execution back into the pending queue.
+			// Running is transient in-process state; a process restart returns
+			// the operation to pending before a provider mutation is retried.
 			if op.State == OpStateRunning {
 				previous := op
 				op.State = OpStatePending
@@ -221,20 +211,25 @@ func (w *Worker) claimDue() []Op {
 }
 
 // blocked reports whether one op must wait on an earlier unfinished journal
-// operation. Failed operations do not block later work, but every pending or
-// running operation on the same inode remains an ordering barrier.
+// operation. A directory rename/delete also waits for its earlier descendant
+// work, keeping that work on the old remote subtree until the move runs.
 func (w *Worker) blocked(tx boltTxT, op Op) (bool, string) {
 	if pendingOpForInode(tx, op.InodeID, op.Seq) {
 		return true, "earlier operation on inode pending"
 	}
-	if op.Type == OpRename || op.Type == OpDelete {
-		return false, ""
-	}
-	parent, err := getInode(tx, op.InodeID)
+	record, err := getInode(tx, op.InodeID)
 	if err != nil {
 		return false, ""
 	}
-	for _, ancestor := range []uint64{parent.DesiredParentID} {
+	if record.Kind == KindDirectory && (op.Type == OpRename || op.Type == OpDelete) {
+		if _, pending := pendingDescendantOp(tx, op.InodeID, op.Seq); pending {
+			return true, "earlier descendant operation pending"
+		}
+	}
+	if op.Type == OpRename || op.Type == OpDelete {
+		return false, ""
+	}
+	for _, ancestor := range []uint64{record.DesiredParentID} {
 		if ancestor == rootInode || ancestor == 0 {
 			continue
 		}
@@ -257,10 +252,7 @@ func pendingOpForInode(tx boltTxT, inode, beforeSeq uint64) bool {
 			return nil
 		}
 		var prior Op
-		if decodeJSON(raw, &prior) != nil {
-			return nil
-		}
-		if prior.InodeID != inode {
+		if decodeJSON(raw, &prior) != nil || prior.InodeID != inode {
 			return nil
 		}
 		if prior.State == OpStatePending || prior.State == OpStateRunning {
@@ -276,194 +268,6 @@ func (w *Worker) releaseInode(inode uint64) {
 	delete(w.running, inode)
 	w.mu.Unlock()
 	w.Wake()
-}
-
-func (w *Worker) execute(ctx context.Context, op Op) {
-	err := w.executeOp(ctx, op)
-	updateErr := w.service.store.update(func(tx boltTxT) error {
-		return replaceOp(tx, op.Seq, func(current *Op) {
-			if current.State != OpStateRunning {
-				return
-			}
-			switch {
-			case err == nil:
-				current.State = OpStateApplied
-				current.AppliedAtUnixNano = time.Now().UnixNano()
-				current.LastError = ""
-			case errors.Is(err, errConflict):
-				current.State = OpStateFailed
-				current.LastError = err.Error()
-				_ = markInodeConflict(tx, op.InodeID)
-			default:
-				current.Retry++
-				current.State = OpStatePending
-				current.LastError = err.Error()
-				current.NextAttemptUnixNano = time.Now().Add(retryDelay(current.Retry)).UnixNano()
-			}
-		})
-	})
-	w.releaseInode(op.InodeID)
-	if updateErr != nil {
-		log.Printf("[metadata/worker] op=%d state update error=%v", op.Seq, updateErr)
-	}
-	if err != nil && !errors.Is(err, errConflict) {
-		log.Printf("[metadata/worker] op=%d type=%d retry pending error=%v", op.Seq, op.Type, err)
-	}
-}
-
-func (w *Worker) executeOp(ctx context.Context, op Op) error {
-	s := w.service
-	backend := s.backendSnapshot()
-	switch op.Type {
-	case OpMkdir:
-		path, parentID, name, err := s.desiredDirTarget(op.InodeID)
-		if err != nil {
-			return err
-		}
-		if err := backend.CreateDirectory(ctx, s.store.namespace.Bucket, parentPrefix(path), name); err != nil && !strings.Contains(strings.ToLower(err.Error()), "exists") {
-			return err
-		}
-		return s.confirmRemote(ctx, backend, op, parentID, name, false)
-	case OpWrite:
-		record, ref, err := s.pendingWrite(op.InodeID, op.ContentGeneration)
-		if err != nil {
-			return err
-		}
-		target := s.desiredRemoteTarget(record)
-		taskID := fmt.Sprintf("metadata-op-%d", op.Seq)
-		localPath, err := s.spliceChunks(ref.Chunks, fmt.Sprintf("%d", op.Seq))
-		if err != nil {
-			return err
-		}
-		defer os.Remove(localPath)
-		s3ops.QueueTransfer(taskID, "upload", s.store.namespace.Bucket, target, localPath, ref.Size)
-		s3ops.SetTransferStatusDetail(taskID, "sync_wait")
-		if err := backend.UploadFile(ctx, s.store.namespace.Bucket, target, localPath, taskID); err != nil {
-			s3ops.FinishQueuedTransfer(taskID, err)
-			return err
-		}
-		if err := s.confirmRemote(ctx, backend, op, record.DesiredParentID, record.DesiredName, true); err != nil {
-			s3ops.FinishQueuedTransfer(taskID, err)
-			return err
-		}
-		s3ops.FinishQueuedTransfer(taskID, nil)
-		return s.retireContent(op.InodeID, ref.Generation)
-	case OpRename:
-		return w.executeMove(ctx, op, backend)
-	case OpDelete:
-		record, err := s.remoteTarget(op.InodeID)
-		if err != nil {
-			return err
-		}
-		if record.Kind == KindDirectory {
-			// Wait for queued descendant ops first: purging their staged
-			// content would orphan them into endless retries.
-			var blocked bool
-			_ = s.store.view(func(tx boltTxT) error {
-				_, blocked = pendingDescendantOp(tx, op.InodeID, op.Seq)
-				return nil
-			})
-			if blocked {
-				return fmt.Errorf("metadata worker: delete op %d waiting for pending descendant op", op.Seq)
-			}
-		}
-		if record.RemoteParentID != 0 {
-			if err := backend.DeleteObject(ctx, s.store.namespace.Bucket, record.RemoteName, record.Kind == KindDirectory, fmt.Sprintf("metadata-op-%d", op.Seq)); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-		}
-		// Directory deletes must purge descendants too; otherwise their inode
-		// records and staged content leak forever while Status().InodeCount
-		// drifts upward.
-		descendants, err := s.collectSubtreeInodes(op.InodeID)
-		if err != nil {
-			return err
-		}
-		if err := s.deleteInodeRecord(op.InodeID); err != nil {
-			return err
-		}
-		return s.purgeInodeRecords(descendants)
-	default:
-		return fmt.Errorf("metadata worker: unknown op type %d", op.Type)
-	}
-}
-
-func (w *Worker) executeMove(ctx context.Context, op Op, backend Backend) error {
-	record, err := w.service.remoteTarget(op.InodeID)
-	if err != nil {
-		return err
-	}
-	if record.RemoteParentID == 0 {
-		// Local-only object: materialize at the desired path directly.
-		desiredPath, err := w.service.Path(op.InodeID)
-		if err != nil {
-			return err
-		}
-		if record.Kind == KindDirectory {
-			if err := backend.CreateDirectory(ctx, w.service.store.namespace.Bucket, parentPrefix(desiredPath), filepath.Base(desiredPath)); err != nil {
-				return err
-			}
-			return w.service.confirmRemote(ctx, backend, op, record.DesiredParentID, record.DesiredName, false)
-		}
-		_, ref, refErr := w.service.pendingWrite(op.InodeID, op.ContentGeneration)
-		if refErr != nil {
-			return refErr
-		}
-		taskID := fmt.Sprintf("metadata-op-%d", op.Seq)
-		localPath, err := w.service.spliceChunks(ref.Chunks, fmt.Sprintf("%d", op.Seq))
-		if err != nil {
-			return err
-		}
-		defer os.Remove(localPath)
-		if err := backend.UploadFile(ctx, w.service.store.namespace.Bucket, desiredPath, localPath, taskID); err != nil {
-			return err
-		}
-		if err := w.service.confirmRemote(ctx, backend, op, record.DesiredParentID, record.DesiredName, true); err != nil {
-			return err
-		}
-		return w.service.retireContent(op.InodeID, ref.Generation)
-	}
-	source := record.RemoteName
-	target, err := w.service.desiredPath(op.InodeID)
-	if err != nil {
-		return err
-	}
-	if source == target {
-		return w.service.confirmRemote(ctx, backend, op, record.DesiredParentID, record.DesiredName, record.Kind == KindDirectory)
-	}
-	taskID := fmt.Sprintf("metadata-op-%d", op.Seq)
-	if err := backend.MoveObject(ctx, w.service.store.namespace.Bucket, source, target, record.Kind == KindDirectory, taskID); err != nil {
-		return err
-	}
-	return w.service.confirmRemote(ctx, backend, op, record.DesiredParentID, record.DesiredName, record.Kind == KindDirectory)
-}
-
-var errConflict = errors.New("metadata: remote fingerprint conflict")
-
-// parentPrefix returns the slash-separated parent prefix for a provider key.
-func parentPrefix(value string) string {
-	trimmed := strings.Trim(strings.TrimSpace(value), "/")
-	if trimmed == "" {
-		return ""
-	}
-	if index := strings.LastIndex(trimmed, "/"); index >= 0 {
-		return trimmed[:index]
-	}
-	return ""
-}
-
-func retryDelay(retry int) time.Duration {
-	if retry <= 1 {
-		return workerRetryBase
-	}
-	delay := workerRetryBase
-	for index := 1; index < retry; index++ {
-		delay *= 2
-		if delay >= workerRetryMax {
-			return workerRetryMax
-		}
-	}
-	return delay
 }
 
 func minTime(left, right time.Time) time.Time {

@@ -161,7 +161,9 @@ func (n *linuxFuseNode) Setattr(
 		return errno
 	}
 	if !overlayOnly {
-		n.access.stageLocalWrite(virtualPath, localPath, fileSize(localPath))
+		if err := n.access.stageLocalWrite(virtualPath, localPath, fileSize(localPath)); err != nil {
+			return gofusefs.ToErrno(err)
+		}
 	}
 	info, err := os.Stat(localPath)
 	if err != nil {

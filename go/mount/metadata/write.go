@@ -4,7 +4,6 @@ package metadata
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,91 +75,6 @@ func (s *Service) CreateDirectory(parent uint64, name string, opts WriteOptions)
 			State: OpStatePending, Origin: origin(opts), CreatedAtUnixNano: nowUnix(),
 			NextAttemptUnixNano: time.Now().Add(s.quietPeriod()).UnixNano(),
 		})
-	})
-	return inode, err
-}
-
-// StageWrite copies source bytes into durable pending content for one inode.
-func (s *Service) StageWrite(inode, generation uint64, source io.Reader, size int64) (ContentRef, error) {
-	s.operationMu.RLock()
-	defer s.operationMu.RUnlock()
-	return s.stagePendingContent(inode, generation, source, size)
-}
-
-// StageWriteForName allocates (if needed) and returns the target inode before
-// copying durable pending content. Call Write after staging to journal the op.
-func (s *Service) StageWriteForName(parent uint64, name string, generation uint64, source io.Reader, size int64) (uint64, ContentRef, error) {
-	s.operationMu.RLock()
-	defer s.operationMu.RUnlock()
-	if s.isReadOnly() {
-		return 0, ContentRef{}, ErrReadOnly
-	}
-	inode, err := s.ensureWriteInode(parent, name)
-	if err != nil {
-		return 0, ContentRef{}, err
-	}
-	if generation == 0 {
-		generation, err = s.reserveContentGeneration(inode)
-		if err != nil {
-			return 0, ContentRef{}, err
-		}
-	}
-	ref, err := s.stagePendingContent(inode, generation, source, size)
-	return inode, ref, err
-}
-
-// reserveContentGeneration gives concurrent path-level writes distinct chunk
-// reference keys before their content is staged outside the journal transaction.
-func (s *Service) reserveContentGeneration(inode uint64) (uint64, error) {
-	var generation uint64
-	err := s.store.update(func(tx boltTxT) error {
-		record, err := getInode(tx, inode)
-		if err != nil {
-			return err
-		}
-		generation = record.ContentGeneration + 1
-		record.ContentGeneration = generation
-		return putInode(tx, record)
-	})
-	return generation, err
-}
-
-func (s *Service) ensureWriteInode(parent uint64, name string) (uint64, error) {
-	name = strings.TrimSpace(name)
-	if name == "" || strings.Contains(name, "/") {
-		return 0, fmt.Errorf("metadata: file name is required")
-	}
-	nameKey := MakeNameKey(name)
-	var inode uint64
-	err := s.store.update(func(tx boltTxT) error {
-		parentRecord, err := getInode(tx, parent)
-		if err != nil {
-			return err
-		}
-		if parentRecord.Kind != KindDirectory {
-			return fmt.Errorf("metadata: parent %d is not a directory", parent)
-		}
-		existing, direntErr := getDirent(tx, parent, nameKey)
-		if direntErr == nil {
-			inode = existing.ChildID
-			return nil
-		}
-		if !errors.Is(direntErr, ErrNotFound) {
-			return direntErr
-		}
-		inode, err = allocateInode(tx)
-		if err != nil {
-			return err
-		}
-		record := Inode{ID: inode, Kind: KindFile, DesiredParentID: parent, DesiredName: name, State: StatePending, LocalRevision: 1}
-		if err := putInode(tx, record); err != nil {
-			return err
-		}
-		if err := putDirent(tx, parent, Dirent{ChildID: inode, DisplayName: name, NameKey: nameKey}); err != nil {
-			return err
-		}
-		parentRecord.LocalRevision++
-		return putInode(tx, parentRecord)
 	})
 	return inode, err
 }
@@ -239,6 +153,9 @@ func (s *Service) Rename(inode, newParent uint64, newName string, opts WriteOpti
 	defer s.operationMu.RUnlock()
 	if s.isReadOnly() {
 		return ErrReadOnly
+	}
+	if inode == rootInode {
+		return fmt.Errorf("metadata: root cannot be renamed")
 	}
 	newName = strings.TrimSpace(newName)
 	if newName == "" || strings.Contains(newName, "/") {
@@ -331,6 +248,9 @@ func (s *Service) Delete(inode uint64, opts WriteOptions) error {
 	defer s.operationMu.RUnlock()
 	if s.isReadOnly() {
 		return ErrReadOnly
+	}
+	if inode == rootInode {
+		return fmt.Errorf("metadata: root cannot be deleted")
 	}
 	return s.store.update(func(tx boltTxT) error {
 		record, err := getInode(tx, inode)

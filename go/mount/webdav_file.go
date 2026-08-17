@@ -381,8 +381,7 @@ func (f *writableWebDAVFile) Close() error {
 	if err := os.Rename(f.tempPath, cachePath); err != nil {
 		return err
 	}
-	f.access.stageLocalWrite(f.virtualKey, cachePath, fileSize(cachePath))
-	return nil
+	return f.access.stageLocalWrite(f.virtualKey, cachePath, fileSize(cachePath))
 }
 
 func (f *writableWebDAVFile) Read([]byte) (int, error) {

@@ -397,14 +397,18 @@ func (fs *winFspBucketFS) Release(p string, fh uint64) int {
 	}
 	open.mu.Lock()
 	defer open.mu.Unlock()
+	stageErr := error(nil)
 	if open.writable && open.dirty {
 		if stat, err := open.file.Stat(); err == nil {
-			fs.access.stageLocalWrite(open.virtualPath, open.localPath, stat.Size())
+			stageErr = fs.access.stageLocalWrite(open.virtualPath, open.localPath, stat.Size())
 		}
 		open.dirty = false
 	}
 	if open.file != nil {
 		_ = open.file.Close()
+	}
+	if stageErr != nil {
+		return winFspErrno(stageErr)
 	}
 	return 0
 }

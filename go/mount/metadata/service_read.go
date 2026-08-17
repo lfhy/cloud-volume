@@ -12,11 +12,13 @@ import (
 // MaterializeDirectory synchronously lists one directory from the provider and
 // commits the resulting dirents/inodes in one transaction.
 func (s *Service) MaterializeDirectory(ctx context.Context, dirInode uint64) error {
-	directoryPath, err := s.Path(dirInode)
+	directoryPath, err := s.materializeDirectoryPath(dirInode)
 	if err != nil {
 		return err
 	}
-	items, err := listProviderChildrenImpl(ctx, s.backendSnapshot(), s.store.namespace.Bucket, dirInode, s.Path)
+	items, err := listProviderChildrenImpl(ctx, s.backendSnapshot(), s.store.namespace.Bucket, dirInode, func(uint64) (string, error) {
+		return directoryPath, nil
+	})
 	if err != nil {
 		return err
 	}
@@ -116,6 +118,33 @@ func (s *Service) MaterializeDirectory(ctx context.Context, dirInode uint64) err
 		}
 		return putListingState(tx, ListingState{Inode: dirInode, Materialized: true, Revision: parent.LocalRevision, VerifiedAtUnixNano: time.Now().UnixNano()})
 	})
+}
+
+// materializeDirectoryPath retains a renamed directory's confirmed remote
+// source until its move journal entry finishes. Its Desired name can already
+// differ, but the provider still lists children below the old remote path.
+func (s *Service) materializeDirectoryPath(inode uint64) (string, error) {
+	desired, err := s.Path(inode)
+	if err != nil {
+		return "", err
+	}
+	var record Inode
+	err = s.store.view(func(tx boltTxT) error {
+		value, err := getInode(tx, inode)
+		record = value
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	if (record.State != StatePending && record.State != StateConflict) || record.RemoteParentID == 0 || record.RemoteName == "" {
+		return desired, nil
+	}
+	remote, remoteErr := s.remotePathLocked(record.RemoteParentID, record.RemoteName)
+	if remoteErr != nil {
+		return desired, nil
+	}
+	return remote, nil
 }
 
 // pendingRemoteKeysToSuppress keeps a remote listing from reviving the source

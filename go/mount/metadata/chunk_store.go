@@ -44,7 +44,7 @@ func (s *Service) tmpDir() string {
 // references in bbolt. A crash before bbolt commits leaves only sweepable
 // orphan files; it cannot leave a ContentRef pointing at absent data.
 func (s *Service) stagePendingContent(
-	inode, generation uint64, source io.Reader, declaredSize int64,
+	inode, generation uint64, source io.Reader, declaredSize int64, awaitingJournal bool,
 ) (ContentRef, error) {
 	s.chunkMu.Lock()
 	defer s.chunkMu.Unlock()
@@ -60,7 +60,7 @@ func (s *Service) stagePendingContent(
 			"metadata: staged size mismatch: declared=%d actual=%d", declaredSize, written,
 		)
 	}
-	ref := ContentRef{Inode: inode, Generation: generation, Chunks: hashes, Size: written}
+	ref := ContentRef{Inode: inode, Generation: generation, Chunks: hashes, Size: written, AwaitingJournal: awaitingJournal}
 	if err := s.replaceContentRefLocked(ref, sizes); err != nil {
 		_ = s.syncChunkProtectionLocked()
 		return ContentRef{}, err
@@ -424,35 +424,6 @@ func (s *Service) chunkFiles() ([]string, error) {
 		return nil
 	})
 	return files, err
-}
-
-// SweepChunkStore removes files absent from the bbolt chunk table, rebuilds
-// the cache-cleaner manifest, and clears stale upload temporaries at startup.
-func (s *Service) SweepChunkStore() error {
-	s.chunkMu.Lock()
-	defer s.chunkMu.Unlock()
-
-	protection, err := s.chunkProtectionSnapshot()
-	if err != nil {
-		return err
-	}
-	files, err := s.chunkFiles()
-	if err != nil {
-		return err
-	}
-	for _, path := range files {
-		if _, ok := protection[filepath.Base(path)]; !ok {
-			_ = os.Remove(path)
-		}
-	}
-	entries, err := os.ReadDir(s.tmpDir())
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	for _, entry := range entries {
-		_ = os.RemoveAll(filepath.Join(s.tmpDir(), entry.Name()))
-	}
-	return s.writeChunkProtection(protection)
 }
 
 func validChunkHash(hash string) bool {

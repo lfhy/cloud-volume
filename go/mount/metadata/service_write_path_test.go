@@ -107,6 +107,56 @@ func TestMaterializeDoesNotReviveRenameSource(t *testing.T) {
 	}
 }
 
+func TestRefreshPendingRenamedDirectoryRetainsMaterializedChildren(t *testing.T) {
+	backend := newFakeBackend()
+	backend.objects["/dir/"] = storageops.ObjectInfo{Key: "dir/", IsDir: true}
+	backend.objects["/dir/child.txt"] = storageops.ObjectInfo{Key: "dir/child.txt", Size: 3}
+	service := newTestService(t, backend)
+	service.SetQuietPeriod(time.Hour)
+	ctx := context.Background()
+	if _, err := service.ListPage(ctx, rootInode, "", 10); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := service.Resolve(rootInode, "dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ListPage(ctx, dir, "", 10); err != nil {
+		t.Fatal(err)
+	}
+	child, err := service.Resolve(dir, "child.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.RenamePath(ctx, "dir", "renamed", WriteOptions{Origin: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.MaterializeDirectory(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+	if resolved, err := service.Resolve(dir, "child.txt"); err != nil || resolved != child {
+		t.Fatalf("refresh replaced child inode: got=%d want=%d err=%v", resolved, child, err)
+	}
+	object, err := service.StatPath(ctx, "renamed/child.txt")
+	if err != nil || object.Inode != mustInodeString(child) {
+		t.Fatalf("renamed child was not retained: %+v err=%v", object, err)
+	}
+}
+
+func TestRootCannotBeDeletedOrRenamed(t *testing.T) {
+	service := newTestService(t, newFakeBackend())
+	ctx := context.Background()
+	if err := service.DeletePath(ctx, "/", WriteOptions{Origin: "test"}); err == nil {
+		t.Fatal("root delete unexpectedly succeeded")
+	}
+	if err := service.RenamePath(ctx, ".", "renamed", WriteOptions{Origin: "test"}); err == nil {
+		t.Fatal("root rename unexpectedly succeeded")
+	}
+	if status := service.Status(); status.PendingOps != 0 {
+		t.Fatalf("root mutation created journal work: %+v", status)
+	}
+}
+
 func mustInodeString(value uint64) string {
 	return strconv.FormatUint(value, 10)
 }

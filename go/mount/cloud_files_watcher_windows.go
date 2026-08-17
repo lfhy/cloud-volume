@@ -263,7 +263,10 @@ func (w *windowsSyncWatcher) scheduleUpload(
 		localPath,
 		info.Size(),
 	)
-	w.access.stageLocalWrite(clean, localPath, info.Size())
+	if err := w.access.stageLocalWrite(clean, localPath, info.Size()); err != nil {
+		log.Printf("[mount/cloud-files] stage metadata write %q: %v", clean, err)
+		return false
+	}
 	return true
 }
 

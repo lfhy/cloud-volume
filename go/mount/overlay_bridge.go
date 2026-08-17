@@ -92,7 +92,9 @@ func (a *bucketAccess) moveOverlayPathToRemote(
 
 func (a *bucketAccess) stageOverlayDirectory(oldVirtualPath, newVirtualPath string) error {
 	localRoot := a.overlay.localPath(oldVirtualPath)
-	a.stageLocalDirectory(newVirtualPath, time.Now())
+	if err := a.stageLocalDirectory(newVirtualPath, time.Now()); err != nil {
+		return err
+	}
 	return filepath.WalkDir(localRoot, func(current string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -111,8 +113,7 @@ func (a *bucketAccess) stageOverlayDirectory(oldVirtualPath, newVirtualPath stri
 			if err != nil {
 				return err
 			}
-			a.stageLocalDirectory(targetVirtualPath, info.ModTime())
-			return nil
+			return a.stageLocalDirectory(targetVirtualPath, info.ModTime())
 		}
 		sourceVirtualPath := joinVirtualPath(oldVirtualPath, virtualRelative)
 		return a.stageOverlayFile(sourceVirtualPath, targetVirtualPath)
@@ -129,8 +130,7 @@ func (a *bucketAccess) stageOverlayFile(oldVirtualPath, newVirtualPath string) e
 	if err := copyFile(cachePath, localPath); err != nil {
 		return err
 	}
-	a.stageLocalWrite(newVirtualPath, cachePath, info.Size())
-	return nil
+	return a.stageLocalWrite(newVirtualPath, cachePath, info.Size())
 }
 
 func joinVirtualPath(basePath, relativePath string) string {
@@ -146,13 +146,17 @@ func joinVirtualPath(basePath, relativePath string) string {
 	}
 }
 
-func (a *bucketAccess) stageLocalDirectory(virtualPath string, modTime time.Time) {
+func (a *bucketAccess) stageLocalDirectory(virtualPath string, modTime time.Time) error {
 	if a == nil {
-		return
+		return nil
+	}
+	if a.usesMetadataWritePath() {
+		return a.createMetadataDirectory(context.Background(), virtualPath)
 	}
 	a.writebackMu.Lock()
 	defer a.writebackMu.Unlock()
 	a.stageLocalDirectoryLocked(virtualPath, modTime)
+	return nil
 }
 
 func (a *bucketAccess) stageLocalDirectoryLocked(virtualPath string, modTime time.Time) {

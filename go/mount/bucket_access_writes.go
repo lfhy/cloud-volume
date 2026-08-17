@@ -34,17 +34,21 @@ func (a *bucketAccess) registerLocalWrite(virtualPath, localPath string, size in
 	a.registerLocalWriteLocked(virtualPath, localPath, size)
 }
 
-// stageLocalWrite publishes the local marker and durable queue entry as one
-// critical section so external invalidation cannot delete a newly staged file
-// between those two steps.
-func (a *bucketAccess) stageLocalWrite(virtualPath, localPath string, size int64) {
+// stageLocalWrite publishes one local file before its delayed remote mutation.
+// Metadata-backed mounts write Desired+journal first; legacy mounts keep the
+// previous queue behavior until their namespace migration is available.
+func (a *bucketAccess) stageLocalWrite(virtualPath, localPath string, size int64) error {
 	if a == nil || a.readOnly {
-		return
+		return nil
+	}
+	if a.usesMetadataWritePath() {
+		return a.stageMetadataWrite(virtualPath, localPath, size)
 	}
 	a.writebackMu.Lock()
 	defer a.writebackMu.Unlock()
 	a.registerLocalWriteLocked(virtualPath, localPath, size)
 	a.scheduleUploadLocked(virtualPath, localPath)
+	return nil
 }
 
 func (a *bucketAccess) registerLocalWriteLocked(virtualPath, localPath string, size int64) {
@@ -57,13 +61,17 @@ func (a *bucketAccess) registerLocalWriteLocked(virtualPath, localPath string, s
 	a.cache.storeLocalFile(cleanVirtualPath(virtualPath), localPath, info)
 }
 
-func (a *bucketAccess) scheduleUpload(virtualPath, localPath string) {
+func (a *bucketAccess) scheduleUpload(virtualPath, localPath string) error {
 	if a == nil || a.readOnly {
-		return
+		return nil
+	}
+	if a.usesMetadataWritePath() {
+		return a.stageMetadataWrite(virtualPath, localPath, fileSize(localPath))
 	}
 	a.writebackMu.Lock()
 	defer a.writebackMu.Unlock()
 	a.scheduleUploadLocked(virtualPath, localPath)
+	return nil
 }
 
 func (a *bucketAccess) scheduleUploadLocked(virtualPath, localPath string) {
@@ -94,8 +102,10 @@ func (a *bucketAccess) createDirectory(
 	if clean == "" {
 		return fmt.Errorf("directory name is required")
 	}
-	a.stageLocalDirectory(clean, time.Now())
-	return nil
+	if a.usesMetadataWritePath() {
+		return a.createMetadataDirectory(ctx, clean)
+	}
+	return a.stageLocalDirectory(clean, time.Now())
 }
 
 func (a *bucketAccess) deletePath(
@@ -103,7 +113,6 @@ func (a *bucketAccess) deletePath(
 	virtualPath string,
 	isDir bool,
 ) error {
-	_ = ctx
 	if err := a.readOnlyError(); err != nil {
 		return err
 	}
@@ -113,6 +122,9 @@ func (a *bucketAccess) deletePath(
 	clean := cleanVirtualPath(virtualPath)
 	if a.overlay.handles(clean) {
 		return a.overlay.removeAll(clean)
+	}
+	if a.usesMetadataWritePath() {
+		return a.deleteMetadataPath(ctx, clean, isDir)
 	}
 	a.writebackMu.Lock()
 	defer a.writebackMu.Unlock()
@@ -163,6 +175,9 @@ func (a *bucketAccess) renamePath(
 			return a.overlay.rename(oldClean, newClean)
 		}
 		return a.renameAcrossBoundary(ctx, oldClean, newClean, isDir)
+	}
+	if a.usesMetadataWritePath() {
+		return a.renameMetadataPath(ctx, oldClean, newClean, isDir)
 	}
 	// Keep a new write from entering the old path while its running upload is
 	// drained and the provider move establishes the destination.
@@ -283,6 +298,9 @@ func (a *bucketAccess) enqueueRenamePath(
 	}
 	if err := a.hiddenTrashError(newClean); err != nil {
 		return err
+	}
+	if a.usesMetadataWritePath() {
+		return a.renameMetadataPath(context.Background(), oldClean, newClean, isDir)
 	}
 	// Allocate the rename barrier while holding the same local-path gate used
 	// by file writes, directory creates, and deletes.

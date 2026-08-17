@@ -98,6 +98,47 @@ func (s *Service) remotePathLocked(parent uint64, name string) (string, error) {
 	return resolved, err
 }
 
+// writeRemoteTarget resolves a write against the remote parent edge captured
+// in its journal payload. A later Desired rename must not redirect an earlier
+// upload and leave the old remote source behind.
+func (s *Service) writeRemoteTarget(op Op) (string, uint64, string, error) {
+	parent, name := op.NewParent, op.NewName
+	if parent == 0 || strings.TrimSpace(name) == "" {
+		record, err := s.remoteTarget(op.InodeID)
+		if err != nil {
+			return "", 0, "", err
+		}
+		parent, name = record.RemoteParentID, record.RemoteName
+	}
+	if parent == 0 || strings.TrimSpace(name) == "" {
+		return "", 0, "", fmt.Errorf("metadata: write op %d has no remote target", op.Seq)
+	}
+	target, err := s.remotePathLocked(parent, name)
+	return target, parent, name, err
+}
+
+// verifyExpectedRemote checks a write precondition before mutation. Comparing
+// the expected fingerprint after our own upload would mistake that upload for
+// an external conflict whenever its ETag naturally changes.
+func (s *Service) verifyExpectedRemote(ctx context.Context, backend Backend, op Op, target string) error {
+	expected := strings.TrimSpace(op.ExpectedRemoteFingerprint)
+	if expected == "" {
+		return nil
+	}
+	info, err := backend.HeadObject(ctx, s.store.namespace.Bucket, RemoteKey(target))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("%w: expected=%s actual=missing", errConflict, expected)
+		}
+		return err
+	}
+	actual := Fingerprint(storageops.ObjectInfo{Size: info.Size, LastModified: info.LastModified, ETag: info.ETag})
+	if expected != actual {
+		return fmt.Errorf("%w: expected=%s actual=%s", errConflict, expected, actual)
+	}
+	return nil
+}
+
 func (s *Service) desiredRemoteTarget(record Inode) string {
 	value, err := s.Path(record.ID)
 	if err != nil {
@@ -142,14 +183,9 @@ func (s *Service) confirmRemote(
 		return fmt.Errorf("metadata: missing backend for remote confirmation")
 	}
 	inode := op.InodeID
-	if _, err := s.remoteTarget(inode); err != nil {
+	target, err := s.remotePathLocked(parent, name)
+	if err != nil {
 		return err
-	}
-	// The desired path is authoritative for confirmation: RemoteName reflects
-	// the previous remote location, which may be stale after a local rename.
-	target, pathErr := s.Path(inode)
-	if pathErr != nil {
-		target = name
 	}
 	info, headErr := backend.HeadObject(ctx, s.store.namespace.Bucket, RemoteKey(target))
 	if headErr != nil {
@@ -163,13 +199,6 @@ func (s *Service) confirmRemote(
 	fingerprint := Fingerprint(storageops.ObjectInfo{
 		Size: info.Size, LastModified: info.LastModified, ETag: info.ETag,
 	})
-	// A provider change that happened under a previously confirmed object is a
-	// conflict, not a successful update, unless this operation is the write that
-	// introduced the object (no prior remote identity).
-	expected := strings.TrimSpace(op.ExpectedRemoteFingerprint)
-	if expected != "" && expected != fingerprint {
-		return fmt.Errorf("%w: expected=%s actual=%s", errConflict, expected, fingerprint)
-	}
 	return s.commitConfirmation(inode, parent, name, fingerprint)
 }
 

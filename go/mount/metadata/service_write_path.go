@@ -47,16 +47,15 @@ func (s *Service) WritePath(
 	if err != nil {
 		return 0, ContentRef{}, err
 	}
-	inode, ref, err := s.StageWriteForName(parentInode, name, 0, source, size)
+	reservation, err := s.stageWriteForName(parentInode, name, 0, source, size)
 	if err != nil {
 		return 0, ContentRef{}, err
 	}
-	if _, err := s.Write(parentInode, name, ref, opts); err != nil {
-		generation := ref.Generation
-		_ = s.releaseContent(inode, &generation, false)
-		return 0, ContentRef{}, err
+	if _, err := s.Write(parentInode, name, reservation.ref, opts); err != nil {
+		cleanupErr := s.rollbackStagedWrite(reservation)
+		return 0, ContentRef{}, combineStageErrors(err, cleanupErr)
 	}
-	return inode, ref, nil
+	return reservation.inode, reservation.ref, nil
 }
 
 // RenamePath moves one resolved inode without exposing parent inode IDs.

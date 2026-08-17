@@ -11,7 +11,7 @@ import (
 
 // SchemaVersion gates forward compatibility. Development builds deliberately
 // delete-and-rebuild instead of upgrading older layouts.
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 const (
 	bucketSchema       = "schema"
@@ -135,10 +135,11 @@ type ListingState struct {
 // ContentRef maps one pending file generation to its ordered content-addressed
 // chunks. Chunk files contain no inode or path information.
 type ContentRef struct {
-	Inode      uint64   `json:"inode"`
-	Generation uint64   `json:"generation"`
-	Chunks     []string `json:"chunks"`
-	Size       int64    `json:"size"`
+	Inode           uint64   `json:"inode"`
+	Generation      uint64   `json:"generation"`
+	Chunks          []string `json:"chunks"`
+	Size            int64    `json:"size"`
+	AwaitingJournal bool     `json:"awaitingJournal,omitempty"`
 }
 
 // Object extends the shared provider object shape with local identity fields.

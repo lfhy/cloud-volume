@@ -89,13 +89,18 @@ func acquireWritebackQueue(access *bucketAccess) (*writebackQueue, error) {
 		pool:        pool,
 	}
 	q.attach(access)
-	if err := q.restorePersistedEntries(); err != nil {
-		q.closeResources()
-		return nil, err
-	}
-	if err := q.restorePersistedMutations(); err != nil {
-		q.closeResources()
-		return nil, err
+	// A metadata namespace owns all new remote mutations. Legacy records are
+	// intentionally left dormant in development rather than replaying a second
+	// upload/rename beside the inode journal.
+	if access.metadataService() == nil {
+		if err := q.restorePersistedEntries(); err != nil {
+			q.closeResources()
+			return nil, err
+		}
+		if err := q.restorePersistedMutations(); err != nil {
+			q.closeResources()
+			return nil, err
+		}
 	}
 	q.wg.Add(1)
 	go q.dispatch()
