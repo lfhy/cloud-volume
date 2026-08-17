@@ -75,6 +75,12 @@ func (s *Service) stageChunksLocked(source io.Reader) ([]string, []int64, int64,
 	if err := os.MkdirAll(s.tmpDir(), 0o755); err != nil {
 		return nil, nil, 0, err
 	}
+	// Keep every already-written prospective block in this staging pass
+	// protected until the ContentRef transaction makes those links durable.
+	protection, err := s.chunkProtectionSnapshot()
+	if err != nil {
+		return nil, nil, 0, err
+	}
 	buffer := make([]byte, chunkSize)
 	hashes := make([]string, 0)
 	sizes := make([]int64, 0)
@@ -85,7 +91,7 @@ func (s *Service) stageChunksLocked(source io.Reader) ([]string, []int64, int64,
 			block := buffer[:count]
 			sum := sha256.Sum256(block)
 			hash := hex.EncodeToString(sum[:])
-			if err := s.protectChunkBeforeCommitLocked(hash, int64(count)); err != nil {
+			if err := s.protectChunkBeforeCommitLocked(protection, hash, int64(count)); err != nil {
 				return nil, nil, 0, err
 			}
 			if err := s.writeChunkLocked(hash, block); err != nil {

@@ -22,6 +22,8 @@ type WriteOptions struct {
 
 // CreateDirectory records a desired mkdir and returns its inode.
 func (s *Service) CreateDirectory(parent uint64, name string, opts WriteOptions) (uint64, error) {
+	s.operationMu.RLock()
+	defer s.operationMu.RUnlock()
 	if s.readOnly {
 		return 0, ErrReadOnly
 	}
@@ -80,12 +82,16 @@ func (s *Service) CreateDirectory(parent uint64, name string, opts WriteOptions)
 
 // StageWrite copies source bytes into durable pending content for one inode.
 func (s *Service) StageWrite(inode, generation uint64, source io.Reader, size int64) (ContentRef, error) {
+	s.operationMu.RLock()
+	defer s.operationMu.RUnlock()
 	return s.stagePendingContent(inode, generation, source, size)
 }
 
 // StageWriteForName allocates (if needed) and returns the target inode before
 // copying durable pending content. Call Write after staging to journal the op.
 func (s *Service) StageWriteForName(parent uint64, name string, generation uint64, source io.Reader, size int64) (uint64, ContentRef, error) {
+	s.operationMu.RLock()
+	defer s.operationMu.RUnlock()
 	if s.readOnly {
 		return 0, ContentRef{}, ErrReadOnly
 	}
@@ -93,7 +99,7 @@ func (s *Service) StageWriteForName(parent uint64, name string, generation uint6
 	if err != nil {
 		return 0, ContentRef{}, err
 	}
-	ref, err := s.StageWrite(inode, generation, source, size)
+	ref, err := s.stagePendingContent(inode, generation, source, size)
 	return inode, ref, err
 }
 
@@ -139,7 +145,8 @@ func (s *Service) ensureWriteInode(parent uint64, name string) (uint64, error) {
 
 // Write records desired file content for an existing or new inode.
 func (s *Service) Write(parent uint64, name string, ref ContentRef, opts WriteOptions) (uint64, error) {
-
+	s.operationMu.RLock()
+	defer s.operationMu.RUnlock()
 	if s.readOnly {
 		return 0, ErrReadOnly
 	}
@@ -206,6 +213,8 @@ func (s *Service) Write(parent uint64, name string, ref ContentRef, opts WriteOp
 
 // Rename moves one inode to a new parent/name and never rewrites descendants.
 func (s *Service) Rename(inode, newParent uint64, newName string, opts WriteOptions) error {
+	s.operationMu.RLock()
+	defer s.operationMu.RUnlock()
 	if s.readOnly {
 		return ErrReadOnly
 	}
@@ -285,7 +294,8 @@ func (s *Service) Rename(inode, newParent uint64, newName string, opts WriteOpti
 			return err
 		}
 		return appendOp(tx, Op{
-			Type: OpRename, InodeID: inode, OldParent: oldParent(record), NewParent: newParent,
+			Type: OpRename, InodeID: inode, ContentGeneration: record.ContentGeneration,
+			OldParent: oldParent(record), NewParent: newParent,
 			OldName: record.RemoteName, NewName: newName, State: OpStatePending,
 			Origin: origin(opts), CreatedAtUnixNano: nowUnix(),
 			NextAttemptUnixNano: time.Now().Add(s.quiet).UnixNano(),
@@ -295,6 +305,8 @@ func (s *Service) Rename(inode, newParent uint64, newName string, opts WriteOpti
 
 // Delete marks an inode tombstoned and schedules provider deletion.
 func (s *Service) Delete(inode uint64, opts WriteOptions) error {
+	s.operationMu.RLock()
+	defer s.operationMu.RUnlock()
 	if s.readOnly {
 		return ErrReadOnly
 	}

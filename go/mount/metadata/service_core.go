@@ -9,11 +9,12 @@ import (
 
 // Service exposes read/write APIs to page and mount adapters.
 type Service struct {
-	store    *Store
-	backend  Backend
-	quiet    time.Duration
-	readOnly bool
-	chunkMu  sync.Mutex
+	store       *Store
+	backend     Backend
+	quiet       time.Duration
+	readOnly    bool
+	operationMu sync.RWMutex
+	chunkMu     sync.Mutex
 }
 
 // NewService wires a durable store to one provider backend.

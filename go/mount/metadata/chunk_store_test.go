@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	storageconfig "remote-storage/go/config"
 )
 
 func TestStageWriteDeduplicatesChunksAndBalancesNlink(t *testing.T) {
@@ -84,6 +86,55 @@ func TestChunksPreservePartialOverlapAndSpliceExactBytes(t *testing.T) {
 	}
 	if !bytes.Equal(got, secondData) {
 		t.Fatal("spliced content differs from staged bytes")
+	}
+}
+
+func TestStagingProtectsEveryUncommittedChunk(t *testing.T) {
+	service := newTestService(t, newFakeBackend())
+	first := bytes.Repeat([]byte("a"), chunkSize)
+	second := bytes.Repeat([]byte("b"), chunkSize)
+
+	service.chunkMu.Lock()
+	hashes, _, _, err := service.stageChunksLocked(bytes.NewReader(append(first, second...)))
+	service.chunkMu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hashes) != 2 {
+		t.Fatalf("chunk count = %d, want 2", len(hashes))
+	}
+	protected, err := service.chunkProtectionSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, hash := range hashes {
+		if _, ok := protected[hash]; ok {
+			t.Fatalf("uncommitted chunk %s unexpectedly has bbolt accounting", hash)
+		}
+	}
+	data, err := os.ReadFile(service.chunkProtectionPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest chunkProtection
+	if err := decodeJSON(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	for _, hash := range hashes {
+		if _, ok := manifest.Chunks[hash]; !ok {
+			t.Fatalf("uncommitted chunk %s is missing from protection manifest", hash)
+		}
+	}
+	if _, err := storageconfig.CleanCache(
+		storageconfig.RemoteStorageConfig{CacheDirectory: service.store.chunkRoot},
+		storageconfig.CleanCacheRequest{ClearAll: true},
+	); err != nil {
+		t.Fatal(err)
+	}
+	for _, hash := range hashes {
+		if _, err := os.Stat(service.chunkPath(hash)); err != nil {
+			t.Fatalf("cache cleanup removed protected uncommitted chunk %s: %v", hash, err)
+		}
 	}
 }
 

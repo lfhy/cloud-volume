@@ -102,7 +102,7 @@ Journal(seq -> op)  ──►  Remote Sync Worker(定期/静默期/退出前排�
 
 使用 `bbolt` 作为**持久化 inode B+Tree 的唯一真源**。bbolt 的 bucket/cursor 本身就是磁盘上的 B+Tree，能在一次写事务中同时更新 inode、目录项和 journal；不要再引入一个内存 `google/btree` 作为第二个权威索引。进程内 map/COW 只能是可从 bbolt 重建的读缓存。
 
-元数据数据库不放在用户可清理的 `CacheDirectory`，也不复用 `config.db`：使用 `RuntimeDir()/metadata/v1/<namespace-hash>/metadata.db`。未同步内容的数据面与元数据分离，固定 4 MiB SHA-256 块位于 `<CacheDirectory>/metadata-chunks/<namespace-hash>/chunks/<hash[:2]>/<hash>`；bbolt 的引用计数才是权威。每个 namespace 同时原子发布 `protection.json`，缓存清理读取失败时保守保护全部块，因此 pending 块不会被“清理缓存”删除。
+元数据数据库不放在用户可清理的 `CacheDirectory`，也不复用 `config.db`：使用 `RuntimeDir()/metadata/v1/<namespace-hash>/metadata.db`。未同步内容的数据面与元数据分离，固定 4 MiB SHA-256 块位于 `<CacheDirectory>/metadata-chunks/<namespace-hash>/chunks/<hash[:2]>/<hash>`；bbolt 的引用计数才是权威。每个 namespace 同时原子发布 `protection.json`，同一次多块暂存必须累积全部尚未提交的 hash；缓存清理读取失败时保守保护全部块，因此 pending 块不会被“清理缓存”删除。
 
 首次创建时把实际 chunk root 写入 schema；后续用户修改 CacheDirectory 也继续读取该根直到显式迁移，避免未同步内容因设置变更而丢失。
 
@@ -300,7 +300,7 @@ Phase 0 的止血修复可以并行落地，但不改变上述主线顺序。
   - `ListingCursor{DirectoryInodeID, DirectoryRevision, LastNameKey, RemoteCursor, VerifiedAt, RemoteRevHint}`。
 - [ ] 单事务保证：本地视图变更 + journal append 原子提交。
 - [ ] 实现 `Rename(inode, destinationParent, destinationName)` 单事务：两个 dirent B+Tree 更新 + 一个 inode 边更新 + journal append；不枚举子孙 inode，不移动子孙内容文件。实现目标覆盖、非空目录、ancestor cycle、case/Unicode collision 的明确错误语义。
-- [x] 内容持久化协议（2026-08-17）：写入按固定 4 MiB 分块、SHA-256 内容寻址；块先 fsync + 原子 rename 到 cache root，再提交 `ContentRef{chunks[]}` 与 `chunks[hash].nlink++`。上传时临时拼接完整文件；确认/删除后 `nlink--`，归零删块。启动 sweep 清除孤儿块和中断的拼接临时文件；仅已 StageWrite 的内容也会计入 reset guard。
+- [x] 内容持久化协议（2026-08-17）：写入按固定 4 MiB 分块、SHA-256 内容寻址；块先 fsync + 原子 rename 到 cache root，再提交 `ContentRef{chunks[]}` 与 `chunks[hash].nlink++`。上传时临时拼接完整文件；确认/删除后 `nlink--`，归零删块。启动 sweep 清除孤儿块和中断的拼接临时文件；仅已 StageWrite 的内容以及 pending/running/failed journal 均计入 reset guard。
 - [x] 缓存挂钩（2026-08-17）：缓存统计显示 protected pending 块；按规则清理与清空缓存都跳过 `protection.json` 标记的 pending 块，清单缺失或损坏时保护整个 namespace。已同步读缓存尚未迁移到块存储。
 - [ ] journal append-only；verified seq 之后才允许 compact。
 - [ ] 读 API 同时覆盖页面分页与 mount readdir/stat：`ListPage(prefix, cursor)`、`Stat(path)`、`GetOID(oid)`；页面不再依赖 `ListMountedObjectPage` 的挂载会话分支。

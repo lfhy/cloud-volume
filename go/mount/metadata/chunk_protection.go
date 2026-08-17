@@ -55,15 +55,11 @@ func (s *Service) syncChunkProtectionBestEffortLocked() {
 }
 
 // protectChunkBeforeCommitLocked publishes a prospective chunk before moving
-// the file into its hash path. The manifest can be a harmless superset after a
-// failed write, but it never exposes a live staged block to cache eviction.
-func (s *Service) protectChunkBeforeCommitLocked(hash string, size int64) error {
-	protected, err := s.chunkProtectionSnapshot()
-	if err != nil {
-		return err
-	}
-	protected[hash] = size
-	return s.writeChunkProtection(protected)
+// the file into its hash path. protection belongs to the whole staging pass,
+// so earlier uncommitted blocks remain protected when later blocks are added.
+func (s *Service) protectChunkBeforeCommitLocked(protection map[string]int64, hash string, size int64) error {
+	protection[hash] = size
+	return s.writeChunkProtection(protection)
 }
 
 // writeChunkProtection atomically publishes a conservative protected set.

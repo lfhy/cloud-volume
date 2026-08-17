@@ -76,6 +76,62 @@ func TestWorkerRetriesTransientFailure(t *testing.T) {
 	}
 }
 
+func TestForcedResetWaitsForInFlightWorker(t *testing.T) {
+	backend := &blockingCreateBackend{
+		fakeBackend: newFakeBackend(), started: make(chan struct{}), release: make(chan struct{}),
+	}
+	service := newTestService(t, backend)
+	service.SetQuietPeriod(time.Nanosecond)
+	if _, err := service.CreateDirectory(rootInode, "running", WriteOptions{Origin: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	worker := &Worker{service: service, wake: make(chan struct{}, 1), running: map[uint64]struct{}{}}
+	workerDone := make(chan struct{})
+	go func() {
+		worker.runDueOnce(context.Background())
+		close(workerDone)
+	}()
+	select {
+	case <-backend.started:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not enter provider call")
+	}
+
+	resetDone := make(chan ResetResult, 1)
+	resetErr := make(chan error, 1)
+	go func() {
+		result, err := service.Reset(true)
+		if err != nil {
+			resetErr <- err
+			return
+		}
+		resetDone <- result
+	}()
+	select {
+	case result := <-resetDone:
+		t.Fatalf("forced reset completed during provider call: %+v", result)
+	case err := <-resetErr:
+		t.Fatal(err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(backend.release)
+	select {
+	case <-workerDone:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not finish after provider release")
+	}
+	select {
+	case result := <-resetDone:
+		if !result.Reset {
+			t.Fatalf("forced reset result = %+v", result)
+		}
+	case err := <-resetErr:
+		t.Fatal(err)
+	case <-time.After(time.Second):
+		t.Fatal("forced reset did not finish after worker")
+	}
+}
+
 type conflictingBackend struct {
 	*fakeBackend
 	mu         sync.Mutex
@@ -248,6 +304,53 @@ func TestWorkerRetiresQueuedWriteGenerationsIndependently(t *testing.T) {
 	}
 	if object, err := service.StatInode(context.Background(), inode); err != nil || object.Size != 6 {
 		t.Fatalf("final inode = %+v, err=%v", object, err)
+	}
+}
+
+func TestWorkerRenameWaitsForEarlierLocalWriteGeneration(t *testing.T) {
+	backend := &uploadCaptureBackend{fakeBackend: newFakeBackend()}
+	service := newTestService(t, backend)
+	service.SetQuietPeriod(time.Hour)
+	inode, ref, err := service.StageWriteForName(rootInode, "before.txt", 1, strings.NewReader("contents"), 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Write(rootInode, "before.txt", ref, WriteOptions{Origin: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Rename(inode, rootInode, "after.txt", WriteOptions{Origin: "test"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var rename Op
+	err = service.store.update(func(tx boltTxT) error {
+		for seq := uint64(1); ; seq++ {
+			op, err := getOp(tx, seq)
+			if errors.Is(err, ErrNotFound) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if op.Type != OpRename {
+				continue
+			}
+			rename = op
+			previous := op
+			op.NextAttemptUnixNano = time.Now().Add(-time.Second).UnixNano()
+			return putOp(tx, op, previous)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rename.ContentGeneration != ref.Generation {
+		t.Fatalf("rename generation = %d, want %d", rename.ContentGeneration, ref.Generation)
+	}
+
+	worker := &Worker{service: service, wake: make(chan struct{}, 1), running: map[uint64]struct{}{}}
+	if claimed := worker.claimDue(); len(claimed) != 0 {
+		t.Fatalf("rename bypassed earlier pending write: %+v", claimed)
 	}
 }
 

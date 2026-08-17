@@ -233,14 +233,6 @@ func (s *Service) Status() Status {
 	_ = s.store.view(func(tx boltTxT) error {
 		status.InodeCount = tx.Bucket([]byte(bucketInodes)).Stats().KeyN
 		status.MaterializedCount = tx.Bucket([]byte(bucketListingState)).Stats().KeyN
-		_ = tx.Bucket([]byte(bucketReadyOps)).ForEach(func(key, _ []byte) error {
-			if OpState(key[0]) == OpStateFailed {
-				status.FailedOps++
-			} else {
-				status.PendingOps++
-			}
-			return nil
-		})
 		status.PendingContent = tx.Bucket([]byte(bucketContentRefs)).Stats().KeyN
 		_ = tx.Bucket([]byte(bucketInodes)).ForEach(func(_, value []byte) error {
 			var record Inode
@@ -251,7 +243,18 @@ func (s *Service) Status() Status {
 		})
 		_ = tx.Bucket([]byte(bucketJournal)).ForEach(func(_, value []byte) error {
 			var op Op
-			if decodeJSON(value, &op) == nil && op.AppliedAtUnixNano > status.LastVerifiedUnixNs {
+			if decodeJSON(value, &op) != nil {
+				return nil
+			}
+			switch op.State {
+			case OpStatePending, OpStateRunning:
+				// Running entries have left ready_ops while the provider call is
+				// in flight, but still make a non-forced reset unsafe.
+				status.PendingOps++
+			case OpStateFailed:
+				status.FailedOps++
+			}
+			if op.AppliedAtUnixNano > status.LastVerifiedUnixNs {
 				status.LastVerifiedUnixNs = op.AppliedAtUnixNano
 			}
 			return nil
@@ -268,34 +271,38 @@ type ResetResult struct {
 	Required bool `json:"forceRequired"`
 }
 
-// Reset deletes the namespace database after checking pending operations.
+// Reset rebuilds namespace metadata after checking pending operations.
 func (s *Service) Reset(force bool) (ResetResult, error) {
 	status := s.Status()
-	if status.PendingOps > 0 || status.FailedOps > 0 || status.PendingContent > 0 {
-		if !force {
-			pending := status.PendingOps + status.FailedOps
-			if status.PendingContent > pending {
-				pending = status.PendingContent
-			}
-			return ResetResult{
-				Pending: pending, Required: true,
-			}, nil
-		}
+	if result, blocked := resetBlocked(status, force); blocked {
+		return result, nil
 	}
-	if err := s.store.Close(); err != nil {
+	// Recheck under the operation barrier so a writer or worker cannot create
+	// a journal entry after the initial guard and before the rebuild.
+	s.operationMu.Lock()
+	defer s.operationMu.Unlock()
+	status = s.Status()
+	if result, blocked := resetBlocked(status, force); blocked {
+		return result, nil
+	}
+	if err := s.store.rebuild(); err != nil {
 		return ResetResult{}, err
 	}
-	root := s.store.namespace.Root
-	_ = os.RemoveAll(root)
-	store, err := OpenStore(s.store.namespace)
-	if err != nil {
-		return ResetResult{}, err
-	}
-	s.store = store
 	if err := s.SweepChunkStore(); err != nil {
 		return ResetResult{}, err
 	}
 	return ResetResult{Reset: true}, nil
+}
+
+func resetBlocked(status Status, force bool) (ResetResult, bool) {
+	if force || (status.PendingOps == 0 && status.FailedOps == 0 && status.PendingContent == 0) {
+		return ResetResult{}, false
+	}
+	pending := status.PendingOps + status.FailedOps
+	if status.PendingContent > pending {
+		pending = status.PendingContent
+	}
+	return ResetResult{Pending: pending, Required: true}, true
 }
 
 // Close releases the backing database.

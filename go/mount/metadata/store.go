@@ -19,6 +19,18 @@ type Store struct {
 	mu        sync.Mutex
 }
 
+var metadataBucketNames = []string{
+	bucketSchema,
+	bucketInodes,
+	bucketDirents,
+	bucketJournal,
+	bucketListingState,
+	bucketContentRefs,
+	bucketChunks,
+	bucketReadyOps,
+	bucketInodeOps,
+}
+
 // OpenStore opens (creating when necessary) one namespace database.
 func OpenStore(namespace Namespace) (*Store, error) {
 	if namespace.ID == "" || namespace.Root == "" {
@@ -56,10 +68,7 @@ func (s *Store) ensureSchema() error {
 			}
 			s.chunkRoot = chunkRoot
 		}
-		for name := range map[string]struct{}{
-			bucketInodes: {}, bucketDirents: {}, bucketJournal: {}, bucketListingState: {},
-			bucketContentRefs: {}, bucketChunks: {}, bucketReadyOps: {}, bucketInodeOps: {},
-		} {
+		for _, name := range metadataBucketNames[1:] {
 			if _, err := tx.CreateBucketIfNotExists([]byte(name)); err != nil {
 				return err
 			}
@@ -85,6 +94,40 @@ func (s *Store) ensureSchema() error {
 			return err
 		}
 		s.chunkRoot = chunkRoot
+		return putInode(tx, Inode{
+			ID: rootInode, Kind: KindDirectory, DesiredParentID: rootInode,
+			RemoteParentID: rootInode, State: StateSynced, LocalRevision: 1,
+		})
+	})
+}
+
+// rebuild clears namespace metadata in-place so an in-flight worker never
+// observes a closed bbolt handle while a forced reset is being applied.
+func (s *Store) rebuild() error {
+	return s.update(func(tx *bolt.Tx) error {
+		for _, name := range metadataBucketNames {
+			if err := tx.DeleteBucket([]byte(name)); err != nil && err != bolt.ErrBucketNotFound {
+				return err
+			}
+		}
+		for _, name := range metadataBucketNames {
+			if _, err := tx.CreateBucket([]byte(name)); err != nil {
+				return err
+			}
+		}
+		schema := tx.Bucket([]byte(bucketSchema))
+		if err := schema.Put([]byte("version"), encodeUint64(SchemaVersion)); err != nil {
+			return err
+		}
+		if err := schema.Put([]byte("namespace"), []byte(s.namespace.ID)); err != nil {
+			return err
+		}
+		if err := schema.Put([]byte("nextInode"), encodeUint64(rootInode)); err != nil {
+			return err
+		}
+		if err := schema.Put([]byte("chunkRoot"), []byte(s.chunkRoot)); err != nil {
+			return err
+		}
 		return putInode(tx, Inode{
 			ID: rootInode, Kind: KindDirectory, DesiredParentID: rootInode,
 			RemoteParentID: rootInode, State: StateSynced, LocalRevision: 1,

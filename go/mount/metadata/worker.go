@@ -66,20 +66,20 @@ func (w *Worker) Drain(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		pending, failed, next := w.snapshotWork()
+		pending, failed, running, next := w.snapshotWork()
 		if pending == 0 && failed == 0 {
 			return nil
 		}
 		if failed > 0 {
 			return fmt.Errorf("metadata worker: %d failed operations", failed)
 		}
-		if !next.IsZero() && next.After(time.Now()) && time.Now().Before(deadline) {
+		if running == 0 && !next.IsZero() && next.After(time.Now()) && time.Now().Before(deadline) {
 			w.sleepUntil(minTime(next, deadline))
 			continue
 		}
 		before := pending
 		w.runDueOnce(ctx)
-		pending, failed, _ = w.snapshotWork()
+		pending, failed, running, _ = w.snapshotWork()
 		if failed > 0 {
 			return fmt.Errorf("metadata worker: %d failed operations", failed)
 		}
@@ -88,11 +88,15 @@ func (w *Worker) Drain(ctx context.Context) error {
 		}
 		// Stop when a pass made no progress; otherwise a repeatedly deferred
 		// retry would turn Drain into a busy loop until its deadline.
-		if pending >= before {
+		if pending >= before && running == 0 {
 			return context.DeadlineExceeded
 		}
 		if time.Now().After(deadline) {
 			return context.DeadlineExceeded
+		}
+		if running > 0 {
+			w.sleepUntil(minTime(time.Now().Add(workerPoll), deadline))
+			continue
 		}
 	}
 }
@@ -124,32 +128,40 @@ func (w *Worker) sleepUntil(when time.Time) {
 	}
 }
 
-func (w *Worker) snapshotWork() (pending int, failed int, next time.Time) {
+func (w *Worker) snapshotWork() (pending int, failed int, running int, next time.Time) {
 	_ = w.service.store.view(func(tx boltTxT) error {
 		now := time.Now().UnixNano()
-		ready := tx.Bucket([]byte(bucketReadyOps))
-		_ = ready.ForEach(func(key, _ []byte) error {
-			opState := OpState(key[0])
-			attempt := int64(decodeUint64(key[1:9]))
-			if opState == OpStateFailed {
-				failed++
+		journal := tx.Bucket([]byte(bucketJournal))
+		_ = journal.ForEach(func(_, value []byte) error {
+			var op Op
+			if decodeJSON(value, &op) != nil {
 				return nil
 			}
-			if attempt > now {
-				nextTime := time.Unix(0, attempt)
-				if next.IsZero() || nextTime.Before(next) {
-					next = nextTime
+			switch op.State {
+			case OpStateFailed:
+				failed++
+			case OpStateRunning:
+				pending++
+				running++
+			case OpStatePending:
+				pending++
+				if op.NextAttemptUnixNano > now {
+					nextTime := time.Unix(0, op.NextAttemptUnixNano)
+					if next.IsZero() || nextTime.Before(next) {
+						next = nextTime
+					}
 				}
 			}
-			pending++
 			return nil
 		})
 		return nil
 	})
-	return pending, failed, next
+	return pending, failed, running, next
 }
 
 func (w *Worker) runDueOnce(ctx context.Context) {
+	w.service.operationMu.RLock()
+	defer w.service.operationMu.RUnlock()
 	ops := w.claimDue()
 	for _, op := range ops {
 		w.execute(ctx, op)
@@ -208,10 +220,13 @@ func (w *Worker) claimDue() []Op {
 	return claimed
 }
 
-// blocked reports whether one op must wait on another journal operation. Only
-// earlier-sequence unfinished ops of the dependency kinds are considered so a
-// failed child can never wedge a parent that already completed.
+// blocked reports whether one op must wait on an earlier unfinished journal
+// operation. Failed operations do not block later work, but every pending or
+// running operation on the same inode remains an ordering barrier.
 func (w *Worker) blocked(tx boltTxT, op Op) (bool, string) {
+	if pendingOpForInode(tx, op.InodeID, op.Seq) {
+		return true, "earlier operation on inode pending"
+	}
 	if op.Type == OpRename || op.Type == OpDelete {
 		return false, ""
 	}
@@ -226,9 +241,6 @@ func (w *Worker) blocked(tx boltTxT, op Op) (bool, string) {
 		if pendingOpForInode(tx, ancestor, op.Seq) {
 			return true, "parent mkdir/rename pending"
 		}
-	}
-	if pendingOpForInode(tx, op.InodeID, op.Seq) {
-		return true, "earlier op on same inode pending"
 	}
 	return false, ""
 }
@@ -392,7 +404,7 @@ func (w *Worker) executeMove(ctx context.Context, op Op) error {
 			}
 			return w.service.confirmRemote(ctx, op, record.DesiredParentID, record.DesiredName, false)
 		}
-		_, ref, refErr := w.service.pendingWrite(op.InodeID, 0)
+		_, ref, refErr := w.service.pendingWrite(op.InodeID, op.ContentGeneration)
 		if refErr != nil {
 			return refErr
 		}

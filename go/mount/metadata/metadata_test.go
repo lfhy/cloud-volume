@@ -281,6 +281,31 @@ func TestResetGuardRequiresForceWithPendingOps(t *testing.T) {
 	}
 }
 
+func TestResetGuardRequiresForceWithRunningOp(t *testing.T) {
+	service := newTestService(t, newFakeBackend())
+	service.SetQuietPeriod(time.Nanosecond)
+	if _, err := service.CreateDirectory(rootInode, "running", WriteOptions{Origin: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	worker := &Worker{service: service, wake: make(chan struct{}, 1), running: map[uint64]struct{}{}}
+	claimed := worker.claimDue()
+	if len(claimed) != 1 || claimed[0].State != OpStateRunning {
+		t.Fatalf("claimed operations = %+v, want one running op", claimed)
+	}
+	defer worker.releaseInode(claimed[0].InodeID)
+
+	if status := service.Status(); status.PendingOps != 1 || status.FailedOps != 0 {
+		t.Fatalf("running operation missing from reset status: %+v", status)
+	}
+	result, err := service.Reset(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Reset || !result.Required || result.Pending != 1 {
+		t.Fatalf("running operation did not block reset: %+v", result)
+	}
+}
+
 func TestProfileIdentityPersistsAcrossSaves(t *testing.T) {
 	if got := NamespaceID(fakeConfig("p1"), "bucket"); got != NamespaceID(fakeConfig("p1"), "bucket") {
 		t.Fatal("namespace identity is not deterministic")
