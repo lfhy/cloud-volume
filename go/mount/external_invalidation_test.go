@@ -395,3 +395,33 @@ func TestMetadataProjectionSkipsSupersededMountWrites(t *testing.T) {
 		t.Fatalf("late page delete projection cleared newer mount marker: %+v ok=%t", marker, ok)
 	}
 }
+
+func TestDirectoryProjectionSkipsLaterMountChildWrite(t *testing.T) {
+	access := newTestBucketAccess(t)
+	backend := newMetadataMountWriteBackend()
+	_, handle := attachMetadataWriteService(t, access, backend)
+	service := handle.Service
+	service.SetQuietPeriod(24 * time.Hour)
+	ctx := context.Background()
+
+	if _, _, err := service.CreateDirectoryPathWithProjection(
+		ctx, "source", metadata.WriteOptions{Origin: "page"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	target, err := service.RenamePathWithProjection(
+		ctx, "source", "destination", metadata.WriteOptions{Origin: "page"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mountWrite := createTempFile(t, access.cacheRoot, "mount-child.txt", "mount")
+	if err := access.stageLocalWrite("destination/existing.txt", mountWrite, int64(len("mount"))); err != nil {
+		t.Fatal(err)
+	}
+
+	access.projectMetadataRename("source", target, true)
+	if marker, ok := access.cache.localFile("destination/existing.txt"); !ok || marker.localPath != mountWrite {
+		t.Fatalf("late directory projection cleared newer child marker: %+v ok=%t", marker, ok)
+	}
+}

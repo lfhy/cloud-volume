@@ -121,9 +121,15 @@ type Op struct {
 	ExpectedRemoteFingerprint string `json:"expectedRemoteFingerprint,omitempty"`
 	HardDelete                bool   `json:"hardDelete,omitempty"`
 	MoveApplied               bool   `json:"moveApplied,omitempty"`
-	Origin                    string `json:"origin"`
-	CreatedAtUnixNano         int64  `json:"createdAtUnixNs"`
-	AppliedAtUnixNano         int64  `json:"appliedAtUnixNs,omitempty"`
+	// MoveSource/Target and MoveParent/Name are frozen immediately before a
+	// provider move. Desired edges may change again while confirmation retries.
+	MoveSource        string `json:"moveSource,omitempty"`
+	MoveTarget        string `json:"moveTarget,omitempty"`
+	MoveParent        uint64 `json:"moveParent,omitempty"`
+	MoveName          string `json:"moveName,omitempty"`
+	Origin            string `json:"origin"`
+	CreatedAtUnixNano int64  `json:"createdAtUnixNs"`
+	AppliedAtUnixNano int64  `json:"appliedAtUnixNs,omitempty"`
 }
 
 // ListingState records whether and when one directory was materialized.

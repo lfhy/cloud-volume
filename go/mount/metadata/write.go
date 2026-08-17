@@ -115,10 +115,6 @@ func (s *Service) Write(parent uint64, name string, ref ContentRef, opts WriteOp
 			if err := putDirent(tx, parent, Dirent{ChildID: inode, DisplayName: name, NameKey: nameKey}); err != nil {
 				return err
 			}
-			parentRecord.LocalRevision++
-			if err := putInode(tx, parentRecord); err != nil {
-				return err
-			}
 		} else {
 			return direntErr
 		}
@@ -136,6 +132,12 @@ func (s *Service) Write(parent uint64, name string, ref ContentRef, opts WriteOp
 		record.LocalRevision++
 		record.State = StatePending
 		if err := putInode(tx, record); err != nil {
+			return err
+		}
+		// A directory projection clears local markers beneath it, so an
+		// overwrite must advance the parent even when its dirent is unchanged.
+		parentRecord.LocalRevision++
+		if err := putInode(tx, parentRecord); err != nil {
 			return err
 		}
 		return appendOp(tx, Op{
