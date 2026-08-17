@@ -85,6 +85,8 @@ func invokeBridgeMethod(method string, args json.RawMessage) (any, error) {
 		return listObjects(args)
 	case "list_object_page":
 		return listObjectPage(args)
+	case "metadata_namespace_status":
+		return metadataNamespaceStatus(args)
 	case "head_object":
 		return headObject(args)
 	case "directory_access":

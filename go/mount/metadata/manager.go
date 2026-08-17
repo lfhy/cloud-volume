@@ -5,7 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,13 +71,17 @@ type AcquireHandle struct {
 	manager *Manager
 }
 
+// ErrNoProfileID marks configs that lack the immutable identity required to
+// open a durable namespace; callers treat it as "fall back to direct listing".
+var ErrNoProfileID = errors.New("metadata: profile has no profileId")
+
 // Acquire returns a retained service handle, creating its bbolt namespace on
 // demand. A missing ProfileID is an error: a namespace derived from mutable
 // fallback fields would silently split/merge accounts after identity assignment.
 func (m *Manager) Acquire(config storageconfig.RemoteStorageConfig, bucket string) (*AcquireHandle, error) {
 	normalized := config.Normalized()
 	if normalized.ProfileID == "" {
-		return nil, fmt.Errorf("metadata: profile has no profileId; save the profile before acquiring metadata")
+		return nil, ErrNoProfileID
 	}
 	id := NamespaceID(normalized, bucket)
 	m.mu.Lock()

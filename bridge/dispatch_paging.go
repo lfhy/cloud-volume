@@ -34,6 +34,12 @@ func listObjectPage(args json.RawMessage) (any, error) {
 	if input.ForceRefresh {
 		bucketmount.InvalidateListCacheForPrefix(input.Config, input.Bucket, input.Prefix)
 	}
+	// Unified read view: page listings always consult the persistent metadata
+	// namespace first; mount-session caches and provider-direct listing are
+	// only fallbacks (M2 of the metadata journal plan).
+	if page, handled, err := listObjectPageFromMetadata(input); handled || err != nil {
+		return page, err
+	}
 	if page, handled, err := bucketmount.ListMountedObjectPage(
 		input.Config,
 		input.Bucket,
