@@ -75,6 +75,79 @@ func (c *bucketCache) renameLocalFile(
 	return nil
 }
 
+// rebaseLocalFileAfterExternalMove updates cache markers after Cloud Files has
+// already moved the bytes before delivering its rename-completion callback.
+func (c *bucketCache) rebaseLocalFileAfterExternalMove(
+	oldVirtualPath, newVirtualPath, oldLocalPath, newLocalPath string,
+	isDir bool,
+) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	oldClean := cleanVirtualPath(oldVirtualPath)
+	newClean := cleanVirtualPath(newVirtualPath)
+	if oldClean == newClean {
+		return
+	}
+	if !isDir {
+		c.rebaseExternallyMovedFileLocked(oldClean, newClean, newLocalPath)
+		c.renameLocalEntryLocked(oldClean, newClean, false)
+		c.renameDeletedLocked(oldClean, newClean, false)
+		c.invalidateParentsLocked(oldClean)
+		c.invalidateParentsLocked(newClean)
+		return
+	}
+
+	oldPrefix := ensureDirSuffix(oldClean)
+	newPrefix := ensureDirSuffix(newClean)
+	moves := make([]cacheLocalMove, 0)
+	for key, item := range c.localFiles {
+		if !strings.HasPrefix(key, oldPrefix) {
+			continue
+		}
+		nextKey := newPrefix + strings.TrimPrefix(key, oldPrefix)
+		moves = append(moves, cacheLocalMove{oldKey: key, newKey: nextKey, item: item})
+	}
+	for _, move := range moves {
+		item := move.item
+		item.localPath = rebaseExternallyMovedLocalPath(item.localPath, oldLocalPath, newLocalPath)
+		item.info.Key = move.newKey
+		c.localFiles[move.newKey] = item
+		delete(c.localFiles, move.oldKey)
+	}
+	c.renameLocalEntryLocked(oldClean, newClean, true)
+	c.renameDeletedLocked(oldClean, newClean, true)
+	c.invalidateParentsLocked(oldClean)
+	c.invalidateParentsLocked(newClean)
+}
+
+func (c *bucketCache) rebaseExternallyMovedFileLocked(oldClean, newClean, newLocalPath string) {
+	item, ok := c.localFiles[oldClean]
+	if !ok {
+		return
+	}
+	if strings.TrimSpace(newLocalPath) != "" {
+		item.localPath = newLocalPath
+	}
+	item.info.Key = newClean
+	c.localFiles[newClean] = item
+	delete(c.localFiles, oldClean)
+}
+
+func rebaseExternallyMovedLocalPath(localPath, oldRoot, newRoot string) string {
+	if strings.TrimSpace(localPath) == "" || strings.TrimSpace(oldRoot) == "" || strings.TrimSpace(newRoot) == "" {
+		return localPath
+	}
+	relative, err := filepath.Rel(filepath.Clean(oldRoot), filepath.Clean(localPath))
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return localPath
+	}
+	if relative == "." {
+		return filepath.Clean(newRoot)
+	}
+	return filepath.Join(newRoot, relative)
+}
+
 func (c *bucketCache) renameLocalFileLocked(oldClean, newClean, cacheRoot string) error {
 	item, ok := c.localFiles[oldClean]
 	if !ok {

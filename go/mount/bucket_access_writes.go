@@ -300,7 +300,9 @@ func (a *bucketAccess) enqueueRenamePath(
 		return err
 	}
 	if a.usesMetadataWritePath() {
-		return a.renameMetadataPath(context.Background(), oldClean, newClean, isDir)
+		return a.renameMetadataPathAfterExternalMove(
+			context.Background(), oldClean, newClean, oldLocalPath, newLocalPath, isDir,
+		)
 	}
 	// Allocate the rename barrier while holding the same local-path gate used
 	// by file writes, directory creates, and deletes.

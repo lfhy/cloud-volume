@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -210,5 +211,42 @@ func TestMetadataMountWritesUseJournalInsteadOfLegacyQueues(t *testing.T) {
 	backend.mu.Unlock()
 	if exists {
 		t.Fatal("metadata delete did not remove the remote object")
+	}
+}
+
+func TestMetadataQueuedRenameAcceptsAlreadyMovedCloudFilesSource(t *testing.T) {
+	// Cloud Files reports rename completion after Explorer has physically moved
+	// the sync-root file, so the metadata path must only rebind its marker.
+	access := newTestBucketAccess(t)
+	backend := newMetadataMountWriteBackend()
+	manager, _ := attachMetadataWriteService(t, access, backend)
+	ctx := context.Background()
+	oldPath := createTempFile(t, access.sessionRoot, "old.txt", "payload")
+	newPath := filepath.Join(access.sessionRoot, "new.txt")
+	if err := access.stageLocalWrite("old.txt", oldPath, int64(len("payload"))); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(oldPath, newPath); err != nil {
+		t.Fatalf("simulate Explorer rename: %v", err)
+	}
+	if err := access.enqueueRenamePath("old.txt", "new.txt", oldPath, newPath, false); err != nil {
+		t.Fatalf("metadata queued rename: %v", err)
+	}
+	marker, ok := access.cache.localFile("new.txt")
+	if !ok || marker.localPath != newPath {
+		t.Fatalf("renamed local marker = %+v ok=%t, want new path %q", marker, ok, newPath)
+	}
+	if _, ok := access.cache.localFile("old.txt"); ok {
+		t.Fatal("old local marker survived Cloud Files rename")
+	}
+	if err := manager.DrainAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	backend.mu.Lock()
+	_, oldExists := backend.objects["old.txt"]
+	_, newExists := backend.objects["new.txt"]
+	backend.mu.Unlock()
+	if oldExists || !newExists {
+		t.Fatalf("remote journal convergence old=%t new=%t", oldExists, newExists)
 	}
 }

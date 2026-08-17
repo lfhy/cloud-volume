@@ -20,6 +20,7 @@
 - Metadata-backed mounted objects now retain stable platform identity: Linux FUSE/WinFsp expose their persistent OID, and Cloud Files uses a namespace-qualified OID identity while keeping remote freshness fingerprints separate for correct dehydration.
 - Added a path-level metadata write facade that reserves unique content generations, journals create/write/rename/delete mutations, and prevents remote refreshes from reviving locally renamed or deleted paths while their work is pending.
 - Metadata-enabled mounts now submit mkdir/upload/rename/delete through the durable inode journal instead of legacy remote queues. Worker ordering preserves write-then-rename semantics, staged-write failures/restarts cannot leave phantom pending inodes, and pending mount drafts retain their stable OID.
+- Fixed a write-confirmation refresh window that could lose a pending rename's Desired inode, and made Windows Cloud Files rename completion rebind already-moved staged-file markers before the metadata journal worker syncs them.
 
 - 修复 Windows Cloud Files 重挂载后客户端能看到文件、但 Explorer 中部分目录为空：复用缓存里的目录现在会重新启用按需枚举；如果目录已退化为普通 NTFS 目录，则原地转换回云占位目录并保留现有内容。并发目录枚举会传递真实失败结果，不再把一次失败误记为“已完整加载”。
 - 修复 Windows Cloud Files 目录改名竞态：`go/mount/dir_sync_queue.go` 的 `rebaseAndFence` 现在把目录创建请求与远端改名统一排进同一个 fence；`bucket_access_writes.go` 在远端源已确认缺失时复用已改名的目标，绝不再向严格后端发送一次“源不存在”的 `MoveObject`。

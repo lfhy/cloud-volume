@@ -3,6 +3,7 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -55,6 +56,56 @@ func TestWorkerWritesRemoteSourceBeforeLaterRename(t *testing.T) {
 	}
 	if upload < 0 || move < 0 || upload > move {
 		t.Fatalf("remote mutation order = %+v, want upload old before move", backend.ops)
+	}
+}
+
+func TestWriteConfirmationRetainsPendingRenameDuringRefresh(t *testing.T) {
+	backend := newFakeBackend()
+	backend.objects["/old.txt"] = storageops.ObjectInfo{Key: "old.txt", Size: 3, ETag: "etag-old"}
+	service := newTestService(t, backend)
+	service.SetQuietPeriod(time.Nanosecond)
+	ctx := context.Background()
+	if _, err := service.ListPage(ctx, rootInode, "", 10); err != nil {
+		t.Fatal(err)
+	}
+	inode, err := service.Resolve(rootInode, "old.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := service.StageWrite(inode, 1, strings.NewReader("new"), 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Write(rootInode, "old.txt", ref, WriteOptions{Origin: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Rename(inode, rootInode, "new.txt", WriteOptions{Origin: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Millisecond)
+	worker := &Worker{service: service, wake: make(chan struct{}, 1), running: map[uint64]struct{}{}}
+	claimed := worker.claimDue()
+	if len(claimed) != 1 || claimed[0].Type != OpWrite {
+		t.Fatalf("first claim = %+v, want only write", claimed)
+	}
+	worker.execute(ctx, claimed[0])
+
+	if err := service.MaterializeDirectory(ctx, rootInode); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Resolve(rootInode, "old.txt"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("refresh revived remote source: %v", err)
+	}
+	if resolved, err := service.Resolve(rootInode, "new.txt"); err != nil || resolved != inode {
+		t.Fatalf("refresh lost renamed inode: got=%d want=%d err=%v", resolved, inode, err)
+	}
+
+	worker.runDueOnce(ctx)
+	if _, exists := backend.objects["/old.txt"]; exists {
+		t.Fatalf("old remote path survived rename: %+v", backend.objects)
+	}
+	if _, exists := backend.objects["/new.txt"]; !exists {
+		t.Fatalf("new remote path missing after rename: %+v", backend.objects)
 	}
 }
 

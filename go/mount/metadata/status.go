@@ -2,6 +2,7 @@
 package metadata
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -192,17 +193,17 @@ func (s *Service) confirmRemote(
 		if errors.Is(headErr, os.ErrNotExist) && !isFile {
 			// Providers without explicit directory markers may legitimately
 			// report missing markers once children exist.
-			return s.commitConfirmation(inode, parent, name, "")
+			return s.commitConfirmation(inode, op.Seq, parent, name, "")
 		}
 		return headErr
 	}
 	fingerprint := Fingerprint(storageops.ObjectInfo{
 		Size: info.Size, LastModified: info.LastModified, ETag: info.ETag,
 	})
-	return s.commitConfirmation(inode, parent, name, fingerprint)
+	return s.commitConfirmation(inode, op.Seq, parent, name, fingerprint)
 }
 
-func (s *Service) commitConfirmation(inode, parent uint64, name, fingerprint string) error {
+func (s *Service) commitConfirmation(inode, confirmedSeq, parent uint64, name, fingerprint string) error {
 	return s.store.update(func(tx boltTxT) error {
 		record, err := getInode(tx, inode)
 		if err != nil {
@@ -212,11 +213,35 @@ func (s *Service) commitConfirmation(inode, parent uint64, name, fingerprint str
 		if fingerprint != "" {
 			record.RemoteFingerprint = fingerprint
 		}
-		if record.State != StateTombstone {
+		// A write can confirm its old Remote edge while a later rename/delete is
+		// still pending. Keep that Desired intent visible so a refresh cannot
+		// revive the remote source and orphan the stable inode.
+		if record.State != StateTombstone && record.State != StateConflict && !hasLaterPendingOp(tx, inode, confirmedSeq) {
 			record.State = StateSynced
 		}
 		return putInode(tx, record)
 	})
+}
+
+func hasLaterPendingOp(tx boltTxT, inode, confirmedSeq uint64) bool {
+	index := tx.Bucket([]byte(bucketInodeOps))
+	journal := tx.Bucket([]byte(bucketJournal))
+	prefix := encodeUint64(inode)
+	cursor := index.Cursor()
+	for key, _ := cursor.Seek(prefix); key != nil && bytes.HasPrefix(key, prefix); key, _ = cursor.Next() {
+		seq := decodeUint64(key[8:])
+		if seq <= confirmedSeq {
+			continue
+		}
+		var op Op
+		if decodeJSON(journal.Get(encodeUint64(seq)), &op) != nil {
+			continue
+		}
+		if op.State == OpStatePending || op.State == OpStateRunning {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) retireContent(inode, generation uint64) error {

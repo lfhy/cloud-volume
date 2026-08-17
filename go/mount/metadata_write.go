@@ -99,3 +99,27 @@ func (a *bucketAccess) renameMetadataPath(ctx context.Context, oldPath, newPath 
 	ForgetPeerContent(a.config, a.bucket, oldClean)
 	return nil
 }
+
+// renameMetadataPathAfterExternalMove records a Cloud Files rename after the
+// provider callback has already moved its sync-root bytes.
+func (a *bucketAccess) renameMetadataPathAfterExternalMove(
+	ctx context.Context, oldPath, newPath, oldLocalPath, newLocalPath string, isDir bool,
+) error {
+	service := a.metadataService()
+	if service == nil {
+		return fmt.Errorf("metadata write path is unavailable")
+	}
+	oldClean, newClean := cleanVirtualPath(oldPath), cleanVirtualPath(newPath)
+	a.writebackMu.Lock()
+	defer a.writebackMu.Unlock()
+	if err := service.RenamePath(ctx, oldClean, newClean, metadata.WriteOptions{Origin: "mount"}); err != nil {
+		return err
+	}
+	// Explorer already performed the physical move. Rebinding only the cache
+	// marker avoids a second os.Rename of the now-absent source path.
+	a.cache.rebaseLocalFileAfterExternalMove(oldClean, newClean, oldLocalPath, newLocalPath, isDir)
+	a.cache.invalidatePath(oldClean)
+	a.cache.invalidatePath(newClean)
+	ForgetPeerContent(a.config, a.bucket, oldClean)
+	return nil
+}
