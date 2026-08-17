@@ -279,12 +279,18 @@ Phase 0 的止血修复可以并行落地，但不改变上述主线顺序。
 
 ### Phase 0 — 先止血（不依赖新架构）
 
-- [ ] 修复 `writeback_restore.canRestoreRecord`：本地缓存默认在 `~/.cloud-volume/cache/mounts/<bucket>`，不在 sessionRoot 内；恢复时应同时接受 sessionRoot 与 cacheRoot，否则重启即丢上传。
-- [ ] macOS `mountSession.stop` 在卸载前调用 `drainWriteback()`，与 Linux FUSE / WinFsp 对齐，并给 drain 设置用户可见超时结果。
-- [ ] `renamePath` 也调用 `dirSync.rebaseAndFence`，避免“未命名文件夹” marker 在重命名后仍按旧名建到远端。
+- [x] 修复 `writeback_restore.canRestoreRecord`：本地缓存默认在 `~/.cloud-volume/cache/mounts/<bucket>`，不在 sessionRoot 内；恢复时应同时接受 sessionRoot 与 cacheRoot，否则重启即丢上传。
+- [x] macOS `mountSession.stop` 在卸载前调用 `drainWriteback()`，与 Linux FUSE / WinFsp 对齐，并给 drain 设置用户可见超时结果。
+- [x] `renamePath` 也调用 `dirSync.rebaseAndFence`，避免“未命名文件夹” marker 在重命名后仍按旧名建到远端。
 - [ ] `dirSync.flush` 失败进入可观测 pending/error 状态，不再只打日志。
-- [ ] 修正 `InvalidateExternalUpload` 直接 `removeLocalPath`（连带删本地缓存文件）的行为：仅当该路径没有 pending writeback 时才清理，避免页面覆盖上传误删 mount 本地数据。
-- [ ] 写 durability contract 文档：明确 quit / crash / unmount 三种场景下哪些状态承诺恢复。
+- [x] 修正 `InvalidateExternalUpload` 直接 `removeLocalPath`（连带删本地缓存文件）的行为：仅当该路径没有 pending writeback 时才清理，避免页面覆盖上传误删 mount 本地数据。
+- [x] 写 durability contract 文档：明确 quit / crash / unmount 三种场景下哪些状态承诺恢复。
+
+#### Phase 0 durability contract (2026-08-17)
+
+- **Quit / requested unmount (macOS):** the session drains persisted file writeback before it asks macOS to unmount the WebDAV volume. The wait is bounded by the configured transfer timeout. A timeout or upload error leaves the volume, WebDAV server, queue, and persisted records live, returns a user-visible failure, and allows a retry; it never silently closes the queue.
+- **Crash / forced termination:** file writeback records survive under `runtime/mounts/<bucket>/writeback`, and a remount restores a record only when its source is still a regular file inside either `sessionRoot` or the configured `cacheRoot`. Directory-marker creates remain memory-only until the following observability/persistence work.
+- **External page mutation while mounted:** an upload/create invalidates remote lookup caches, but keeps a matching pending writeback file and its local marker. A settled local cache entry remains evictable by that invalidation.
 
 ### Phase 1 — 统一元数据存储核心（页面与 mount 共用）
 

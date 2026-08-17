@@ -64,7 +64,8 @@ func (q *writebackQueue) canRestoreRecord(
 		return false
 	}
 	sessionRoot := filepath.Clean(access.sessionRoot)
-	if !isPathWithin(localPath, sessionRoot) {
+	cacheRoot := filepath.Clean(access.cacheRoot)
+	if !isPathWithin(localPath, sessionRoot) && !isPathWithin(localPath, cacheRoot) {
 		return false
 	}
 	info, err := os.Stat(localPath)

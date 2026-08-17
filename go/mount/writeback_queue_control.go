@@ -2,6 +2,7 @@
 package mount
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"path/filepath"
@@ -250,8 +251,21 @@ func (q *writebackQueue) shutdown() error {
 }
 
 func (q *writebackQueue) drain() error {
+	return q.drainContext(context.Background())
+}
+
+// drainContext forces queued uploads through the normal dispatcher until it is
+// idle. A caller that must keep a live mount on timeout can cancel its wait
+// without shutting down the queue or discarding the persisted entries.
+func (q *writebackQueue) drainContext(ctx context.Context) error {
 	if q == nil {
 		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	q.mu.Lock()
@@ -270,6 +284,9 @@ func (q *writebackQueue) drain() error {
 
 	lastWaitLog := time.Time{}
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		ready, pending, running, err := q.prepareDrainPass()
 		if err != nil {
 			return err
@@ -287,12 +304,16 @@ func (q *writebackQueue) drain() error {
 				running,
 			)
 			for _, entry := range ready {
-				q.enqueueDrainEntry(entry)
+				if err := q.enqueueDrainEntry(ctx, entry); err != nil {
+					return err
+				}
 			}
 		} else {
 			now := time.Now()
 			if !lastWaitLog.IsZero() && now.Sub(lastWaitLog) < writebackDrainLogInterval {
-				time.Sleep(100 * time.Millisecond)
+				if err := waitForWritebackDrain(ctx, 100*time.Millisecond); err != nil {
+					return err
+				}
 				continue
 			}
 			lastWaitLog = now
@@ -304,7 +325,20 @@ func (q *writebackQueue) drain() error {
 				q.drainRunningProgress(),
 			)
 		}
-		time.Sleep(100 * time.Millisecond)
+		if err := waitForWritebackDrain(ctx, 100*time.Millisecond); err != nil {
+			return err
+		}
+	}
+}
+
+func waitForWritebackDrain(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -364,13 +398,28 @@ func (q *writebackQueue) prepareDrainPass() ([]*pendingWriteback, int, int, erro
 	return ready, len(q.entries), len(q.running), nil
 }
 
-func (q *writebackQueue) enqueueDrainEntry(entry *pendingWriteback) {
+func (q *writebackQueue) enqueueDrainEntry(ctx context.Context, entry *pendingWriteback) error {
 	if entry == nil {
-		return
+		return nil
 	}
 	select {
 	case q.queue <- entry:
+		return nil
+	case <-ctx.Done():
+		q.unqueueDrainEntry(entry)
+		return ctx.Err()
 	case <-q.stop:
+		q.unqueueDrainEntry(entry)
+		return fmt.Errorf("writeback queue is closed")
+	}
+}
+
+func (q *writebackQueue) unqueueDrainEntry(entry *pendingWriteback) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	current, ok := q.entries[entry.virtualPath]
+	if ok && current == entry {
+		current.queued = false
 	}
 }
 

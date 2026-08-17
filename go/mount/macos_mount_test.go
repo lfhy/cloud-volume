@@ -4,6 +4,7 @@
 package mount
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -190,6 +191,84 @@ func TestStopKeepsWebDAVAliveWhenUnmountFails(t *testing.T) {
 	}
 	_ = response.Body.Close()
 }
+
+func TestStopDrainsWritebackBeforeUnmount(t *testing.T) {
+	access := newTestBucketAccess(t)
+	access.transferTimeout = time.Second
+	var order []string
+	oldDrain := drainMacOSWriteback
+	oldProbe := probeWebDAVMountActive
+	oldUnmount := executeUnmountWebDAV
+	drainMacOSWriteback = func(_ context.Context, _ *bucketAccess) error {
+		order = append(order, "drain")
+		return nil
+	}
+	probeWebDAVMountActive = func(string) (bool, error) {
+		order = append(order, "probe")
+		return true, nil
+	}
+	executeUnmountWebDAV = func(string) error {
+		order = append(order, "unmount")
+		return nil
+	}
+	t.Cleanup(func() {
+		drainMacOSWriteback = oldDrain
+		probeWebDAVMountActive = oldProbe
+		executeUnmountWebDAV = oldUnmount
+	})
+
+	session := &mountSession{
+		bucket:      "test-bucket",
+		mounted:     true,
+		stopping:    true,
+		mountTarget: "/Volumes/云卷-test",
+		access:      access,
+	}
+	if err := session.stop(); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if got, want := len(order), 3; got != want ||
+		order[0] != "drain" || order[1] != "probe" || order[2] != "unmount" {
+		t.Fatalf("unexpected stop order: %v", order)
+	}
+}
+
+func TestStopKeepsMountWhenWritebackDrainTimesOut(t *testing.T) {
+	access := newTestBucketAccess(t)
+	access.transferTimeout = 10 * time.Millisecond
+	oldDrain := drainMacOSWriteback
+	oldProbe := probeWebDAVMountActive
+	drainMacOSWriteback = func(ctx context.Context, _ *bucketAccess) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	probeWebDAVMountActive = func(string) (bool, error) {
+		t.Fatal("unmount probe ran after drain timeout")
+		return false, nil
+	}
+	t.Cleanup(func() {
+		drainMacOSWriteback = oldDrain
+		probeWebDAVMountActive = oldProbe
+	})
+
+	session := &mountSession{
+		bucket:      "test-bucket",
+		mounted:     true,
+		stopping:    true,
+		mountTarget: "/Volumes/云卷-test",
+		access:      access,
+	}
+	if err := session.stop(); err == nil {
+		t.Fatal("stop unexpectedly succeeded after drain timeout")
+	}
+	if !session.mounted || session.stopping || session.access == nil {
+		t.Fatal("drain timeout did not preserve the live mount for retry")
+	}
+	if session.lastError == "" {
+		t.Fatal("drain timeout was not surfaced through mount status")
+	}
+}
+
 func TestOpenMountPathReturnsBeforeFinderStatfs(t *testing.T) {
 	t.Parallel()
 

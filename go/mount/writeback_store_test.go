@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestWritebackStoreMergesLatestEntryAcrossQueueFiles(t *testing.T) {
@@ -190,6 +191,45 @@ func TestRestorePersistedEntriesDropsMissingLocalPaths(t *testing.T) {
 	}
 	if len(records) != 0 {
 		t.Fatalf("expected stale persisted records to be removed, got %d", len(records))
+	}
+}
+
+func TestRestorePersistedEntriesKeepsCacheRootFiles(t *testing.T) {
+	access := newTestBucketAccess(t)
+	cacheRoot := t.TempDir()
+	access.cacheRoot = cacheRoot
+	localPath := filepath.Join(cacheRoot, "archive", "output.zip")
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		t.Fatalf("mkdir cache path: %v", err)
+	}
+	if err := os.WriteFile(localPath, []byte("payload"), 0o600); err != nil {
+		t.Fatalf("write cache file: %v", err)
+	}
+
+	storeDir := filepath.Join(access.sessionRoot, writebackStoreDirName)
+	writeWritebackQueueFile(t, filepath.Join(storeDir, "queue-100.json"), map[string]writebackRecord{
+		"archive/output.zip": {
+			TaskID:          "task-cache-root",
+			VirtualPath:     "archive/output.zip",
+			LocalPath:       localPath,
+			Size:            int64(len("payload")),
+			ModTimeUnixNano: time.Now().UnixNano(),
+			DueAtUnixNano:   time.Now().Add(time.Hour).UnixNano(),
+		},
+	})
+
+	if err := access.writeback.shutdown(); err != nil {
+		t.Fatalf("shutdown writeback queue: %v", err)
+	}
+	restored, err := newWritebackQueue(access)
+	if err != nil {
+		t.Fatalf("restore writeback queue: %v", err)
+	}
+	access.writeback = restored
+
+	entry := restored.entries["archive/output.zip"]
+	if entry == nil || entry.localPath != localPath {
+		t.Fatalf("cache-root record was not restored: %+v", entry)
 	}
 }
 

@@ -2,6 +2,7 @@
 package mount
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -179,10 +180,16 @@ func (a *bucketAccess) close() error {
 }
 
 func (a *bucketAccess) drainWriteback() error {
+	return a.drainWritebackContext(context.Background())
+}
+
+// drainWritebackContext lets lifecycle callers bound their own wait while the
+// durable queue remains available for a later retry.
+func (a *bucketAccess) drainWritebackContext(ctx context.Context) error {
 	if a == nil || a.writeback == nil {
 		return nil
 	}
-	return a.writeback.drain()
+	return a.writeback.drainContext(ctx)
 }
 
 func (a *bucketAccess) release() {

@@ -2,6 +2,7 @@
 package mount
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -385,5 +386,29 @@ func TestDrainWaitsForRunningEntries(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("drain did not finish after running task cleared")
+	}
+}
+
+func TestDrainContextReturnsDeadlineWithoutDiscardingPendingWork(t *testing.T) {
+	access := newTestBucketAccess(t)
+	entry := &pendingWriteback{
+		taskID:      "task-running",
+		virtualPath: "archive/output.zip",
+		localPath:   filepath.Join(access.cacheRoot, "archive", "output.zip"),
+	}
+	access.writeback.mu.Lock()
+	access.writeback.running[entry.taskID] = entry
+	access.writeback.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if err := access.writeback.drainContext(ctx); err != context.DeadlineExceeded {
+		t.Fatalf("drain context error = %v, want deadline exceeded", err)
+	}
+	access.writeback.mu.Lock()
+	_, stillRunning := access.writeback.running[entry.taskID]
+	access.writeback.mu.Unlock()
+	if !stillRunning {
+		t.Fatal("deadline discarded the running writeback entry")
 	}
 }

@@ -2,6 +2,7 @@
 package mount
 
 import (
+	"context"
 	"runtime"
 	"testing"
 	"time"
@@ -78,6 +79,51 @@ func TestNestedDirectoryCreatesRebaseAsOneTree(t *testing.T) {
 	}
 	if backend.hasEventPrefix("rename:New Folder:Reports") {
 		t.Fatalf("missing queued source was sent to the strict backend: %v", backend.eventsSnapshot())
+	}
+}
+
+func TestLegacyRenameRebasesQueuedDirectoryMarker(t *testing.T) {
+	backend := newDirectorySyncTestBackend()
+	backend.blockCreate = true
+	access := newDirectorySyncTestAccess(t, backend)
+	cleanupDirectoryTestBlock(t, backend.releaseCreate)
+
+	access.dirSync.enqueue("worker-one")
+	access.dirSync.enqueue("worker-two")
+	waitForDirectoryCreateStarts(t, backend, 2)
+	access.dirSync.enqueue("dispatcher-wait")
+	waitForDirectoryEntryRunning(t, access.dirSync, "dispatcher-wait")
+	access.dirSync.enqueue("New Folder")
+
+	renameDone := make(chan error, 1)
+	go func() {
+		renameDone <- access.renamePath(
+			context.Background(), "New Folder", "Reports", true,
+		)
+	}()
+	waitForDirectorySync(t, func() bool {
+		access.dirSync.mu.Lock()
+		defer access.dirSync.mu.Unlock()
+		_, rebased := access.dirSync.entries["Reports"]
+		_, old := access.dirSync.entries["New Folder"]
+		return rebased && !old
+	})
+	releaseDirectoryTestBlock(backend.releaseCreate)
+
+	select {
+	case err := <-renameDone:
+		if err != nil {
+			t.Fatalf("legacy rename: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("legacy rename did not finish")
+	}
+	if !backend.hasDirectory("Reports") || backend.hasDirectory("New Folder") {
+		t.Fatalf("unexpected marker state: %v", backend.eventsSnapshot())
+	}
+	if backend.hasEventPrefix("create:New Folder") ||
+		backend.hasEventPrefix("rename:New Folder:Reports") {
+		t.Fatalf("legacy rename used stale directory marker: %v", backend.eventsSnapshot())
 	}
 }
 

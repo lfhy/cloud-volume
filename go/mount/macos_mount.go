@@ -152,57 +152,6 @@ func boundedReadDir(path string, timeout time.Duration) (readDirResult, bool) {
 	}
 }
 
-func (s *mountSession) stop() error {
-	log.Printf(
-		"[mount/session] stop bucket=%q mounted=%t target=%q",
-		s.bucket,
-		s.mounted,
-		s.mountTarget,
-	)
-	var mountErr error
-	if s.mounted && s.mountTarget != "" {
-		active, err := probeWebDAVMountActive(s.mountTarget)
-		if err != nil {
-			mountErr = err
-		} else if active {
-			mountErr = executeUnmountWebDAV(s.mountTarget)
-		}
-		if mountErr != nil {
-			s.lastError = mountErr.Error()
-			s.stopping = false
-			log.Printf(
-				"[mount/session] keep-webdav-after-unmount-error bucket=%q err=%v",
-				s.bucket,
-				mountErr,
-			)
-			return mountErr
-		}
-		s.mounted = false
-	}
-	serverErr := error(nil)
-	if s.server != nil {
-		log.Printf("[mount/session] stop-webdav bucket=%q", s.bucket)
-		serverErr = s.server.stop()
-		s.server = nil
-	}
-	accessErr := error(nil)
-	if s.access != nil {
-		log.Printf("[mount/session] close-access bucket=%q", s.bucket)
-		accessErr = s.access.close()
-		s.access = nil
-	}
-	if serverErr != nil {
-		s.lastError = serverErr.Error()
-		return serverErr
-	}
-	if accessErr != nil {
-		s.lastError = accessErr.Error()
-		return accessErr
-	}
-	log.Printf("[mount/session] stop-done bucket=%q", s.bucket)
-	return nil
-}
-
 // mountWebDAV mounts the loopback WebDAV server at mountPath using the
 // synchronous /sbin/mount_webdav command. Unlike `osascript "mount volume"`,
 // which registers the volume in the kernel and returns immediately while

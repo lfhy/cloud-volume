@@ -5,6 +5,7 @@ package mount
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	storageconfig "remote-storage/go/config"
@@ -108,6 +109,40 @@ func TestInvalidateExternalUploadProjectsCreatedPath(t *testing.T) {
 
 	if projectedPath != "docs/new-folder" || !projectedDir {
 		t.Fatalf("unexpected platform projection path=%q isDir=%t", projectedPath, projectedDir)
+	}
+}
+
+func TestInvalidateExternalUploadPreservesPendingLocalFile(t *testing.T) {
+	access := newTestBucketAccess(t)
+	stagedPath := createTempFile(t, access.cacheRoot, "pending.txt", "hello")
+	access.registerLocalWrite("pending.txt", stagedPath, 5)
+	access.scheduleUpload("pending.txt", stagedPath)
+
+	access.InvalidateExternalUpload("pending.txt", false)
+
+	if _, err := os.Stat(stagedPath); err != nil {
+		t.Fatalf("pending content was removed: %v", err)
+	}
+	if _, ok := access.cache.localFile("pending.txt"); !ok {
+		t.Fatal("pending local cache marker was removed")
+	}
+	if !access.writeback.hasPendingAtOrBelow("pending.txt", false) {
+		t.Fatal("pending writeback was removed")
+	}
+}
+
+func TestInvalidateExternalUploadDropsSettledLocalFile(t *testing.T) {
+	access := newTestBucketAccess(t)
+	stagedPath := createTempFile(t, access.cacheRoot, "settled.txt", "hello")
+	access.cache.storeLocalFile("settled.txt", stagedPath, s3ops.ObjectInfo{Size: 5})
+
+	access.InvalidateExternalUpload("settled.txt", false)
+
+	if _, err := os.Stat(stagedPath); !os.IsNotExist(err) {
+		t.Fatalf("settled local content was not removed: %v", err)
+	}
+	if _, ok := access.cache.localFile("settled.txt"); ok {
+		t.Fatal("settled local cache marker remains")
 	}
 }
 

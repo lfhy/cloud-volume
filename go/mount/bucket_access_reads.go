@@ -268,7 +268,15 @@ func (a *bucketAccess) MarkExternalDelete(virtualPath string, isDir bool) {
 // next read without waiting for the list TTL.
 func (a *bucketAccess) InvalidateExternalUpload(virtualPath string, isDir bool) {
 	clean := cleanVirtualPath(virtualPath)
-	a.cache.removeLocalPath(clean, isDir)
+	if a.writeback == nil || !a.writeback.hasPendingAtOrBelow(clean, isDir) {
+		a.cache.removeLocalPath(clean, isDir)
+	} else {
+		log.Printf(
+			"[mount/external] preserve-pending-local path=%q is_dir=%t",
+			clean,
+			isDir,
+		)
+	}
 	a.cache.invalidatePath(clean)
 	a.cache.invalidatePath(parentVirtualPrefix(clean))
 	if a.externalUpload != nil {
