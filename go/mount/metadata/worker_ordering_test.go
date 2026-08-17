@@ -109,6 +109,66 @@ func TestWriteConfirmationRetainsPendingRenameDuringRefresh(t *testing.T) {
 	}
 }
 
+func TestRefreshUnmaterializedRenameTargetKeepsRemoteSource(t *testing.T) {
+	backend := newFakeBackend()
+	backend.objects["/source/"] = storageops.ObjectInfo{Key: "source/", IsDir: true}
+	backend.objects["/source/old.txt"] = storageops.ObjectInfo{Key: "source/old.txt", Size: 3, ETag: "etag-old"}
+	backend.objects["/target/"] = storageops.ObjectInfo{Key: "target/", IsDir: true}
+	backend.objects["/target/new.txt"] = storageops.ObjectInfo{Key: "target/new.txt", Size: 6, ETag: "etag-target"}
+	service := newTestService(t, backend)
+	service.SetQuietPeriod(time.Nanosecond)
+	ctx := context.Background()
+	if _, err := service.ListPage(ctx, rootInode, "", 10); err != nil {
+		t.Fatal(err)
+	}
+	source, err := service.Resolve(rootInode, "source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := service.Resolve(rootInode, "target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ListPage(ctx, source, "", 10); err != nil {
+		t.Fatal(err)
+	}
+	inode, err := service.Resolve(source, "old.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := service.StageWrite(inode, 1, strings.NewReader("new"), 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Write(source, "old.txt", ref, WriteOptions{Origin: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Rename(inode, target, "new.txt", WriteOptions{Origin: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Millisecond)
+	worker := &Worker{service: service, wake: make(chan struct{}, 1), running: map[uint64]struct{}{}}
+	claimed := worker.claimDue()
+	if len(claimed) != 1 || claimed[0].Type != OpWrite {
+		t.Fatalf("first claim = %+v, want only write", claimed)
+	}
+	worker.execute(ctx, claimed[0])
+
+	if err := service.MaterializeDirectory(ctx, target); err != nil {
+		t.Fatal(err)
+	}
+	if resolved, err := service.Resolve(target, "new.txt"); err != nil || resolved != inode {
+		t.Fatalf("target refresh replaced pending inode: got=%d want=%d err=%v", resolved, inode, err)
+	}
+	worker.runDueOnce(ctx)
+	if _, exists := backend.objects["/source/old.txt"]; exists {
+		t.Fatalf("source survived cross-directory move: %+v", backend.objects)
+	}
+	if object, exists := backend.objects["/target/new.txt"]; !exists || object.Size != 3 {
+		t.Fatalf("target was not replaced by staged write: %+v", backend.objects)
+	}
+}
+
 func TestDirectoryRenameWaitsForEarlierChildWrite(t *testing.T) {
 	backend := newFakeBackend()
 	backend.objects["/dir/"] = storageops.ObjectInfo{Key: "dir/", IsDir: true}

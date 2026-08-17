@@ -78,8 +78,15 @@ func (s *Service) MaterializeDirectory(ctx context.Context, dirInode uint64) err
 			}
 			// Preserve the whole prior record for local pending work. Rebuilding
 			// it from provider data would drop ContentGeneration and orphan
-			// staged pending content in pending-content/.
+			// staged chunk-backed content.
 			if prior, ok := priorByKey[nameKey]; ok && (prior.State == StatePending || prior.State == StateConflict) {
+				// A pending cross-directory rename has already installed its Desired
+				// dirent in the target before that directory is materialized. A
+				// same-name remote object there is not confirmation of the source
+				// edge; accepting it would make the worker think its move is a no-op.
+				if prior.RemoteParentID != dirInode || MakeNameKey(prior.RemoteName) != nameKey {
+					continue
+				}
 				desiredParent, desiredName, state := record.DesiredParentID, record.DesiredName, record.State
 				record = prior
 				record.Kind = KindFile
