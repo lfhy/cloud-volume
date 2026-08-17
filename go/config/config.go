@@ -7,10 +7,13 @@ import (
 
 // RemoteStorageConfig stores account connection values persisted to TOML.
 type RemoteStorageConfig struct {
-	Endpoint                    string                        `json:"endpoint" toml:"endpoint"`
-	StorageType                 string                        `json:"storageType" toml:"storage_type"`
-	ProviderType                string                        `json:"providerType" toml:"provider_type"`
-	DisplayName                 string                        `json:"displayName" toml:"display_name"`
+	Endpoint     string `json:"endpoint" toml:"endpoint"`
+	StorageType  string `json:"storageType" toml:"storage_type"`
+	ProviderType string `json:"providerType" toml:"provider_type"`
+	DisplayName  string `json:"displayName" toml:"display_name"`
+	// ProfileID is a stable local account identity used by metadata namespaces.
+	// It survives display-name and credential presentation changes.
+	ProfileID                   string                        `json:"profileId" toml:"profile_id"`
 	MappedBucketName            string                        `json:"mappedBucketName" toml:"mapped_bucket_name"`
 	Region                      string                        `json:"region" toml:"region"`
 	Bucket                      string                        `json:"bucket" toml:"bucket"`
@@ -99,10 +102,10 @@ func (c *RemoteStorageConfig) UnmarshalJSON(data []byte) error {
 }
 
 type BucketSettings struct {
-	ReadOnly         bool   `json:"readOnly" toml:"read_only"`
-	TrashEnabled     *bool  `json:"trashEnabled,omitempty" toml:"trash_enabled,omitempty"`
-	TrashDirectory   string `json:"trashDirectory" toml:"trash_directory"`
-	CustomQuotaBytes int64  `json:"customQuotaBytes,omitempty" toml:"custom_quota_bytes,omitempty"`
+	ReadOnly          bool   `json:"readOnly" toml:"read_only"`
+	TrashEnabled      *bool  `json:"trashEnabled,omitempty" toml:"trash_enabled,omitempty"`
+	TrashDirectory    string `json:"trashDirectory" toml:"trash_directory"`
+	CustomQuotaBytes  int64  `json:"customQuotaBytes,omitempty" toml:"custom_quota_bytes,omitempty"`
 	WinFspVolumeLabel string `json:"winFspVolumeLabel,omitempty" toml:"winfsp_volume_label,omitempty"`
 }
 
@@ -196,6 +199,7 @@ func (c RemoteStorageConfig) Normalized() RemoteStorageConfig {
 		StorageType:                 normalizeStorageType(c.StorageType),
 		ProviderType:                normalizeProviderType(c.ProviderType, c.Endpoint, c.StorageType),
 		DisplayName:                 strings.TrimSpace(c.DisplayName),
+		ProfileID:                   strings.TrimSpace(c.ProfileID),
 		MappedBucketName:            normalizeMappedBucketName(c.StorageType, c.MappedBucketName, c.DisplayName),
 		Region:                      strings.TrimSpace(c.Region),
 		Bucket:                      strings.TrimSpace(c.Bucket),

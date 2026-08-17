@@ -186,6 +186,7 @@ func saveProfileToDB(name string, config RemoteStorageConfig) error {
 	defer db.Close()
 	return db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(profilesBucketKey)
+		ensureProfileIdentity(bucket, cleanName, &config)
 		data, err := json.Marshal(config)
 		if err != nil {
 			return fmt.Errorf("encode profile: %w", err)
