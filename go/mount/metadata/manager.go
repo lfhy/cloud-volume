@@ -247,7 +247,7 @@ func (m *Manager) release(handle *AcquireHandle) {
 			continue
 		}
 		managed.refs--
-		if managed.refs > 0 {
+		if managed.refs > 0 || retainsBackgroundWork(managed.service) {
 			return
 		}
 		delete(m.services, id)
@@ -255,6 +255,16 @@ func (m *Manager) release(handle *AcquireHandle) {
 		_ = managed.service.Close()
 		return
 	}
+}
+
+// retainsBackgroundWork keeps a page-only namespace alive after its final
+// handle release so its journal worker can finish durable local intent.
+func retainsBackgroundWork(service *Service) bool {
+	if service == nil {
+		return false
+	}
+	status := service.Status()
+	return status.PendingOps > 0 || status.FailedOps > 0 || status.PendingContent > 0
 }
 
 // RemoveNamespace deletes one namespace database and stops its workers.

@@ -284,3 +284,48 @@ func TestNotifyExternalUploadAllowsImmediateReList(t *testing.T) {
 		t.Fatalf("expected empty refreshed root listing, got ok=%t items=%+v", ok, refreshed)
 	}
 }
+
+func TestMetadataProjectionClearsStaleLocalMarkers(t *testing.T) {
+	access := newTestBucketAccess(t)
+	source := createTempFile(t, access.cacheRoot, "source.txt", "old")
+	access.cache.storeLocalFile("source.txt", source, s3ops.ObjectInfo{Size: 3})
+	var deleted, uploaded string
+	access.externalDelete = func(virtualPath string, _ bool) error {
+		deleted = virtualPath
+		return nil
+	}
+	access.externalUpload = func(virtualPath string, _ bool) error {
+		uploaded = virtualPath
+		return nil
+	}
+
+	access.projectMetadataRename("source.txt", "destination.txt", false)
+
+	if _, err := os.Stat(source); err != nil {
+		t.Fatalf("metadata projection removed recoverable source data: %v", err)
+	}
+	if _, ok := access.cache.localFile("source.txt"); ok {
+		t.Fatal("stale source marker survived metadata rename")
+	}
+	if !access.cache.isMarkedDeleted("source.txt") {
+		t.Fatal("metadata rename did not tombstone the source projection")
+	}
+	if deleted != "" || uploaded != "" {
+		t.Fatalf("metadata projection invoked remote-confirmation callbacks delete=%q upload=%q", deleted, uploaded)
+	}
+}
+
+func TestMetadataProjectionUploadReplacesMatchingLocalDraft(t *testing.T) {
+	access := newTestBucketAccess(t)
+	stale := createTempFile(t, access.cacheRoot, "draft.txt", "old")
+	access.cache.storeLocalFile("draft.txt", stale, s3ops.ObjectInfo{Size: 3})
+
+	access.projectMetadataUpload("draft.txt", false)
+
+	if _, err := os.Stat(stale); err != nil {
+		t.Fatalf("metadata projection removed recoverable local data: %v", err)
+	}
+	if _, ok := access.cache.localFile("draft.txt"); ok {
+		t.Fatal("metadata upload left a local marker that would override Desired")
+	}
+}

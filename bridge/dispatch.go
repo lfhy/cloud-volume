@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	storageconfig "remote-storage/go/config"
@@ -224,38 +223,6 @@ type directoryAccessArgs struct {
 	Prefix string                            `json:"prefix"`
 }
 
-type createDirectoryArgs struct {
-	Config storageconfig.RemoteStorageConfig `json:"config"`
-	Bucket string                            `json:"bucket"`
-	Prefix string                            `json:"prefix"`
-	Name   string                            `json:"name"`
-}
-
-type objectMutationArgs struct {
-	Config      storageconfig.RemoteStorageConfig `json:"config"`
-	Bucket      string                            `json:"bucket"`
-	Key         string                            `json:"key"`
-	IsDirectory bool                              `json:"isDirectory"`
-	TaskID      string                            `json:"taskId"`
-	Permanent   bool                              `json:"permanent"`
-}
-
-type renameObjectArgs struct {
-	Config      storageconfig.RemoteStorageConfig `json:"config"`
-	Bucket      string                            `json:"bucket"`
-	Key         string                            `json:"key"`
-	IsDirectory bool                              `json:"isDirectory"`
-	NewName     string                            `json:"newName"`
-}
-
-type uploadArgs struct {
-	Config    storageconfig.RemoteStorageConfig `json:"config"`
-	Bucket    string                            `json:"bucket"`
-	Key       string                            `json:"key"`
-	LocalPath string                            `json:"localPath"`
-	TaskID    string                            `json:"taskId"`
-}
-
 type downloadArgs struct {
 	Config    storageconfig.RemoteStorageConfig `json:"config"`
 	Bucket    string                            `json:"bucket"`
@@ -331,124 +298,6 @@ func directoryAccess(args json.RawMessage) (any, error) {
 	return storageops.ForConfig(input.Config).DirectoryAccess(context.Background(), input.Bucket, input.Prefix)
 }
 
-func createDirectory(args json.RawMessage) (any, error) {
-	var input createDirectoryArgs
-	if err := decodeArgs(args, &input); err != nil {
-		return nil, err
-	}
-	if err := storageops.ForConfig(input.Config).CreateDirectory(
-		context.Background(),
-		input.Bucket,
-		input.Prefix,
-		input.Name,
-	); err != nil {
-		return nil, err
-	}
-	// Sync mount caches so the new directory is visible without a TTL wait.
-	newDir := joinChildPath(input.Prefix, input.Name)
-	bucketmount.NotifyExternalUpload(input.Config, input.Bucket, newDir, true)
-	broadcastPeerMutation(input.Config, input.Bucket, newDir, "upload")
-	return map[string]any{"ok": true}, nil
-}
-
-func deleteObject(args json.RawMessage) (any, error) {
-	var input objectMutationArgs
-	if err := decodeArgs(args, &input); err != nil {
-		return nil, err
-	}
-	backend := storageops.ForConfig(input.Config)
-	// A permanent delete skips the trash routing and hard-deletes the tree
-	// even when the bucket has soft delete enabled.
-	deleteFn := backend.DeleteObject
-	if input.Permanent {
-		deleteFn = backend.DeleteObjectHard
-	}
-	if err := deleteFn(
-		context.Background(),
-		input.Bucket,
-		input.Key,
-		input.IsDirectory,
-		input.TaskID,
-	); err != nil {
-		return nil, err
-	}
-	// Sync mounted session caches so the mount point and file manager both drop
-	// the entry immediately instead of serving a stale listCache/localEntries view.
-	bucketmount.NotifyExternalDelete(input.Config, input.Bucket, input.Key, input.IsDirectory)
-	broadcastPeerMutation(input.Config, input.Bucket, input.Key, "delete")
-	return map[string]any{"ok": true}, nil
-}
-
-func renameObject(args json.RawMessage) (any, error) {
-	var input renameObjectArgs
-	if err := decodeArgs(args, &input); err != nil {
-		return nil, err
-	}
-	if err := storageops.ForConfig(input.Config).RenameObject(
-		context.Background(),
-		input.Bucket,
-		input.Key,
-		input.IsDirectory,
-		input.NewName,
-	); err != nil {
-		return nil, err
-	}
-	// Keep mount caches in sync: the old path is gone and the new path now exists.
-	newPath := joinChildPath(parentDirectoryOf(input.Key), input.NewName)
-	bucketmount.NotifyExternalRename(input.Config, input.Bucket, input.Key, newPath, input.IsDirectory)
-	broadcastPeerMutation(input.Config, input.Bucket, newPath, "rename")
-	return map[string]any{"ok": true}, nil
-}
-
-func uploadFile(args json.RawMessage) (any, error) {
-	var input uploadArgs
-	if err := decodeArgs(args, &input); err != nil {
-		return nil, err
-	}
-	if err := storageops.ForConfig(input.Config).UploadFile(
-		context.Background(),
-		input.Bucket,
-		input.Key,
-		input.LocalPath,
-		input.TaskID,
-	); err != nil {
-		return nil, err
-	}
-	// Sync mount caches so the uploaded object is visible without a TTL wait.
-	bucketmount.NotifyExternalUpload(input.Config, input.Bucket, input.Key, false)
-	if info, err := storageops.ForConfig(input.Config).HeadObject(context.Background(), input.Bucket, input.Key); err == nil {
-		bucketmount.RememberPeerContent(input.Config, input.Bucket, input.Key, input.LocalPath, info)
-	}
-	broadcastPeerMutation(input.Config, input.Bucket, input.Key, "upload")
-	return map[string]any{"ok": true}, nil
-}
-
-func uploadDirectory(args json.RawMessage) (any, error) {
-	var input uploadArgs
-	if err := decodeArgs(args, &input); err != nil {
-		return nil, err
-	}
-	backend := storageops.ForConfig(input.Config)
-	go func() {
-		_ = storageops.UploadDirectory(
-			context.Background(),
-			backend,
-			input.Bucket,
-			input.Key,
-			input.LocalPath,
-			input.TaskID,
-		)
-		// Directory upload is asynchronous; invalidate the target directory and its
-		// parent listing once the bulk upload finishes so the mount view catches up.
-		bucketmount.NotifyExternalUpload(input.Config, input.Bucket, input.Key, true)
-		broadcastPeerMutation(input.Config, input.Bucket, input.Key, "upload")
-	}()
-	// Pre-invalidate the parent so the new directory appears on a manual refresh
-	// even while the upload is still streaming.
-	bucketmount.NotifyExternalUpload(input.Config, input.Bucket, parentDirectoryOf(input.Key), false)
-	return map[string]any{"ok": true}, nil
-}
-
 func downloadFile(args json.RawMessage) (any, error) {
 	var input downloadArgs
 	if err := decodeArgs(args, &input); err != nil {
@@ -493,31 +342,4 @@ func triggerTransfer(args json.RawMessage) (any, error) {
 		return nil, fmt.Errorf("missing transfer task id")
 	}
 	return map[string]any{"ok": bucketmount.TriggerQueuedTransfer(input.TaskID)}, nil
-}
-
-// parentDirectoryOf returns the prefix portion of a slash-joined object key,
-// e.g. "photos/a.jpg" -> "photos". Used when computing the parent path of an
-// out-of-mount mutation target so its listing cache can be invalidated.
-func parentDirectoryOf(key string) string {
-	trimmed := strings.Trim(strings.TrimSpace(key), "/")
-	idx := strings.LastIndex(trimmed, "/")
-	if idx < 0 {
-		return ""
-	}
-	return trimmed[:idx]
-}
-
-// joinChildPath joins a parent prefix with a single relative name (the new name
-// for a rename), mirroring how the mount layer composes virtual paths.
-func joinChildPath(parent, name string) string {
-	cleanParent := strings.Trim(strings.TrimSpace(parent), "/")
-	cleanName := strings.Trim(strings.TrimSpace(name), "/")
-	switch {
-	case cleanParent == "":
-		return cleanName
-	case cleanName == "":
-		return cleanParent
-	default:
-		return cleanParent + "/" + cleanName
-	}
 }

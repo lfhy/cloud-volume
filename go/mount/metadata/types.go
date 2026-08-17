@@ -119,6 +119,7 @@ type Op struct {
 	LastError                 string
 	NextAttemptUnixNano       int64  `json:"nextAttemptUnixNs"`
 	ExpectedRemoteFingerprint string `json:"expectedRemoteFingerprint,omitempty"`
+	HardDelete                bool   `json:"hardDelete,omitempty"`
 	Origin                    string `json:"origin"`
 	CreatedAtUnixNano         int64  `json:"createdAtUnixNs"`
 	AppliedAtUnixNano         int64  `json:"appliedAtUnixNs,omitempty"`

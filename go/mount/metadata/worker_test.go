@@ -402,6 +402,41 @@ func TestWorkerRenameOverFileSchedulesRemoteDelete(t *testing.T) {
 	}
 }
 
+type hardDeleteBackend struct {
+	*fakeBackend
+	hardDeleteCalls int
+}
+
+func (b *hardDeleteBackend) DeleteObjectHard(ctx context.Context, bucket, key string, dir bool, task string) error {
+	b.hardDeleteCalls++
+	return b.fakeBackend.DeleteObject(ctx, bucket, key, dir, task)
+}
+
+func TestWorkerUsesHardDeleteForPermanentIntent(t *testing.T) {
+	backend := &hardDeleteBackend{fakeBackend: newFakeBackend()}
+	backend.objects["/old.txt"] = storageops.ObjectInfo{Key: "old.txt", Size: 3}
+	service := newTestService(t, backend)
+	service.SetQuietPeriod(time.Nanosecond)
+	if _, err := service.ListPage(context.Background(), rootInode, "", 10); err != nil {
+		t.Fatal(err)
+	}
+	inode, err := service.Resolve(rootInode, "old.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Delete(inode, WriteOptions{Origin: "page", HardDelete: true}); err != nil {
+		t.Fatal(err)
+	}
+	worker := NewWorker(service)
+	defer worker.Stop()
+	if err := worker.Drain(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if backend.hardDeleteCalls != 1 {
+		t.Fatalf("hard delete calls = %d, want 1", backend.hardDeleteCalls)
+	}
+}
+
 func TestManagerAcquireUsesUnscopedBackendAndRefLifecycle(t *testing.T) {
 	manager := NewManager(filepath.Join(t.TempDir(), "metadata"))
 	config := fakeConfig("profile-id")

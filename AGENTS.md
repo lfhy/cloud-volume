@@ -119,7 +119,7 @@ When the user asks to add a new storage type (e.g. FTP, SFTP, or any new remote 
 
 ### Feature: Mount Operation Queues (挂载写回队列体系)
 
-**Status (2026-08-17):** persistent inode metadata now backs page/mount reads and metadata-enabled mount writes. Mounts without a durable `ProfileID` retain the legacy queues as their explicit fallback; page writes remain the last M6 caller to migrate.
+**Status (2026-08-17):** persistent inode metadata now backs page/mount reads and metadata-enabled writes. Mounts and profile-scoped page mutations share one journal-first namespace; callers without a durable `ProfileID` retain the legacy direct/queue fallback.
 
 #### New persistent metadata core
 
@@ -169,6 +169,13 @@ When the user asks to add a new storage type (e.g. FTP, SFTP, or any new remote 
 - `go/mount/metadata_write.go` - the mount adapter routes metadata-enabled `createDirectory`, staged file close, rename, and delete to `metadata.Service` before returning success. It keeps local cached bytes readable, moves cache indexes before a rename and rolls them back if the Desired transaction rejects it, and does not announce a local intent through the legacy peer-broadcast path. Cloud Files completion uses its externally-moved variant, which only rebinds the marker to the callback's `newLocalPath` because Explorer has already moved the bytes.
 - `go/mount/bucket_access_writes.go`, `bucket_cache_rename.go`, `overlay_bridge.go`, `webdav_file.go`, `linux_fuse_file.go`, `linux_fuse_nodes.go`, `winfsp_fs_windows.go`, and `cloud_files_watcher_windows.go` propagate staging errors at synchronous platform boundaries. `enqueueRenamePath` selects the external-move marker rebase for metadata sessions; pending metadata drafts now project their persistent OID, while legacy local-only drafts still use the fallback.
 - **Known P2 (M6b review):** `winFspBucketFS.Release` clears `open.dirty` after a failed metadata `stageLocalWrite`, so that Windows close failure has no durable retry record yet. Keep this separate from successful journal admission; do not assume the local file was queued.
+
+#### M6c page write integration (completed 2026-08-17)
+
+- `bridge/dispatch_metadata_mutation.go` owns the profile-scoped page-to-journal adapter. It acquires `DefaultManager`, falls back only for `ErrNoProfileID`, and opens/stat's a file only before `Service.WritePath` stages it. `bridge/dispatch_page_mutations.go` owns page create/upload/rename/delete handlers; `dispatch_object_transfer.go` sends moves through the same adapter. `copyObject` and recursive `uploadDirectory` explicitly fail closed when `ProfileID` exists because they need a future durable copy/batch operation.
+- `go/mount/metadata/manager.go` keeps an unreferenced namespace alive while `Status` reports pending/failed operations or pending content. This makes per-request page handles safe: the background worker remains available until work is drained, then a later acquire/release prunes the idle service. `Op.HardDelete` is durable and worker execution selects `DeleteObjectHard` for permanent page intent.
+- `go/mount/external_invalidation.go`, `bucket_access_reads.go`, and `bucket_cache.go` add `ProjectMetadata*` helpers. They only clear stale cache markers or add a retained-bytes tombstone after page journal admission, so mount-local bytes cannot shadow Desired state or be deleted before worker confirmation. They are distinct from `NotifyExternal*`, which remains the legacy remote-confirmed invalidation path.
+- **Known P2 (M6c review scope):** page task IDs do not yet map to worker transfer snapshot IDs, and mount byte reads cannot yet serve unconfirmed page-upload chunks. Do not present either as completed durability behavior.
 - `go/mount/writeback_store.go` - a metadata-enabled mount constructs the legacy queue only as an inert compatibility/control surface: it deliberately does not restore old queue/mutation records and new mutations never enqueue there. This prevents two independent remote writers. Fallback mounts without a metadata namespace retain the old behavior.
 
 - `go/mount/metadata/manager.go` - namespace registry rooted at `RuntimeDir()/metadata/v1/<namespace-hash>`; namespace = `ProfileID + storageType + endpoint + config bucket + rootPrefix + bucket`. Retains Service+Worker across mount sessions and exposes `DrainAll` for app exit.

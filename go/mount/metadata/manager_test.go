@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -165,6 +166,88 @@ func TestPageReleaseDoesNotCloseMountHeldNamespace(t *testing.T) {
 	mountHandle.Release()
 	if services := manager.List(); len(services) != 0 {
 		t.Fatalf("mount release did not close final service: %+v", services)
+	}
+}
+
+func TestPageReleaseRetainsPendingNamespaceUntilLaterIdleRelease(t *testing.T) {
+	manager := NewManager(filepath.Join(t.TempDir(), "metadata"))
+	defer manager.RemoveAllForTest()
+	config := fakeConfig("page-pending-profile")
+	config.CacheDirectory = t.TempDir()
+	backend := newFakeBackend()
+	handle, err := manager.AcquireWithBackend(config, "bucket", backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle.Service.SetQuietPeriod(time.Hour)
+	if _, _, err := handle.Service.WritePath(
+		context.Background(), "draft.txt", strings.NewReader("draft"), 5, WriteOptions{Origin: "page"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	handle.Release()
+	if services := manager.List(); len(services) != 1 {
+		t.Fatalf("page release closed pending namespace: %+v", services)
+	}
+	if err := handle.Service.store.update(func(tx boltTxT) error {
+		return replaceOp(tx, 1, func(op *Op) { op.NextAttemptUnixNano = time.Now().Add(-time.Second).UnixNano() })
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.DrainAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := manager.AcquireWithBackend(config, "bucket", backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopened.Release()
+	if services := manager.List(); len(services) != 0 {
+		t.Fatalf("idle namespace stayed retained after later release: %+v", services)
+	}
+}
+
+func TestPageReleaseRetainsFailedNamespace(t *testing.T) {
+	manager := NewManager(filepath.Join(t.TempDir(), "metadata"))
+	defer manager.RemoveAllForTest()
+	config := fakeConfig("page-failed-profile")
+	config.CacheDirectory = t.TempDir()
+	handle, err := manager.AcquireWithBackend(config, "bucket", newFakeBackend())
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle.Service.SetQuietPeriod(time.Hour)
+	if _, err := handle.Service.CreateDirectoryPath(context.Background(), "failed", WriteOptions{Origin: "page"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := handle.Service.store.update(func(tx boltTxT) error {
+		return replaceOp(tx, 1, func(op *Op) { op.State = OpStateFailed })
+	}); err != nil {
+		t.Fatal(err)
+	}
+	handle.Release()
+	if services := manager.List(); len(services) != 1 {
+		t.Fatalf("page release closed failed namespace: %+v", services)
+	}
+}
+
+func TestPageReleaseRetainsPendingContent(t *testing.T) {
+	manager := NewManager(filepath.Join(t.TempDir(), "metadata"))
+	defer manager.RemoveAllForTest()
+	config := fakeConfig("page-content-profile")
+	config.CacheDirectory = t.TempDir()
+	handle, err := manager.AcquireWithBackend(config, "bucket", newFakeBackend())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := handle.Service.StageWriteForName(
+		rootInode, "draft.txt", 1, strings.NewReader("draft"), 5,
+	); err != nil {
+		t.Fatal(err)
+	}
+	handle.Release()
+	if services := manager.List(); len(services) != 1 {
+		t.Fatalf("page release closed namespace with pending content: %+v", services)
 	}
 }
 

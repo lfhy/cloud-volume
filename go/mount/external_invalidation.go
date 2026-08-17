@@ -82,3 +82,40 @@ func NotifyExternalRename(
 		access.InvalidateExternalRename(oldPath, newPath, isDir)
 	})
 }
+
+// ProjectMetadataDelete updates an active mount's local overlay after the
+// shared metadata tree accepted a page-originated delete journal entry.
+func ProjectMetadataDelete(
+	cfg storageconfig.RemoteStorageConfig,
+	bucket, virtualPath string,
+	isDir bool,
+) {
+	globalManager.notifyExternalMutation(cfg, bucket, func(access *bucketAccess) {
+		access.projectMetadataDelete(virtualPath, isDir)
+	})
+}
+
+// ProjectMetadataUpload removes stale mount-local markers after metadata
+// accepts a page-originated write or mkdir. It does not announce a remote
+// mutation; the metadata worker owns remote confirmation.
+func ProjectMetadataUpload(
+	cfg storageconfig.RemoteStorageConfig,
+	bucket, virtualPath string,
+	isDir bool,
+) {
+	globalManager.notifyExternalMutation(cfg, bucket, func(access *bucketAccess) {
+		access.projectMetadataUpload(virtualPath, isDir)
+	})
+}
+
+// ProjectMetadataRename projects a Desired-tree rename into an active mount
+// without using the remote-first invalidation or peer-broadcast paths.
+func ProjectMetadataRename(
+	cfg storageconfig.RemoteStorageConfig,
+	bucket, oldPath, newPath string,
+	isDir bool,
+) {
+	globalManager.notifyExternalMutation(cfg, bucket, func(access *bucketAccess) {
+		access.projectMetadataRename(oldPath, newPath, isDir)
+	})
+}

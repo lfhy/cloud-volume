@@ -17,6 +17,7 @@ type WriteOptions struct {
 	Size       int64
 	MTime      string
 	ForceRetry bool
+	HardDelete bool
 }
 
 // CreateDirectory records a desired mkdir and returns its inode.
@@ -276,7 +277,7 @@ func (s *Service) Delete(inode uint64, opts WriteOptions) error {
 		}
 		return appendOp(tx, Op{
 			Type: OpDelete, InodeID: inode, OldParent: record.RemoteParentID,
-			OldName: record.RemoteName, State: OpStatePending, Origin: origin(opts),
+			OldName: record.RemoteName, HardDelete: opts.HardDelete, State: OpStatePending, Origin: origin(opts),
 			CreatedAtUnixNano: nowUnix(), NextAttemptUnixNano: time.Now().Add(s.quietPeriod()).UnixNano(),
 		})
 	})
@@ -331,7 +332,7 @@ func appendReplacedDelete(tx boltTxT, victim Inode, opts WriteOptions) error {
 	}
 	return appendOp(tx, Op{
 		Type: OpDelete, InodeID: victim.ID, OldParent: victim.RemoteParentID,
-		OldName: victim.RemoteName, State: OpStatePending, Origin: origin(opts),
+		OldName: victim.RemoteName, HardDelete: opts.HardDelete, State: OpStatePending, Origin: origin(opts),
 		CreatedAtUnixNano: nowUnix(), NextAttemptUnixNano: nowUnix(),
 	})
 }

@@ -239,6 +239,52 @@ func (c *bucketCache) clearLocalFileMarker(virtualPath string) {
 	delete(c.localFiles, cleanVirtualPath(virtualPath))
 }
 
+// clearLocalMarkers drops path-indexed local state without deleting its bytes.
+// Metadata journal projection uses this when another writer owns the newer
+// Desired entry but a mounted source file must remain physically recoverable.
+func (c *bucketCache) clearLocalMarkers(virtualPath string, isDir bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.clearLocalMarkersLocked(cleanVirtualPath(virtualPath), isDir)
+}
+
+func (c *bucketCache) clearLocalMarkersLocked(clean string, isDir bool) {
+	if !isDir {
+		delete(c.localFiles, clean)
+		delete(c.localEntries, clean)
+		delete(c.deletedPaths, clean)
+		c.invalidateParentsLocked(clean)
+		return
+	}
+	prefix := ensureDirSuffix(clean)
+	for key := range c.localFiles {
+		if strings.HasPrefix(key, prefix) {
+			delete(c.localFiles, key)
+		}
+	}
+	for key := range c.localEntries {
+		if key == clean || strings.HasPrefix(key, prefix) {
+			delete(c.localEntries, key)
+		}
+	}
+	for key := range c.deletedPaths {
+		if key == clean || strings.HasPrefix(key, prefix) {
+			delete(c.deletedPaths, key)
+		}
+	}
+	c.invalidateParentsLocked(clean)
+}
+
+// markDeletedRetainingBytes hides a local marker without deleting its source.
+func (c *bucketCache) markDeletedRetainingBytes(virtualPath string, isDir bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	clean := cleanVirtualPath(virtualPath)
+	c.clearLocalMarkersLocked(clean, isDir)
+	c.deletedPaths[clean] = deletedEntry{isDir: isDir}
+	c.invalidateParentsLocked(clean)
+}
+
 func (c *bucketCache) markDeleted(virtualPath string, isDir bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

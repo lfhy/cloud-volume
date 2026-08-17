@@ -233,6 +233,13 @@ metadata.db
 - Schema v3 marks a path-facade `ContentRef` as awaiting a journal owner. Failed staging/journal append rolls back a newly allocated inode; startup removes an unowned marked ref and its phantom inode after a crash. Raw low-level `StageWrite` stays available for its explicit caller contract.
 - **Recorded P2 review risk:** WinFsp currently clears an open handle's `dirty` flag even when metadata staging/journal admission fails during release. The handle close path needs a recoverable retry record before metadata-only sessions can guarantee that failed close is replayable; this is not silently treated as a successful remote mutation.
 
+### M6c page write integration (completed 2026-08-17)
+
+- Profile-scoped page `createDirectory`, `uploadFile`, `renameObject`, `moveObject`, and `deleteObject` now submit the same Desired-tree transaction and durable journal used by metadata-enabled mounts. Admission is local and does not synchronously call the provider; the retained namespace worker performs the remote mutation and confirmation later. A permanent page delete persists `HardDelete`, including across a reopen/replay.
+- Page-only handles no longer strand accepted work: `Manager.Release` retains a zero-reference namespace while it has pending/failed operations or pending chunk content, and a later idle acquire/release prunes it. The active mount projection clears only stale path-indexed markers or adds a tombstone; it deliberately retains source bytes and never calls provider-confirmation callbacks before the worker succeeds.
+- Legacy profiles without `ProfileID` retain their direct-provider behavior. Profile-scoped `copyObject` and recursive `uploadDirectory` intentionally fail closed until a durable copy/batch operation can atomically snapshot their complete input; allowing their old direct paths would create a second remote writer.
+- **Recorded P2 design gaps:** page task IDs are currently admission IDs rather than worker transfer IDs (`metadata-op-<seq>` remains the worker snapshot); a pending page-upload's chunks are not yet a mount byte-read source, so a mount read before remote confirmation still asks the provider. These require durable task ownership and chunk-backed read plumbing, respectively, and are outside the first MVP closure.
+
 ## 推荐实施顺序（锁定）
 
 **先完成本地 inode metadata + 页面/mount 统一视图，再做远端同步和跨设备 feed。** 远端 change feed 的 receiver 必须把事件应用到唯一的本地树，才能正确判断“本地 pending”与“远端已变”；在两套缓存并存时先做 feed，只会重新制造 `NotifyExternal*` 式旁路修补。
@@ -309,7 +316,7 @@ Phase 0 的止血修复可以并行落地，但不改变上述主线顺序。
 3. **M3 mount 读接入（已完成）**：WebDAV/FUSE/WinFsp/Cloud Files readdir/stat 全部改读 metadata；本地 overlay 保持旁路，轮询刷新同一持久远端基底。
 4. **M4 页面读接入**：bridge list/stat 改走 metadata；删除 ListMountedObjectPage 会话分支；页面分页适配 stale cursor。
 5. **M5 rename 事务与内部身份关联（已完成）**：inode rename；各平台 adapter 保证 metadata-backed 项的展示文件号能稳定解析回 OID（Linux FUSE 直接用 `Ino=OID`，WinFsp/Cloud Files 直用 OID，macOS WebDAV 保持内部映射）。
-6. **M6 写入口最小同步**：M6a facade 和 M6b mount 写入口已完成；页面写操作仍需接入 Desired+journal，远端成功点仍需统一 ingest Remote 状态。
+6. **M6 写入口最小同步（已完成）**：M6a facade、M6b mount 写入口和 M6c 页面 create/upload/rename/move/delete 已接入 Desired+journal；worker 的确认事务更新 Remote 边。复杂 copy/递归目录上传在有持久身份时 fail-closed，等待专门的 durable batch op。
 7. **M7 一致性与验收**：双端视图一致性测试、rename 复杂度测试、重建测试、全量 `go test ./...` + `flutter analyze`。
 
 ### Phase 0 — 先止血（不依赖新架构）
@@ -354,7 +361,7 @@ Phase 0 的止血修复可以并行落地，但不改变上述主线顺序。
 ### Phase 2 — 双入口改造：mount 与页面走同一写路径
 
 - [x] `createDirectory/renamePath/deletePath/scheduleUpload` 在 metadata-enabled mount 中先写 metadata+journal，再返回成功给 Finder/FUSE；未持久化 ProfileID 的 fallback mount 保留 legacy queue。
-- [ ] 页面 `createDirectory/uploadFile/renameObject/deleteObject` 改为同一 journal 入口（先视图后远端），替代“远端成功 + NotifyExternal*”的反向修补；`NotifyExternal*` 改为远端确认 ingest，不再承担失效/删除语义。
+- [x] 页面 `createDirectory/uploadFile/renameObject/deleteObject` 改为同一 journal 入口（先视图后远端），替代“远端成功 + NotifyExternal*”的反向修补；metadata 分支由 worker confirmation 更新 Remote 边，挂载只做不删字节的 Desired 投影。
 - [ ] `NotifyExternal*` 被替换为远端确认 ingest 入口：只按远端 fingerprint 合并 confirmed 状态，不得删除仍 pending 的本地内容。
 - [ ] 为每个对象分配稳定 uint64 OID；journal 的 rename 只改 DesiredParentID/DesiredName，不改 OID，且不重写任意 descendant。
 - [ ] 各平台展示文件号能稳定解析回内部 OID：Linux FUSE `linuxFuseStableAttr.Ino` 建议直接等于 OID（替换 path hash）；WinFsp `FileIndex` 可直接返回 OID 或在 adapter 内维护解析表；Cloud Files placeholder FileIdentity 可编码 OID 或由 adapter 解析（不再用 `path+ETag` 作为主身份）。watcher `MarkRenameSource/Rebase` 改为按 OID 追踪。外部文件号不要求跨平台相等。

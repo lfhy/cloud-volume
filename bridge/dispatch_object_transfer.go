@@ -24,6 +24,9 @@ func copyObject(args json.RawMessage) (any, error) {
 	if err := decodeArgs(args, &input); err != nil {
 		return nil, err
 	}
+	if err := rejectUnsupportedMetadataMutation(input.Config, "copy"); err != nil {
+		return nil, err
+	}
 	if err := storageops.ForConfig(input.Config).CopyObject(
 		context.Background(),
 		input.Bucket,
@@ -44,6 +47,16 @@ func moveObject(args json.RawMessage) (any, error) {
 	var input objectTransferArgs
 	if err := decodeArgs(args, &input); err != nil {
 		return nil, err
+	}
+	if handled, err := metadataMutationFunc(metadataMutationRequest{
+		Kind: metadataMutationRename, Config: input.Config, Bucket: input.Bucket,
+		Path: input.SourceKey, TargetPath: input.TargetKey, TaskID: input.TaskID,
+	}); handled || err != nil {
+		if err != nil {
+			return nil, err
+		}
+		bucketmount.ProjectMetadataRename(input.Config, input.Bucket, input.SourceKey, input.TargetKey, input.IsDirectory)
+		return map[string]any{"ok": true}, nil
 	}
 	if err := storageops.ForConfig(input.Config).MoveObject(
 		context.Background(),

@@ -110,7 +110,11 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 			}
 		}
 		if record.RemoteParentID != 0 {
-			if err := backend.DeleteObject(ctx, s.store.namespace.Bucket, record.RemoteName, record.Kind == KindDirectory, fmt.Sprintf("metadata-op-%d", op.Seq)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			deleteObject := backend.DeleteObject
+			if op.HardDelete {
+				deleteObject = backend.DeleteObjectHard
+			}
+			if err := deleteObject(ctx, s.store.namespace.Bucket, record.RemoteName, record.Kind == KindDirectory, fmt.Sprintf("metadata-op-%d", op.Seq)); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
 		}
