@@ -12,7 +12,7 @@ import (
 // MaterializeDirectory synchronously lists one directory from the provider and
 // commits the resulting dirents/inodes in one transaction.
 func (s *Service) MaterializeDirectory(ctx context.Context, dirInode uint64) error {
-	items, err := listProviderChildrenImpl(ctx, s.backend, s.store.namespace.Bucket, dirInode, s.Path)
+	items, err := listProviderChildrenImpl(ctx, s.backendSnapshot(), s.store.namespace.Bucket, dirInode, s.Path)
 	if err != nil {
 		return err
 	}

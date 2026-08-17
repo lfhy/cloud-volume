@@ -10,6 +10,7 @@ import (
 // Service exposes read/write APIs to page and mount adapters.
 type Service struct {
 	store       *Store
+	backendMu   sync.RWMutex
 	backend     Backend
 	policyMu    sync.RWMutex
 	quiet       time.Duration
@@ -43,6 +44,23 @@ func (s *Service) SetReadOnly(value bool) {
 	s.policyMu.Unlock()
 }
 
+// SetBackend publishes refreshed account transport settings for future remote
+// operations while an already-started provider request keeps its own snapshot.
+func (s *Service) SetBackend(backend Backend) {
+	if backend == nil {
+		return
+	}
+	s.backendMu.Lock()
+	s.backend = backend
+	s.backendMu.Unlock()
+}
+
+func (s *Service) backendSnapshot() Backend {
+	s.backendMu.RLock()
+	defer s.backendMu.RUnlock()
+	return s.backend
+}
+
 // setPolicy publishes the paired manager-owned settings together so an
 // existing namespace never observes a partially refreshed configuration.
 func (s *Service) setPolicy(quiet time.Duration, readOnly bool) {
@@ -73,5 +91,5 @@ func (s *Service) isReadOnly() bool {
 // Store exposes the underlying store for lifecycle ownership.
 func (s *Service) Store() *Store { return s.store }
 
-// Backend exposes the provider backend for remote worker execution.
-func (s *Service) Backend() Backend { return s.backend }
+// Backend exposes the current provider backend for remote worker execution.
+func (s *Service) Backend() Backend { return s.backendSnapshot() }

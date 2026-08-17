@@ -111,23 +111,56 @@ func (m *manager) mountBucket(
 		return BucketMountStatus{}, err
 	}
 	log.Printf("[mount/manager] mount-session-ready bucket=%q mount_name=%q target=%q", session.bucket, session.mountName, session.mountTarget)
-	if err := session.backend.CleanupStale(session); err != nil {
-		log.Printf("[mount/manager] mount-cleanup-stale-error bucket=%q err=%v", session.bucket, err)
+	if err := startMountSession(session); err != nil {
 		return BucketMountStatus{}, err
 	}
-	log.Printf("[mount/manager] mount-cleanup-stale-done bucket=%q", session.bucket)
-	if err := session.backend.Start(session); err != nil {
-		log.Printf("[mount/manager] mount-start-error bucket=%q err=%v", session.bucket, err)
-		_ = session.backend.Stop(session)
-		return BucketMountStatus{}, err
-	}
-	session.remotePoller = newRemoteDirectoryPoller(session)
-	session.remotePoller.Start()
 
 	m.sessions[trimmedBucket] = session
 	delete(m.lastProbes, session.mountTarget)
 	log.Printf("[mount/manager] mount-done bucket=%q path=%q url=%q", session.bucket, session.mountPath, session.serverURL)
 	return session.status(), nil
+}
+
+// startMountSession closes every session resource when a pre-registration
+// lifecycle phase fails, including its metadata handle and background queues.
+func startMountSession(session *mountSession) (resultErr error) {
+	if session == nil || session.backend == nil {
+		return fmt.Errorf("mount session is not initialized")
+	}
+	startInvoked := false
+	defer func() {
+		if resultErr == nil {
+			return
+		}
+		if session.remotePoller != nil {
+			session.remotePoller.Stop()
+			session.remotePoller = nil
+		}
+		if startInvoked {
+			if err := session.backend.Stop(session); err != nil {
+				log.Printf("[mount/manager] mount-start-cleanup-error bucket=%q err=%v", session.bucket, err)
+			}
+		}
+		if session.access != nil {
+			if err := session.access.close(); err != nil {
+				log.Printf("[mount/manager] mount-access-cleanup-error bucket=%q err=%v", session.bucket, err)
+			}
+			session.access = nil
+		}
+	}()
+	if err := session.backend.CleanupStale(session); err != nil {
+		log.Printf("[mount/manager] mount-cleanup-stale-error bucket=%q err=%v", session.bucket, err)
+		return err
+	}
+	log.Printf("[mount/manager] mount-cleanup-stale-done bucket=%q", session.bucket)
+	startInvoked = true
+	if err := session.backend.Start(session); err != nil {
+		log.Printf("[mount/manager] mount-start-error bucket=%q err=%v", session.bucket, err)
+		return err
+	}
+	session.remotePoller = newRemoteDirectoryPoller(session)
+	session.remotePoller.Start()
+	return nil
 }
 
 func (m *manager) unmountBucket(bucket string, options UnmountOptions) (BucketMountStatus, error) {

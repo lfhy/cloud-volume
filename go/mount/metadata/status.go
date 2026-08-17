@@ -141,7 +141,7 @@ func (s *Service) confirmRemote(ctx context.Context, op Op, parent uint64, name 
 	if pathErr != nil {
 		target = name
 	}
-	info, headErr := s.backend.HeadObject(ctx, s.store.namespace.Bucket, RemoteKey(target))
+	info, headErr := s.backendSnapshot().HeadObject(ctx, s.store.namespace.Bucket, RemoteKey(target))
 	if headErr != nil {
 		if errors.Is(headErr, os.ErrNotExist) && !isFile {
 			// Providers without explicit directory markers may legitimately

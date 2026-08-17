@@ -3,6 +3,7 @@ package mount
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -20,6 +21,7 @@ type deleteQueue struct {
 
 	mu      sync.Mutex
 	entries map[string]*pendingDelete
+	running map[string]*pendingDelete
 	queue   chan *pendingDelete
 	closed  bool
 	wg      sync.WaitGroup
@@ -36,6 +38,7 @@ func newDeleteQueue(access *bucketAccess) *deleteQueue {
 	q := &deleteQueue{
 		access:  access,
 		entries: map[string]*pendingDelete{},
+		running: map[string]*pendingDelete{},
 		queue:   make(chan *pendingDelete, 128),
 	}
 	for i := 0; i < deleteWorkerCount; i++ {
@@ -91,7 +94,9 @@ func (q *deleteQueue) worker() {
 		if !q.claim(entry) {
 			continue
 		}
-		if err := q.flushNow(entry); err != nil {
+		err := q.flushNow(entry)
+		q.finish(entry)
+		if err != nil {
 			log.Printf(
 				"[mount/delete] bucket=%q path=%q isDir=%t hard=%t error=%v",
 				q.access.bucket,
@@ -113,7 +118,19 @@ func (q *deleteQueue) claim(entry *pendingDelete) bool {
 		return false
 	}
 	delete(q.entries, entry.virtualPath)
+	q.running[entry.taskID] = entry
 	return true
+}
+
+func (q *deleteQueue) finish(entry *pendingDelete) {
+	if entry == nil {
+		return
+	}
+	q.mu.Lock()
+	if current := q.running[entry.taskID]; current == entry {
+		delete(q.running, entry.taskID)
+	}
+	q.mu.Unlock()
 }
 
 func (q *deleteQueue) flushNow(entry *pendingDelete) (err error) {
@@ -164,7 +181,61 @@ func (q *deleteQueue) cancelDescendantsLocked(clean string) {
 	}
 }
 
+// rebase moves pending delete intent with a rename before the rename's remote
+// move runs. The caller holds access.mutationMu, so running deletes cannot have
+// started their provider call while their target path is being adjusted.
+func (q *deleteQueue) rebase(oldVirtualPath, newVirtualPath string, isDir bool) {
+	if q == nil {
+		return
+	}
+	oldClean := cleanVirtualPath(oldVirtualPath)
+	newClean := cleanVirtualPath(newVirtualPath)
+	if oldClean == "" || newClean == "" || oldClean == newClean {
+		return
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for key, entry := range q.entries {
+		next, ok := rebaseDeletePath(key, oldClean, newClean, isDir)
+		if !ok || entry == nil {
+			continue
+		}
+		if existing := q.entries[next]; existing != nil && existing != entry {
+			s3ops.CancelTransfer(entry.taskID)
+			delete(q.entries, key)
+			continue
+		}
+		delete(q.entries, key)
+		entry.virtualPath = next
+		q.entries[next] = entry
+	}
+	for _, entry := range q.running {
+		if entry == nil {
+			continue
+		}
+		if next, ok := rebaseDeletePath(entry.virtualPath, oldClean, newClean, isDir); ok {
+			entry.virtualPath = next
+		}
+	}
+}
+
+func rebaseDeletePath(path, oldPath, newPath string, isDir bool) (string, bool) {
+	clean := cleanVirtualPath(path)
+	if clean == oldPath {
+		return newPath, true
+	}
+	if !isDir || !strings.HasPrefix(clean, ensureDirSuffix(oldPath)) {
+		return "", false
+	}
+	return newPath + strings.TrimPrefix(clean, oldPath), true
+}
+
 func (q *deleteQueue) runDelete(ctx context.Context, entry *pendingDelete) error {
+	if q.access == nil {
+		return fmt.Errorf("missing delete access")
+	}
+	q.access.mutationMu.Lock()
+	defer q.access.mutationMu.Unlock()
 	deleteFunc := q.access.backend.DeleteObject
 	if entry.hardDelete {
 		deleteFunc = q.access.backend.DeleteObjectHard

@@ -114,10 +114,16 @@ func (a *bucketAccess) deletePath(
 	if a.overlay.handles(clean) {
 		return a.overlay.removeAll(clean)
 	}
+	a.writebackMu.Lock()
+	defer a.writebackMu.Unlock()
 	if !isDir {
-		a.writeback.cancel(clean)
+		if a.writeback != nil {
+			a.writeback.cancel(clean)
+		}
 	} else {
-		a.writeback.cancelAtOrBelow(clean, true)
+		if a.writeback != nil {
+			a.writeback.cancelAtOrBelow(clean, true)
+		}
 	}
 	a.cache.markDeleted(clean, isDir)
 	a.cache.invalidatePath(clean)
@@ -177,6 +183,13 @@ func (a *bucketAccess) renamePath(
 		if err := a.writeback.drainPath(timeoutCtx, oldClean, isDir); err != nil {
 			return fmt.Errorf("flush writeback before rename: %w", err)
 		}
+	}
+	// Wait for any delete already in flight, then move its pending target with
+	// the desired-path rename before the provider sees this remote mutation.
+	a.mutationMu.Lock()
+	defer a.mutationMu.Unlock()
+	if a.deletes != nil {
+		a.deletes.rebase(oldClean, newClean, isDir)
 	}
 	hadPendingWriteback, err := a.writeback.rename(oldClean, newClean, isDir)
 	if err != nil {
@@ -268,6 +281,10 @@ func (a *bucketAccess) enqueueRenamePath(
 	if err := a.hiddenTrashError(newClean); err != nil {
 		return err
 	}
+	// Allocate the rename barrier while holding the same local-path gate used
+	// by file writes, directory creates, and deletes.
+	a.writebackMu.Lock()
+	defer a.writebackMu.Unlock()
 	var dirBarrier *dirSyncBarrier
 	if a.dirSync != nil {
 		dirBarrier = a.dirSync.rebaseAndFence(oldClean, newClean, isDir)
@@ -295,36 +312,48 @@ func (a *bucketAccess) enqueueRenamePath(
 			if isDir && dirBarrier != nil && dirBarrier.rebasedCreate {
 				ctx, cancel := a.withTimeout(context.Background())
 				defer cancel()
-				exists, err := a.probeRemotePath(ctx, oldClean, true)
-				if err != nil {
-					return err
-				}
-				if !exists {
-					if err := a.createRemoteDirectory(ctx, newClean); err != nil {
-						return err
-					}
-					exists, err = a.probeRemotePath(ctx, newClean, true)
-					if err != nil {
-						return err
-					}
-					if !exists {
-						return fmt.Errorf(
-							"directory %q is absent after create",
-							newClean,
-						)
-					}
-					if err := a.cache.renameLocalFile(oldClean, newClean, true, a.cacheRoot); err != nil {
-						return err
-					}
-					a.cache.invalidatePath(oldClean)
-					a.cache.invalidatePath(newClean)
-					return nil
-				}
+				return a.completeRebasedDirectoryRename(ctx, oldClean, newClean)
 			}
 			return a.renamePath(context.Background(), oldClean, newClean, isDir)
 		},
 		dirBarrier,
 	)
+}
+
+// completeRebasedDirectoryRename finishes a local-only directory rename after
+// its rebased marker fence. It uses the same gates as a synchronous rename so
+// a delete cannot keep targeting the old source path.
+func (a *bucketAccess) completeRebasedDirectoryRename(ctx context.Context, oldClean, newClean string) error {
+	exists, err := a.probeRemotePath(ctx, oldClean, true)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return a.renamePath(ctx, oldClean, newClean, true)
+	}
+	a.writebackMu.Lock()
+	defer a.writebackMu.Unlock()
+	a.mutationMu.Lock()
+	defer a.mutationMu.Unlock()
+	if a.deletes != nil {
+		a.deletes.rebase(oldClean, newClean, true)
+	}
+	if err := a.createRemoteDirectory(ctx, newClean); err != nil {
+		return err
+	}
+	exists, err = a.probeRemotePath(ctx, newClean, true)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("directory %q is absent after create", newClean)
+	}
+	if err := a.cache.renameLocalFile(oldClean, newClean, true, a.cacheRoot); err != nil {
+		return err
+	}
+	a.cache.invalidatePath(oldClean)
+	a.cache.invalidatePath(newClean)
+	return nil
 }
 
 func (a *bucketAccess) probeRemotePath(

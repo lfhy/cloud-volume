@@ -3,9 +3,11 @@ package mount
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 
 	storageconfig "remote-storage/go/config"
+	"remote-storage/go/mount/metadata"
 )
 
 type stopFailureMountBackend struct{}
@@ -24,6 +26,32 @@ func (stopFailureMountBackend) CleanupStale(*mountSession) error     { return ni
 type inactiveStopFailureMountBackend struct{ stopFailureMountBackend }
 
 func (inactiveStopFailureMountBackend) IsActive(*mountSession) (bool, error) { return false, nil }
+
+type cleanupFailureMountBackend struct{ stopCalls int }
+
+func (*cleanupFailureMountBackend) Initialize(*mountSession) error { return nil }
+func (*cleanupFailureMountBackend) Start(*mountSession) error      { return nil }
+func (b *cleanupFailureMountBackend) Stop(*mountSession) error {
+	b.stopCalls++
+	return nil
+}
+func (*cleanupFailureMountBackend) IsActive(*mountSession) (bool, error) { return false, nil }
+func (*cleanupFailureMountBackend) CleanupStale(*mountSession) error {
+	return errors.New("injected cleanup-stale failure")
+}
+
+type startFailureMountBackend struct{ stopCalls int }
+
+func (*startFailureMountBackend) Initialize(*mountSession) error { return nil }
+func (*startFailureMountBackend) Start(*mountSession) error {
+	return errors.New("injected start failure")
+}
+func (b *startFailureMountBackend) Stop(*mountSession) error {
+	b.stopCalls++
+	return nil
+}
+func (*startFailureMountBackend) IsActive(*mountSession) (bool, error) { return false, nil }
+func (*startFailureMountBackend) CleanupStale(*mountSession) error     { return nil }
 
 func TestMountConfigChangeKeepsSessionWhenStopFails(t *testing.T) {
 	access := newTestBucketAccess(t)
@@ -93,5 +121,63 @@ func TestStatusProbeKeepsSessionWhenInactiveStopFails(t *testing.T) {
 	}
 	if status.LastError == "" {
 		t.Fatal("status probe did not retain the stop failure")
+	}
+}
+
+func TestStartMountSessionReleasesAccessAfterCleanupStaleFailure(t *testing.T) {
+	manager := metadata.NewManager(filepath.Join(t.TempDir(), "metadata"))
+	defer manager.RemoveAllForTest()
+	config := storageconfig.RemoteStorageConfig{
+		ProfileID:      "cleanup-profile",
+		CacheDirectory: t.TempDir(),
+	}
+	handle, err := manager.AcquireWithBackend(config, "bucket", mountTestBackend{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	access := &bucketAccess{metadataHandle: handle}
+	backend := &cleanupFailureMountBackend{}
+	session := &mountSession{bucket: "bucket", access: access, backend: backend}
+
+	if err := startMountSession(session); err == nil {
+		t.Fatal("start unexpectedly succeeded after CleanupStale failure")
+	}
+	if session.access != nil {
+		t.Fatal("failed mount retained bucket access")
+	}
+	if backend.stopCalls != 0 {
+		t.Fatalf("CleanupStale failure called Stop %d times, want 0", backend.stopCalls)
+	}
+	if services := manager.List(); len(services) != 0 {
+		t.Fatalf("failed mount retained metadata namespace: %+v", services)
+	}
+}
+
+func TestStartMountSessionStopsPartialStartAndReleasesAccess(t *testing.T) {
+	manager := metadata.NewManager(filepath.Join(t.TempDir(), "metadata"))
+	defer manager.RemoveAllForTest()
+	config := storageconfig.RemoteStorageConfig{
+		ProfileID:      "start-profile",
+		CacheDirectory: t.TempDir(),
+	}
+	handle, err := manager.AcquireWithBackend(config, "bucket", mountTestBackend{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := &startFailureMountBackend{}
+	session := &mountSession{
+		bucket:  "bucket",
+		access:  &bucketAccess{metadataHandle: handle},
+		backend: backend,
+	}
+
+	if err := startMountSession(session); err == nil {
+		t.Fatal("start unexpectedly succeeded")
+	}
+	if backend.stopCalls != 1 {
+		t.Fatalf("partial start Stop calls = %d, want 1", backend.stopCalls)
+	}
+	if session.access != nil || len(manager.List()) != 0 {
+		t.Fatalf("partial start leaked access or metadata: access=%v services=%+v", session.access, manager.List())
 	}
 }

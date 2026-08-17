@@ -147,6 +147,15 @@ func joinVirtualPath(basePath, relativePath string) string {
 }
 
 func (a *bucketAccess) stageLocalDirectory(virtualPath string, modTime time.Time) {
+	if a == nil {
+		return
+	}
+	a.writebackMu.Lock()
+	defer a.writebackMu.Unlock()
+	a.stageLocalDirectoryLocked(virtualPath, modTime)
+}
+
+func (a *bucketAccess) stageLocalDirectoryLocked(virtualPath string, modTime time.Time) {
 	clean := cleanVirtualPath(virtualPath)
 	if clean == "" {
 		return

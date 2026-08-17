@@ -39,11 +39,14 @@ type bucketAccess struct {
 	quotaProvider   storageops.BucketQuotaProvider
 	quotaMu         sync.Mutex
 	writebackMu     sync.Mutex
-	quotaCachedAt   time.Time
-	quotaTotal      int64
-	quotaUsed       int64
-	quotaKnown      bool
-	quotaLoading    bool
+	// mutationMu serializes remote path mutations after writebackMu has fixed
+	// their local ordering, so a queued delete cannot overtake a rename move.
+	mutationMu    sync.Mutex
+	quotaCachedAt time.Time
+	quotaTotal    int64
+	quotaUsed     int64
+	quotaKnown    bool
+	quotaLoading  bool
 
 	group singleflight.Group
 

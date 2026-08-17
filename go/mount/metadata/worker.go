@@ -313,13 +313,14 @@ func (w *Worker) execute(ctx context.Context, op Op) {
 
 func (w *Worker) executeOp(ctx context.Context, op Op) error {
 	s := w.service
+	backend := s.backendSnapshot()
 	switch op.Type {
 	case OpMkdir:
 		path, parentID, name, err := s.desiredDirTarget(op.InodeID)
 		if err != nil {
 			return err
 		}
-		if err := s.backend.CreateDirectory(ctx, s.store.namespace.Bucket, parentPrefix(path), name); err != nil && !strings.Contains(strings.ToLower(err.Error()), "exists") {
+		if err := backend.CreateDirectory(ctx, s.store.namespace.Bucket, parentPrefix(path), name); err != nil && !strings.Contains(strings.ToLower(err.Error()), "exists") {
 			return err
 		}
 		return s.confirmRemote(ctx, op, parentID, name, false)
@@ -337,7 +338,7 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 		defer os.Remove(localPath)
 		s3ops.QueueTransfer(taskID, "upload", s.store.namespace.Bucket, target, localPath, ref.Size)
 		s3ops.SetTransferStatusDetail(taskID, "sync_wait")
-		if err := s.backend.UploadFile(ctx, s.store.namespace.Bucket, target, localPath, taskID); err != nil {
+		if err := backend.UploadFile(ctx, s.store.namespace.Bucket, target, localPath, taskID); err != nil {
 			s3ops.FinishQueuedTransfer(taskID, err)
 			return err
 		}
@@ -348,7 +349,7 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 		s3ops.FinishQueuedTransfer(taskID, nil)
 		return s.retireContent(op.InodeID, ref.Generation)
 	case OpRename:
-		return w.executeMove(ctx, op)
+		return w.executeMove(ctx, op, backend)
 	case OpDelete:
 		record, err := s.remoteTarget(op.InodeID)
 		if err != nil {
@@ -367,7 +368,7 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 			}
 		}
 		if record.RemoteParentID != 0 {
-			if err := s.backend.DeleteObject(ctx, s.store.namespace.Bucket, record.RemoteName, record.Kind == KindDirectory, fmt.Sprintf("metadata-op-%d", op.Seq)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			if err := backend.DeleteObject(ctx, s.store.namespace.Bucket, record.RemoteName, record.Kind == KindDirectory, fmt.Sprintf("metadata-op-%d", op.Seq)); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
 		}
@@ -387,7 +388,7 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 	}
 }
 
-func (w *Worker) executeMove(ctx context.Context, op Op) error {
+func (w *Worker) executeMove(ctx context.Context, op Op, backend Backend) error {
 	record, err := w.service.remoteTarget(op.InodeID)
 	if err != nil {
 		return err
@@ -399,7 +400,7 @@ func (w *Worker) executeMove(ctx context.Context, op Op) error {
 			return err
 		}
 		if record.Kind == KindDirectory {
-			if err := w.service.backend.CreateDirectory(ctx, w.service.store.namespace.Bucket, parentPrefix(desiredPath), filepath.Base(desiredPath)); err != nil {
+			if err := backend.CreateDirectory(ctx, w.service.store.namespace.Bucket, parentPrefix(desiredPath), filepath.Base(desiredPath)); err != nil {
 				return err
 			}
 			return w.service.confirmRemote(ctx, op, record.DesiredParentID, record.DesiredName, false)
@@ -414,7 +415,7 @@ func (w *Worker) executeMove(ctx context.Context, op Op) error {
 			return err
 		}
 		defer os.Remove(localPath)
-		if err := w.service.backend.UploadFile(ctx, w.service.store.namespace.Bucket, desiredPath, localPath, taskID); err != nil {
+		if err := backend.UploadFile(ctx, w.service.store.namespace.Bucket, desiredPath, localPath, taskID); err != nil {
 			return err
 		}
 		if err := w.service.confirmRemote(ctx, op, record.DesiredParentID, record.DesiredName, true); err != nil {
@@ -431,7 +432,7 @@ func (w *Worker) executeMove(ctx context.Context, op Op) error {
 		return w.service.confirmRemote(ctx, op, record.DesiredParentID, record.DesiredName, record.Kind == KindDirectory)
 	}
 	taskID := fmt.Sprintf("metadata-op-%d", op.Seq)
-	if err := w.service.backend.MoveObject(ctx, w.service.store.namespace.Bucket, source, target, record.Kind == KindDirectory, taskID); err != nil {
+	if err := backend.MoveObject(ctx, w.service.store.namespace.Bucket, source, target, record.Kind == KindDirectory, taskID); err != nil {
 		return err
 	}
 	return w.service.confirmRemote(ctx, op, record.DesiredParentID, record.DesiredName, record.Kind == KindDirectory)

@@ -16,6 +16,7 @@ type runningRenameTestBackend struct {
 	uploadStarted chan struct{}
 	moveStarted   chan struct{}
 	releaseUpload chan struct{}
+	releaseMove   chan struct{}
 	uploadOnce    sync.Once
 	moveOnce      sync.Once
 }
@@ -59,6 +60,13 @@ func (b *runningRenameTestBackend) MoveObject(
 	taskID string,
 ) error {
 	b.moveOnce.Do(func() { close(b.moveStarted) })
+	if b.releaseMove != nil {
+		select {
+		case <-b.releaseMove:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	return b.mutationMoveTestBackend.MoveObject(ctx, bucket, source, target, isDir, taskID)
 }
 
@@ -128,5 +136,54 @@ func TestWritebackRenameKeepsSourceWhenCacheMoveFails(t *testing.T) {
 	}
 	if _, ok := access.cache.localFile("source.txt"); !ok {
 		t.Fatal("source cache marker was removed after failed cache move")
+	}
+}
+
+func TestRenameGatesConcurrentDirectoryCreateAndDelete(t *testing.T) {
+	access := newTestBucketAccess(t)
+	backend := newRunningRenameTestBackend()
+	backend.releaseMove = make(chan struct{})
+	access.backend = backend
+
+	renameDone := make(chan error, 1)
+	go func() {
+		renameDone <- access.renamePath(context.Background(), "old.txt", "new.txt", false)
+	}()
+	select {
+	case <-backend.moveStarted:
+	case <-time.After(time.Second):
+		t.Fatal("remote move did not start")
+	}
+
+	createDone := make(chan error, 1)
+	deleteDone := make(chan error, 1)
+	go func() { createDone <- access.createDirectory(context.Background(), "old.txt/child") }()
+	go func() { deleteDone <- access.deletePath(context.Background(), "old.txt", false) }()
+	select {
+	case err := <-createDone:
+		t.Fatalf("directory create bypassed rename gate: %v", err)
+	case err := <-deleteDone:
+		t.Fatalf("delete bypassed rename gate: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(backend.releaseMove)
+	select {
+	case err := <-renameDone:
+		if err != nil {
+			t.Fatalf("rename: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("rename did not finish")
+	}
+	for name, done := range map[string]chan error{"create": createDone, "delete": deleteDone} {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("%s after rename: %v", name, err)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("%s did not resume after rename", name)
+		}
 	}
 }

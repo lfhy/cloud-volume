@@ -147,6 +147,7 @@ func (m *Manager) Acquire(config storageconfig.RemoteStorageConfig, bucket strin
 		existing.service.setPolicy(
 			quietDuration(normalized), normalized.BucketSettingsFor(bucket).ReadOnly,
 		)
+		existing.service.SetBackend(storageops.ForConfig(normalized))
 		managed = existing
 	} else {
 		service, err := m.openService(id, normalized, bucket)
@@ -175,6 +176,7 @@ func (m *Manager) AcquireWithBackend(
 		existing.service.setPolicy(
 			quietDuration(normalized), normalized.BucketSettingsFor(bucket).ReadOnly,
 		)
+		existing.service.SetBackend(backend)
 		return &AcquireHandle{Service: existing.service, manager: m}, nil
 	}
 	namespace, err := m.namespace(id, normalized, bucket)

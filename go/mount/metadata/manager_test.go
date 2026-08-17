@@ -8,6 +8,7 @@ import (
 	"time"
 
 	storageconfig "remote-storage/go/config"
+	storageops "remote-storage/go/storage"
 )
 
 func TestManagerRegistryReusesOneManagerForItsRuntimeRoot(t *testing.T) {
@@ -108,5 +109,40 @@ func TestPageReleaseDoesNotCloseMountHeldNamespace(t *testing.T) {
 	mountHandle.Release()
 	if services := manager.List(); len(services) != 0 {
 		t.Fatalf("mount release did not close final service: %+v", services)
+	}
+}
+
+func TestAcquireWithBackendRefreshesTransportHeldByMount(t *testing.T) {
+	manager := NewManager(filepath.Join(t.TempDir(), "metadata"))
+	defer manager.RemoveAllForTest()
+	config := fakeConfig("transport-profile")
+	config.CacheDirectory = t.TempDir()
+	oldBackend := newFakeBackend()
+	oldBackend.objects["/old.txt"] = storageops.ObjectInfo{Key: "old.txt", Size: 1}
+	mountHandle, err := manager.AcquireWithBackend(config, "bucket", oldBackend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mountHandle.Service.MaterializeDirectory(context.Background(), rootInode); err != nil {
+		t.Fatal(err)
+	}
+
+	newBackend := newFakeBackend()
+	newBackend.objects["/new.txt"] = storageops.ObjectInfo{Key: "new.txt", Size: 2}
+	pageHandle, err := manager.AcquireWithBackend(config, "bucket", newBackend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pageHandle.Release()
+	defer mountHandle.Release()
+	if err := mountHandle.Service.MaterializeDirectory(context.Background(), rootInode); err != nil {
+		t.Fatal(err)
+	}
+	page, err := mountHandle.Service.ListPage(context.Background(), rootInode, "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].Key != "new.txt" {
+		t.Fatalf("mount-held service kept stale backend: %+v", page.Items)
 	}
 }

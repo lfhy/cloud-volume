@@ -221,7 +221,14 @@ func (q *writebackQueue) reconcileQueuedRename(
 	access *bucketAccess,
 	op *queuedWritebackRename,
 ) (bool, error) {
+	access.writebackMu.Lock()
+	defer access.writebackMu.Unlock()
+	access.mutationMu.Lock()
+	defer access.mutationMu.Unlock()
 	record := op.record
+	if access.deletes != nil {
+		access.deletes.rebase(record.OldVirtualPath, record.NewVirtualPath, record.IsDirectory)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), access.requestTimeout)
 	defer cancel()
 	err := access.reconcileRemoteMove(ctx, record)
