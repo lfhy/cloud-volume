@@ -2,6 +2,7 @@
 package mount
 
 import (
+	"fmt"
 	"strings"
 
 	s3ops "remote-storage/go/s3"
@@ -84,7 +85,7 @@ func (q *writebackQueue) cancelAtOrBelow(virtualPath string, isDir bool) {
 	}
 }
 
-func (q *writebackQueue) rename(oldVirtualPath, newVirtualPath string, isDir bool) bool {
+func (q *writebackQueue) rename(oldVirtualPath, newVirtualPath string, isDir bool) (bool, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -94,15 +95,17 @@ func (q *writebackQueue) rename(oldVirtualPath, newVirtualPath string, isDir boo
 	if !isDir {
 		entry, ok := q.entries[oldClean]
 		if !ok {
-			return false
+			return false, nil
+		}
+		if access != nil {
+			if err := access.cache.renameLocalFile(oldClean, newClean, false, access.cacheRoot); err != nil {
+				return false, fmt.Errorf("move pending cache file: %w", err)
+			}
+			access.cache.invalidatePath(oldClean)
+			access.cache.invalidatePath(newClean)
 		}
 		if entry.timer != nil {
 			entry.timer.Stop()
-		}
-		if access != nil {
-			access.cache.renameLocalFile(oldClean, newClean, false, access.cacheRoot)
-			access.cache.invalidatePath(oldClean)
-			access.cache.invalidatePath(newClean)
 		}
 		delete(q.entries, oldClean)
 		entry.virtualPath = newClean
@@ -112,7 +115,7 @@ func (q *writebackQueue) rename(oldVirtualPath, newVirtualPath string, isDir boo
 		q.persistEntryLocked(entry)
 		_ = q.store.delete(oldClean)
 		q.projectSyncState(entry.virtualPath, false)
-		return true
+		return true, nil
 	}
 
 	oldPrefix := ensureDirSuffix(oldClean)
@@ -122,20 +125,22 @@ func (q *writebackQueue) rename(oldVirtualPath, newVirtualPath string, isDir boo
 		if !strings.HasPrefix(key, oldPrefix) {
 			continue
 		}
-		if entry.timer != nil {
-			entry.timer.Stop()
-		}
 		entries[key] = entry
 	}
 	if len(entries) == 0 {
-		return false
+		return false, nil
 	}
 	if access != nil {
-		access.cache.renameLocalFile(oldClean, newClean, true, access.cacheRoot)
+		if err := access.cache.renameLocalFile(oldClean, newClean, true, access.cacheRoot); err != nil {
+			return false, fmt.Errorf("move pending cache directory: %w", err)
+		}
 		access.cache.invalidatePath(oldClean)
 		access.cache.invalidatePath(newClean)
 	}
 	for key, entry := range entries {
+		if entry.timer != nil {
+			entry.timer.Stop()
+		}
 		delete(q.entries, key)
 		entry.virtualPath = newPrefix + strings.TrimPrefix(key, oldPrefix)
 		nextKey := entry.virtualPath
@@ -146,7 +151,7 @@ func (q *writebackQueue) rename(oldVirtualPath, newVirtualPath string, isDir boo
 		_ = q.store.delete(key)
 		q.projectSyncState(entry.virtualPath, false)
 	}
-	return true
+	return true, nil
 }
 
 // rebaseEntryLocalPathLocked picks up the cache's physical move while the

@@ -143,7 +143,7 @@ func TestRenameQueuedTransferProjectsNewPathNotInSync(t *testing.T) {
 	)
 	projector.calls = nil
 
-	if ok := access.writeback.rename("archive/output.zip", "archive/final.zip", false); !ok {
+	if ok, err := access.writeback.rename("archive/output.zip", "archive/final.zip", false); err != nil || !ok {
 		t.Fatal("expected queued writeback rename to succeed")
 	}
 	if len(projector.calls) != 1 {
@@ -454,7 +454,7 @@ func TestDrainContextRestoresEveryUnsentEntryAfterQueueBackpressure(t *testing.T
 	}
 }
 
-func TestRenameRekeysPendingEntryToMovedLocalPath(t *testing.T) {
+func TestRenameDrainsPendingEntryBeforeRemoteMove(t *testing.T) {
 	access := newTestBucketAccess(t)
 	oldPath := createTempFile(t, access.cacheRoot, "old.txt", "payload")
 	access.stageLocalWrite("old.txt", oldPath, int64(len("payload")))
@@ -462,18 +462,16 @@ func TestRenameRekeysPendingEntryToMovedLocalPath(t *testing.T) {
 	if err := access.renamePath(context.Background(), "old.txt", "new.txt", false); err != nil {
 		t.Fatalf("rename local-only pending write: %v", err)
 	}
-	entry := access.writeback.entries["new.txt"]
-	if entry == nil {
-		t.Fatal("renamed writeback entry is missing")
+	if access.writeback.entries["old.txt"] != nil || access.writeback.entries["new.txt"] != nil {
+		t.Fatalf("rename left a pending upload after draining source: %+v", access.writeback.entries)
 	}
-	wantPath := access.cachePathFor("new.txt")
-	if entry.localPath != wantPath {
-		t.Fatalf("renamed entry local path = %q, want %q", entry.localPath, wantPath)
+	if _, ok := access.cache.localFile("old.txt"); ok {
+		t.Fatal("drained source retained its local write marker")
 	}
-	if _, err := os.Stat(wantPath); err != nil {
-		t.Fatalf("renamed local content is missing: %v", err)
+	if _, ok := access.cache.localFile("new.txt"); ok {
+		t.Fatal("rename recreated a local write marker after source drain")
 	}
-	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
-		t.Fatalf("old local content remains after rename: %v", err)
+	if _, err := os.Stat(oldPath); err != nil {
+		t.Fatalf("drained cache bytes were unexpectedly removed: %v", err)
 	}
 }

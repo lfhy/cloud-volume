@@ -3,7 +3,6 @@ package mount
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -253,118 +252,6 @@ func (c *bucketCache) isMarkedDeleted(virtualPath string) bool {
 		}
 	}
 	return false
-}
-
-func (c *bucketCache) renameLocalFile(
-	oldVirtualPath,
-	newVirtualPath string,
-	isDir bool,
-	cacheRoot string,
-) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	oldClean := cleanVirtualPath(oldVirtualPath)
-	newClean := cleanVirtualPath(newVirtualPath)
-	if !isDir {
-		c.renameLocalFileLocked(oldClean, newClean, cacheRoot)
-		c.renameLocalEntryLocked(oldClean, newClean, false)
-		c.renameDeletedLocked(oldClean, newClean, false)
-		c.invalidateParentsLocked(oldClean)
-		c.invalidateParentsLocked(newClean)
-		return
-	}
-
-	oldPrefix := ensureDirSuffix(oldClean)
-	newPrefix := ensureDirSuffix(newClean)
-	c.renameLocalEntryLocked(oldClean, newClean, true)
-	c.renameDeletedLocked(oldClean, newClean, true)
-	for key, item := range c.localFiles {
-		if !strings.HasPrefix(key, oldPrefix) {
-			continue
-		}
-		suffix := strings.TrimPrefix(key, oldPrefix)
-		nextKey := newPrefix + suffix
-		nextPath := pathForVirtualKey(cacheRoot, nextKey)
-		_ = os.MkdirAll(filepath.Dir(nextPath), 0o755)
-		_ = os.Remove(nextPath)
-		_ = os.Rename(item.localPath, nextPath)
-		item.localPath = nextPath
-		item.info.Key = nextKey
-		c.localFiles[nextKey] = item
-		delete(c.localFiles, key)
-	}
-	c.invalidateParentsLocked(oldClean)
-	c.invalidateParentsLocked(newClean)
-}
-
-func (c *bucketCache) renameLocalFileLocked(oldClean, newClean, cacheRoot string) {
-	item, ok := c.localFiles[oldClean]
-	if !ok {
-		return
-	}
-	newCachePath := pathForVirtualKey(cacheRoot, newClean)
-	_ = os.MkdirAll(filepath.Dir(newCachePath), 0o755)
-	_ = os.Remove(newCachePath)
-	_ = os.Rename(item.localPath, newCachePath)
-	item.localPath = newCachePath
-	item.info.Key = newClean
-	c.localFiles[newClean] = item
-	delete(c.localFiles, oldClean)
-}
-
-func (c *bucketCache) renameLocalEntryLocked(oldClean, newClean string, isDir bool) {
-	if !isDir {
-		item, ok := c.localEntries[oldClean]
-		if !ok {
-			return
-		}
-		item.info = normalizeObjectInfo(newClean, item.info)
-		c.localEntries[newClean] = item
-		delete(c.localEntries, oldClean)
-		return
-	}
-
-	if item, ok := c.localEntries[oldClean]; ok {
-		item.info = normalizeObjectInfo(newClean, item.info)
-		c.localEntries[newClean] = item
-		delete(c.localEntries, oldClean)
-	}
-	oldPrefix := ensureDirSuffix(oldClean)
-	newPrefix := ensureDirSuffix(newClean)
-	for key, item := range c.localEntries {
-		if !strings.HasPrefix(key, oldPrefix) {
-			continue
-		}
-		nextKey := newPrefix + strings.TrimPrefix(key, oldPrefix)
-		item.info = normalizeObjectInfo(nextKey, item.info)
-		c.localEntries[nextKey] = item
-		delete(c.localEntries, key)
-	}
-}
-
-func (c *bucketCache) renameDeletedLocked(oldClean, newClean string, isDir bool) {
-	if !isDir {
-		if item, ok := c.deletedPaths[oldClean]; ok {
-			c.deletedPaths[newClean] = item
-			delete(c.deletedPaths, oldClean)
-		}
-		return
-	}
-	if item, ok := c.deletedPaths[oldClean]; ok {
-		c.deletedPaths[newClean] = item
-		delete(c.deletedPaths, oldClean)
-	}
-	oldPrefix := ensureDirSuffix(oldClean)
-	newPrefix := ensureDirSuffix(newClean)
-	for key, item := range c.deletedPaths {
-		if !strings.HasPrefix(key, oldPrefix) {
-			continue
-		}
-		nextKey := newPrefix + strings.TrimPrefix(key, oldPrefix)
-		c.deletedPaths[nextKey] = item
-		delete(c.deletedPaths, key)
-	}
 }
 
 func (c *bucketCache) mergeLocalFiles(

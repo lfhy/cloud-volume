@@ -61,7 +61,9 @@ func TestBucketCacheRenameLocalTree(t *testing.T) {
 		IsDir: false,
 	})
 
-	cache.renameLocalFile("alpha", "beta", true, root)
+	if err := cache.renameLocalFile("alpha", "beta", true, root); err != nil {
+		t.Fatalf("rename local directory cache: %v", err)
+	}
 
 	if _, ok := cache.localFile("alpha/note.txt"); ok {
 		t.Fatal("expected old local file key to be removed")

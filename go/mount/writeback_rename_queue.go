@@ -226,20 +226,23 @@ func (q *writebackQueue) reconcileQueuedRename(
 	defer cancel()
 	err := access.reconcileRemoteMove(ctx, record)
 	if err == nil {
-		access.applyMutationSuccess(record)
-		if completeErr := q.mutations.Complete(record.ID); completeErr != nil {
-			// The move is verified remotely; only bookkeeping failed. The
-			// next reconcile pass sees source-absent/destination-present and
-			// completes without repeating the provider mutation.
-			log.Printf(
-				"[mount/writeback] mutation-complete-error bucket=%q id=%s error=%v",
-				q.bucketName(),
-				record.ID,
-				completeErr,
-			)
+		if err := access.applyMutationSuccess(record); err != nil {
+			err = fmt.Errorf("apply local rename state: %w", err)
+		} else {
+			if completeErr := q.mutations.Complete(record.ID); completeErr != nil {
+				// The move is verified remotely; only bookkeeping failed. The
+				// next reconcile pass sees source-absent/destination-present and
+				// completes without repeating the provider mutation.
+				log.Printf(
+					"[mount/writeback] mutation-complete-error bucket=%q id=%s error=%v",
+					q.bucketName(),
+					record.ID,
+					completeErr,
+				)
+			}
+			q.setMutationError("")
+			return false, nil
 		}
-		q.setMutationError("")
-		return false, nil
 	}
 	record.RetryCount++
 	record.NextAttemptUnixNs = time.Now().Add(mutationRetryDelay(record)).UnixNano()

@@ -119,11 +119,31 @@ func writebackScope(config storageconfig.RemoteStorageConfig, bucket string) str
 		normalized.Endpoint,
 		normalized.Bucket,
 		normalized.RootPrefix,
-		normalized.AccessKeyID,
+		writebackScopePrincipal(normalized),
 		normalizeBucketName(bucket),
 	}, "\x00")
 	sum := sha256.Sum256([]byte(raw))
 	return fmt.Sprintf("%x", sum[:])
+}
+
+// writebackScopePrincipal chooses credentials that identify a remote account
+// without treating routine OAuth access-token refreshes as a different target.
+func writebackScopePrincipal(config storageconfig.RemoteStorageConfig) string {
+	switch config.StorageType {
+	case storageconfig.StorageTypeWebDAV:
+		return "webdav:" + config.WebDAVUsername
+	case storageconfig.StorageTypeFTP, storageconfig.StorageTypeSFTP:
+		if config.FTPAnonymous {
+			return fmt.Sprintf("ftp-anonymous:%d", config.FTPPort)
+		}
+		return fmt.Sprintf("ftp:%s:%d", config.FTPUsername, config.FTPPort)
+	case storageconfig.StorageTypeBaiduPan:
+		// AccessKeyID is Baidu's short-lived access token. Its refresh token is
+		// the durable credential we can use to reject a different authorization.
+		return "baidu-refresh:" + config.SecretAccessKey
+	default:
+		return "s3:" + config.AccessKeyID
+	}
 }
 
 func openWritebackStore(dirPath, scope string) (*writebackStore, error) {

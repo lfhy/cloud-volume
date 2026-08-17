@@ -115,10 +115,12 @@ func (a *bucketAccess) reconcileRemoteMove(
 
 // applyMutationSuccess updates local caches, peer knowledge, and broadcast
 // state after a verified remote move.
-func (a *bucketAccess) applyMutationSuccess(record mutationRecord) {
+func (a *bucketAccess) applyMutationSuccess(record mutationRecord) error {
 	oldClean := cleanVirtualPath(record.OldVirtualPath)
 	newClean := cleanVirtualPath(record.NewVirtualPath)
-	a.cache.renameLocalFile(oldClean, newClean, record.IsDirectory, a.cacheRoot)
+	if err := a.cache.renameLocalFile(oldClean, newClean, record.IsDirectory, a.cacheRoot); err != nil {
+		return err
+	}
 	a.cache.invalidatePath(oldClean)
 	a.cache.invalidatePath(newClean)
 	ForgetPeerContent(a.config, a.bucket, oldClean)
@@ -132,6 +134,7 @@ func (a *bucketAccess) applyMutationSuccess(record mutationRecord) {
 			Operation:   "rename",
 		})
 	}
+	return nil
 }
 
 // ensureLocalMutationRoots repairs local cache/staging roots captured in a

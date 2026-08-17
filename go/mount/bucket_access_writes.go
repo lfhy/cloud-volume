@@ -158,6 +158,10 @@ func (a *bucketAccess) renamePath(
 		}
 		return a.renameAcrossBoundary(ctx, oldClean, newClean, isDir)
 	}
+	// Keep a new write from entering the old path while its running upload is
+	// drained and the provider move establishes the destination.
+	a.writebackMu.Lock()
+	defer a.writebackMu.Unlock()
 	var dirBarrier *dirSyncBarrier
 	if a.dirSync != nil {
 		dirBarrier = a.dirSync.rebaseAndFence(oldClean, newClean, isDir)
@@ -169,7 +173,15 @@ func (a *bucketAccess) renamePath(
 			return fmt.Errorf("wait for directory marker rename: %w", err)
 		}
 	}
-	hadPendingWriteback := a.writeback.rename(oldClean, newClean, isDir)
+	if a.writeback != nil {
+		if err := a.writeback.drainPath(timeoutCtx, oldClean, isDir); err != nil {
+			return fmt.Errorf("flush writeback before rename: %w", err)
+		}
+	}
+	hadPendingWriteback, err := a.writeback.rename(oldClean, newClean, isDir)
+	if err != nil {
+		return err
+	}
 	if isDir && dirBarrier != nil && dirBarrier.rebasedCreate {
 		exists, err := a.probeRemotePath(timeoutCtx, oldClean, true)
 		if err != nil {
@@ -184,7 +196,9 @@ func (a *bucketAccess) renamePath(
 				return fmt.Errorf("directory %q is absent after marker rebase", newClean)
 			}
 			if !hadPendingWriteback {
-				a.applyRenamedLocalState(oldClean, newClean, true)
+				if err := a.applyRenamedLocalState(oldClean, newClean, true); err != nil {
+					return err
+				}
 			}
 			return nil
 		}
@@ -209,7 +223,9 @@ func (a *bucketAccess) renamePath(
 	); err != nil {
 		return err
 	}
-	a.applyRenamedLocalState(oldClean, newClean, isDir)
+	if err := a.applyRenamedLocalState(oldClean, newClean, isDir); err != nil {
+		return err
+	}
 	ForgetPeerContent(a.config, a.bucket, oldClean)
 	if hook := PeerBroadcastHook(); hook != nil {
 		hook(BroadcastPayload{Config: a.config, Bucket: a.bucket, VirtualPath: newClean, OldPath: oldClean, IsDir: isDir, Operation: "rename"})
@@ -219,10 +235,13 @@ func (a *bucketAccess) renamePath(
 
 // applyRenamedLocalState keeps local staging and lookup caches aligned once a
 // rename has either reached the provider or been satisfied by a rebased marker.
-func (a *bucketAccess) applyRenamedLocalState(oldClean, newClean string, isDir bool) {
-	a.cache.renameLocalFile(oldClean, newClean, isDir, a.cacheRoot)
+func (a *bucketAccess) applyRenamedLocalState(oldClean, newClean string, isDir bool) error {
+	if err := a.cache.renameLocalFile(oldClean, newClean, isDir, a.cacheRoot); err != nil {
+		return err
+	}
 	a.cache.invalidatePath(oldClean)
 	a.cache.invalidatePath(newClean)
+	return nil
 }
 
 func (a *bucketAccess) enqueueRenamePath(
@@ -294,7 +313,9 @@ func (a *bucketAccess) enqueueRenamePath(
 							newClean,
 						)
 					}
-					a.cache.renameLocalFile(oldClean, newClean, true, a.cacheRoot)
+					if err := a.cache.renameLocalFile(oldClean, newClean, true, a.cacheRoot); err != nil {
+						return err
+					}
 					a.cache.invalidatePath(oldClean)
 					a.cache.invalidatePath(newClean)
 					return nil

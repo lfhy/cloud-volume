@@ -19,6 +19,39 @@ func (q *writebackQueue) drain() error {
 	return q.drainContext(context.Background())
 }
 
+// drainPath forces writes for one rename source to settle before the provider
+// move can run. It leaves unrelated bucket uploads on their normal schedule.
+func (q *writebackQueue) drainPath(
+	ctx context.Context,
+	virtualPath string,
+	isDir bool,
+) error {
+	if q == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for {
+		ready, pending, running, err := q.preparePathDrainPass(virtualPath, isDir)
+		if err != nil {
+			return err
+		}
+		if pending == 0 && running == 0 {
+			return nil
+		}
+		for index, entry := range ready {
+			if err := q.enqueueDrainEntry(ctx, entry); err != nil {
+				q.resumeUnsentDrainEntries(ready[index:])
+				return err
+			}
+		}
+		if err := waitForWritebackDrain(ctx, writebackBarrierPollInterval); err != nil {
+			return err
+		}
+	}
+}
+
 // drainContext forces queued uploads through the normal dispatcher until it is
 // idle. A caller that must keep a live mount on timeout can cancel its wait
 // without shutting down the queue or discarding the persisted entries.
@@ -162,6 +195,54 @@ func (q *writebackQueue) prepareDrainPass() ([]*pendingWriteback, int, int, erro
 		ready = append(ready, entry)
 	}
 	return ready, len(q.entries), len(q.running), nil
+}
+
+func (q *writebackQueue) preparePathDrainPass(
+	virtualPath string,
+	isDir bool,
+) ([]*pendingWriteback, int, int, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.closed {
+		return nil, 0, 0, fmt.Errorf("writeback queue is closed")
+	}
+
+	ready := make([]*pendingWriteback, 0)
+	pending := 0
+	for _, entry := range q.entries {
+		if entry == nil || !writebackPathMatches(entry.virtualPath, virtualPath, isDir) {
+			continue
+		}
+		pending++
+		if entry.queued {
+			continue
+		}
+		if entry.timer != nil {
+			entry.timer.Stop()
+			entry.timer = nil
+		}
+		entry.queued = true
+		entry.dueAt = time.Now()
+		q.persistEntryLocked(entry)
+		ready = append(ready, entry)
+	}
+
+	running := 0
+	for _, entry := range q.running {
+		if entry != nil && writebackPathMatches(entry.virtualPath, virtualPath, isDir) {
+			running++
+		}
+	}
+	return ready, pending, running, nil
+}
+
+func writebackPathMatches(entryPath, virtualPath string, isDir bool) bool {
+	entryClean := cleanVirtualPath(entryPath)
+	clean := cleanVirtualPath(virtualPath)
+	if entryClean == clean {
+		return true
+	}
+	return isDir && strings.HasPrefix(entryClean, ensureDirSuffix(clean))
 }
 
 func (q *writebackQueue) enqueueDrainEntry(ctx context.Context, entry *pendingWriteback) error {
