@@ -7,6 +7,7 @@ import (
 	"log"
 
 	storageconfig "remote-storage/go/config"
+	"remote-storage/go/mount/metadata"
 )
 
 // notifyExternalMutation runs callback against the bucketAccess of the active
@@ -87,11 +88,12 @@ func NotifyExternalRename(
 // shared metadata tree accepted a page-originated delete journal entry.
 func ProjectMetadataDelete(
 	cfg storageconfig.RemoteStorageConfig,
-	bucket, virtualPath string,
+	bucket string,
+	projection metadata.PathProjection,
 	isDir bool,
 ) {
 	globalManager.notifyExternalMutation(cfg, bucket, func(access *bucketAccess) {
-		access.projectMetadataDelete(virtualPath, isDir)
+		access.projectMetadataDelete(projection, isDir)
 	})
 }
 
@@ -100,11 +102,12 @@ func ProjectMetadataDelete(
 // mutation; the metadata worker owns remote confirmation.
 func ProjectMetadataUpload(
 	cfg storageconfig.RemoteStorageConfig,
-	bucket, virtualPath string,
+	bucket string,
+	projection metadata.PathProjection,
 	isDir bool,
 ) {
 	globalManager.notifyExternalMutation(cfg, bucket, func(access *bucketAccess) {
-		access.projectMetadataUpload(virtualPath, isDir)
+		access.projectMetadataUpload(projection, isDir)
 	})
 }
 
@@ -112,10 +115,11 @@ func ProjectMetadataUpload(
 // without using the remote-first invalidation or peer-broadcast paths.
 func ProjectMetadataRename(
 	cfg storageconfig.RemoteStorageConfig,
-	bucket, oldPath, newPath string,
+	bucket, oldPath string,
+	projection metadata.PathProjection,
 	isDir bool,
 ) {
 	globalManager.notifyExternalMutation(cfg, bucket, func(access *bucketAccess) {
-		access.projectMetadataRename(oldPath, newPath, isDir)
+		access.projectMetadataRename(oldPath, projection, isDir)
 	})
 }

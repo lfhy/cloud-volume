@@ -8,6 +8,7 @@ import (
 
 	storageconfig "remote-storage/go/config"
 	bucketmount "remote-storage/go/mount"
+	bucketmetadata "remote-storage/go/mount/metadata"
 	storageops "remote-storage/go/storage"
 )
 
@@ -49,13 +50,14 @@ func createDirectory(args json.RawMessage) (any, error) {
 		return nil, err
 	}
 	path := joinChildPath(input.Prefix, input.Name)
+	var projection bucketmetadata.PathProjection
 	if handled, err := metadataMutationFunc(metadataMutationRequest{
-		Kind: metadataMutationCreateDirectory, Config: input.Config, Bucket: input.Bucket, Path: path,
+		Kind: metadataMutationCreateDirectory, Config: input.Config, Bucket: input.Bucket, Path: path, Projection: &projection,
 	}); handled || err != nil {
 		if err != nil {
 			return nil, err
 		}
-		bucketmount.ProjectMetadataUpload(input.Config, input.Bucket, path, true)
+		bucketmount.ProjectMetadataUpload(input.Config, input.Bucket, projection, true)
 		return map[string]any{"ok": true}, nil
 	}
 	if err := storageops.ForConfig(input.Config).CreateDirectory(
@@ -73,14 +75,15 @@ func deleteObject(args json.RawMessage) (any, error) {
 	if err := decodeArgs(args, &input); err != nil {
 		return nil, err
 	}
+	var projection bucketmetadata.PathProjection
 	if handled, err := metadataMutationFunc(metadataMutationRequest{
 		Kind: metadataMutationDelete, Config: input.Config, Bucket: input.Bucket, Path: input.Key,
-		TaskID: input.TaskID, Permanent: input.Permanent,
+		TaskID: input.TaskID, Permanent: input.Permanent, Projection: &projection,
 	}); handled || err != nil {
 		if err != nil {
 			return nil, err
 		}
-		bucketmount.ProjectMetadataDelete(input.Config, input.Bucket, input.Key, input.IsDirectory)
+		bucketmount.ProjectMetadataDelete(input.Config, input.Bucket, projection, input.IsDirectory)
 		return map[string]any{"ok": true}, nil
 	}
 	backend := storageops.ForConfig(input.Config)
@@ -102,13 +105,14 @@ func renameObject(args json.RawMessage) (any, error) {
 		return nil, err
 	}
 	newPath := joinChildPath(parentDirectoryOf(input.Key), input.NewName)
+	var projection bucketmetadata.PathProjection
 	if handled, err := metadataMutationFunc(metadataMutationRequest{
-		Kind: metadataMutationRename, Config: input.Config, Bucket: input.Bucket, Path: input.Key, TargetPath: newPath,
+		Kind: metadataMutationRename, Config: input.Config, Bucket: input.Bucket, Path: input.Key, TargetPath: newPath, Projection: &projection,
 	}); handled || err != nil {
 		if err != nil {
 			return nil, err
 		}
-		bucketmount.ProjectMetadataRename(input.Config, input.Bucket, input.Key, newPath, input.IsDirectory)
+		bucketmount.ProjectMetadataRename(input.Config, input.Bucket, input.Key, projection, input.IsDirectory)
 		return map[string]any{"ok": true}, nil
 	}
 	if err := storageops.ForConfig(input.Config).RenameObject(
@@ -126,14 +130,15 @@ func uploadFile(args json.RawMessage) (any, error) {
 	if err := decodeArgs(args, &input); err != nil {
 		return nil, err
 	}
+	var projection bucketmetadata.PathProjection
 	if handled, err := metadataMutationFunc(metadataMutationRequest{
 		Kind: metadataMutationWriteFile, Config: input.Config, Bucket: input.Bucket, Path: input.Key,
-		LocalPath: input.LocalPath, TaskID: input.TaskID,
+		LocalPath: input.LocalPath, TaskID: input.TaskID, Projection: &projection,
 	}); handled || err != nil {
 		if err != nil {
 			return nil, err
 		}
-		bucketmount.ProjectMetadataUpload(input.Config, input.Bucket, input.Key, false)
+		bucketmount.ProjectMetadataUpload(input.Config, input.Bucket, projection, false)
 		return map[string]any{"ok": true}, nil
 	}
 	backend := storageops.ForConfig(input.Config)

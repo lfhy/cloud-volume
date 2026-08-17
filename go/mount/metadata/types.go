@@ -120,6 +120,7 @@ type Op struct {
 	NextAttemptUnixNano       int64  `json:"nextAttemptUnixNs"`
 	ExpectedRemoteFingerprint string `json:"expectedRemoteFingerprint,omitempty"`
 	HardDelete                bool   `json:"hardDelete,omitempty"`
+	MoveApplied               bool   `json:"moveApplied,omitempty"`
 	Origin                    string `json:"origin"`
 	CreatedAtUnixNano         int64  `json:"createdAtUnixNs"`
 	AppliedAtUnixNano         int64  `json:"appliedAtUnixNs,omitempty"`
@@ -141,6 +142,15 @@ type ContentRef struct {
 	Chunks          []string `json:"chunks"`
 	Size            int64    `json:"size"`
 	AwaitingJournal bool     `json:"awaitingJournal,omitempty"`
+}
+
+// PathProjection identifies the exact Desired-tree version a caller may
+// project into a platform-local cache after durable journal admission.
+type PathProjection struct {
+	Path     string
+	Inode    uint64
+	Revision uint64
+	Present  bool
 }
 
 // Object extends the shared provider object shape with local identity fields.

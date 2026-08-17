@@ -32,6 +32,7 @@ type metadataMutationRequest struct {
 	LocalPath  string
 	TaskID     string
 	Permanent  bool
+	Projection *bucketmetadata.PathProjection
 }
 
 // metadataMutationFunc allows bridge tests to replace DefaultManager wiring.
@@ -70,7 +71,8 @@ func mutateViaHandle(handle *bucketmetadata.AcquireHandle, input metadataMutatio
 	options := bucketmetadata.WriteOptions{Origin: "page", TaskID: input.TaskID, HardDelete: input.Permanent}
 	switch input.Kind {
 	case metadataMutationCreateDirectory:
-		_, err := service.CreateDirectoryPath(context.Background(), path, options)
+		_, projection, err := service.CreateDirectoryPathWithProjection(context.Background(), path, options)
+		setMutationProjection(input, projection)
 		return err
 	case metadataMutationWriteFile:
 		file, err := os.Open(input.LocalPath)
@@ -86,14 +88,26 @@ func mutateViaHandle(handle *bucketmetadata.AcquireHandle, input metadataMutatio
 			return fmt.Errorf("metadata: upload source is a directory: %s", input.LocalPath)
 		}
 		options.MTime = info.ModTime().Format("2006-01-02 15:04:05")
-		_, _, err = service.WritePath(context.Background(), path, file, info.Size(), options)
+		_, _, projection, writeErr := service.WritePathWithProjection(context.Background(), path, file, info.Size(), options)
+		setMutationProjection(input, projection)
+		err = writeErr
 		return err
 	case metadataMutationRename:
-		return service.RenamePath(context.Background(), path, trimPrefixPath(input.TargetPath), options)
+		projection, err := service.RenamePathWithProjection(context.Background(), path, trimPrefixPath(input.TargetPath), options)
+		setMutationProjection(input, projection)
+		return err
 	case metadataMutationDelete:
-		return service.DeletePath(context.Background(), path, options)
+		projection, err := service.DeletePathWithProjection(context.Background(), path, options)
+		setMutationProjection(input, projection)
+		return err
 	default:
 		return fmt.Errorf("metadata: unsupported page mutation %d", input.Kind)
+	}
+}
+
+func setMutationProjection(input metadataMutationRequest, projection bucketmetadata.PathProjection) {
+	if input.Projection != nil {
+		*input.Projection = projection
 	}
 }
 

@@ -6,9 +6,12 @@ package mount
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	storageconfig "remote-storage/go/config"
+	"remote-storage/go/mount/metadata"
 	s3ops "remote-storage/go/s3"
 )
 
@@ -287,6 +290,21 @@ func TestNotifyExternalUploadAllowsImmediateReList(t *testing.T) {
 
 func TestMetadataProjectionClearsStaleLocalMarkers(t *testing.T) {
 	access := newTestBucketAccess(t)
+	backend := newMetadataMountWriteBackend()
+	_, handle := attachMetadataWriteService(t, access, backend)
+	service := handle.Service
+	ctx := context.Background()
+	if _, _, _, err := service.WritePathWithProjection(
+		ctx, "source.txt", strings.NewReader("new"), 3, metadata.WriteOptions{Origin: "page"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	target, err := service.RenamePathWithProjection(
+		ctx, "source.txt", "destination.txt", metadata.WriteOptions{Origin: "page"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	source := createTempFile(t, access.cacheRoot, "source.txt", "old")
 	access.cache.storeLocalFile("source.txt", source, s3ops.ObjectInfo{Size: 3})
 	var deleted, uploaded string
@@ -299,7 +317,7 @@ func TestMetadataProjectionClearsStaleLocalMarkers(t *testing.T) {
 		return nil
 	}
 
-	access.projectMetadataRename("source.txt", "destination.txt", false)
+	access.projectMetadataRename("source.txt", target, false)
 
 	if _, err := os.Stat(source); err != nil {
 		t.Fatalf("metadata projection removed recoverable source data: %v", err)
@@ -317,15 +335,63 @@ func TestMetadataProjectionClearsStaleLocalMarkers(t *testing.T) {
 
 func TestMetadataProjectionUploadReplacesMatchingLocalDraft(t *testing.T) {
 	access := newTestBucketAccess(t)
+	backend := newMetadataMountWriteBackend()
+	_, handle := attachMetadataWriteService(t, access, backend)
+	projectionInode, _, projection, err := handle.Service.WritePathWithProjection(
+		context.Background(), "draft.txt", strings.NewReader("new"), 3, metadata.WriteOptions{Origin: "page"},
+	)
+	if err != nil || projectionInode == 0 {
+		t.Fatalf("page write projection inode=%d err=%v", projectionInode, err)
+	}
 	stale := createTempFile(t, access.cacheRoot, "draft.txt", "old")
 	access.cache.storeLocalFile("draft.txt", stale, s3ops.ObjectInfo{Size: 3})
 
-	access.projectMetadataUpload("draft.txt", false)
+	access.projectMetadataUpload(projection, false)
 
 	if _, err := os.Stat(stale); err != nil {
 		t.Fatalf("metadata projection removed recoverable local data: %v", err)
 	}
 	if _, ok := access.cache.localFile("draft.txt"); ok {
 		t.Fatal("metadata upload left a local marker that would override Desired")
+	}
+}
+
+func TestMetadataProjectionSkipsSupersededMountWrites(t *testing.T) {
+	access := newTestBucketAccess(t)
+	backend := newMetadataMountWriteBackend()
+	_, handle := attachMetadataWriteService(t, access, backend)
+	service := handle.Service
+	service.SetQuietPeriod(24 * time.Hour)
+	ctx := context.Background()
+
+	_, _, pageUpload, err := service.WritePathWithProjection(
+		ctx, "draft.txt", strings.NewReader("page"), 4, metadata.WriteOptions{Origin: "page"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mountWrite := createTempFile(t, access.cacheRoot, "mount-write.txt", "mount")
+	if err := access.stageLocalWrite("draft.txt", mountWrite, int64(len("mount"))); err != nil {
+		t.Fatal(err)
+	}
+	access.projectMetadataUpload(pageUpload, false)
+	if marker, ok := access.cache.localFile("draft.txt"); !ok || marker.localPath != mountWrite {
+		t.Fatalf("late page upload projection cleared newer mount marker: %+v ok=%t", marker, ok)
+	}
+
+	pageDelete, err := service.DeletePathWithProjection(ctx, "draft.txt", metadata.WriteOptions{Origin: "page"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mountRecreate := createTempFile(t, access.cacheRoot, "mount-recreate.txt", "newer")
+	if err := access.stageLocalWrite("draft.txt", mountRecreate, int64(len("newer"))); err != nil {
+		t.Fatal(err)
+	}
+	access.projectMetadataDelete(pageDelete, false)
+	if access.cache.isMarkedDeleted("draft.txt") {
+		t.Fatal("late page delete projection tombstoned a newer mount write")
+	}
+	if marker, ok := access.cache.localFile("draft.txt"); !ok || marker.localPath != mountRecreate {
+		t.Fatalf("late page delete projection cleared newer mount marker: %+v ok=%t", marker, ok)
 	}
 }

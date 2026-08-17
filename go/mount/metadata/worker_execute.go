@@ -174,11 +174,81 @@ func (w *Worker) executeMove(ctx context.Context, op Op, backend Backend) error 
 	if source == target {
 		return w.service.confirmRemote(ctx, backend, op, record.DesiredParentID, record.DesiredName, record.Kind == KindDirectory)
 	}
+	// A successful provider move is durable before confirmation can HEAD the
+	// target. Persist that boundary so a restart only retries confirmation.
+	if op.MoveApplied {
+		return w.service.confirmRemote(ctx, backend, op, record.DesiredParentID, record.DesiredName, record.Kind == KindDirectory)
+	}
 	taskID := fmt.Sprintf("metadata-op-%d", op.Seq)
 	if err := backend.MoveObject(ctx, w.service.store.namespace.Bucket, source, target, record.Kind == KindDirectory, taskID); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			applied, reconcileErr := w.reconcileMissingMoveSource(ctx, backend, op, record, source, target)
+			if reconcileErr != nil {
+				return reconcileErr
+			}
+			if applied {
+				return w.service.confirmRemote(ctx, backend, op, record.DesiredParentID, record.DesiredName, record.Kind == KindDirectory)
+			}
+		}
+		return err
+	}
+	if err := w.markMoveApplied(op.Seq); err != nil {
 		return err
 	}
 	return w.service.confirmRemote(ctx, backend, op, record.DesiredParentID, record.DesiredName, record.Kind == KindDirectory)
+}
+
+// markMoveApplied records the remote side-effect before confirmation can fail.
+func (w *Worker) markMoveApplied(seq uint64) error {
+	return w.service.store.update(func(tx boltTxT) error {
+		return replaceOp(tx, seq, func(current *Op) {
+			if current.State == OpStateRunning {
+				current.MoveApplied = true
+			}
+		})
+	})
+}
+
+// reconcileMissingMoveSource covers a crash after a provider accepted a move
+// but before moveApplied reached bbolt. A matching target is the only safe
+// postcondition; an unrelated pre-existing target is a local conflict.
+func (w *Worker) reconcileMissingMoveSource(
+	ctx context.Context,
+	backend Backend,
+	op Op,
+	record Inode,
+	source, target string,
+) (bool, error) {
+	if _, err := backend.HeadObject(ctx, w.service.store.namespace.Bucket, RemoteKey(source)); err == nil {
+		return false, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	info, err := backend.HeadObject(ctx, w.service.store.namespace.Bucket, RemoteKey(target))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// A provider may not retain an explicit marker for an otherwise valid
+			// directory move. confirmRemote has the same directory-marker rule.
+			if record.Kind == KindDirectory {
+				if err := w.markMoveApplied(op.Seq); err != nil {
+					return false, err
+				}
+				return true, nil
+			}
+			return false, nil
+		}
+		return false, err
+	}
+	if expected := record.RemoteFingerprint; expected != "" && Fingerprint(info) != expected {
+		return false, fmt.Errorf(
+			"%w: move source %q is missing and target %q fingerprint differs",
+			errConflict, source, target,
+		)
+	}
+	if err := w.markMoveApplied(op.Seq); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 var errConflict = errors.New("metadata: remote fingerprint conflict")

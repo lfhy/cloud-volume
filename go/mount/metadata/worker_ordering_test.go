@@ -169,6 +169,105 @@ func TestRefreshUnmaterializedRenameTargetKeepsRemoteSource(t *testing.T) {
 	}
 }
 
+func TestMoveReplayConfirmsAppliedRemoteMoveAfterReopen(t *testing.T) {
+	backend := &moveConfirmationFailureBackend{fakeBackend: newFakeBackend(), failTargetHead: true}
+	backend.objects["/old.txt"] = storageops.ObjectInfo{Key: "old.txt", Size: 3, ETag: "etag-old"}
+	service := newTestService(t, backend)
+	service.SetQuietPeriod(time.Nanosecond)
+	ctx := context.Background()
+	if _, err := service.ListPage(ctx, rootInode, "", 10); err != nil {
+		t.Fatal(err)
+	}
+	inode, err := service.Resolve(rootInode, "old.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Rename(inode, rootInode, "new.txt", WriteOptions{Origin: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Millisecond)
+	worker := &Worker{service: service, wake: make(chan struct{}, 1), running: map[uint64]struct{}{}}
+	claimed := worker.claimDue()
+	if len(claimed) != 1 || claimed[0].Type != OpRename {
+		t.Fatalf("first claim = %+v, want one rename", claimed)
+	}
+	worker.execute(ctx, claimed[0])
+	if moves := backend.moveCount(); moves != 1 {
+		t.Fatalf("remote move count after interrupted confirmation = %d, want 1", moves)
+	}
+	var afterFirst Op
+	if err := service.store.view(func(tx boltTxT) error {
+		var err error
+		afterFirst, err = getOp(tx, claimed[0].Seq)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !afterFirst.MoveApplied || afterFirst.State != OpStatePending {
+		t.Fatalf("rename did not retain applied-move phase: %+v", afterFirst)
+	}
+
+	namespace := service.store.namespace
+	if err := service.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenStore(namespace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed := NewService(reopened, backend)
+	defer resumed.Close()
+	resumed.SetQuietPeriod(time.Nanosecond)
+	// Materializing the target before retry must preserve the remote source edge
+	// until the persisted move phase confirms the target.
+	if err := resumed.MaterializeDirectory(ctx, rootInode); err != nil {
+		t.Fatal(err)
+	}
+	if err := resumed.store.update(func(tx boltTxT) error {
+		return replaceOp(tx, claimed[0].Seq, func(op *Op) {
+			op.NextAttemptUnixNano = time.Now().Add(-time.Second).UnixNano()
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	retryWorker := NewWorker(resumed)
+	defer retryWorker.Stop()
+	if err := retryWorker.Drain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if moves := backend.moveCount(); moves != 1 {
+		t.Fatalf("replay repeated an already-applied remote move: %d", moves)
+	}
+	if _, err := resumed.StatPath(ctx, "new.txt"); err != nil {
+		t.Fatalf("replayed rename missing desired target: %v", err)
+	}
+}
+
+// moveConfirmationFailureBackend fails the first target HEAD after accepting
+// a move, reproducing the crash/retry boundary without changing the move.
+type moveConfirmationFailureBackend struct {
+	*fakeBackend
+	failTargetHead bool
+}
+
+func (b *moveConfirmationFailureBackend) HeadObject(ctx context.Context, bucket, key string) (storageops.ObjectInfo, error) {
+	if key == "new.txt" && b.failTargetHead {
+		b.failTargetHead = false
+		return storageops.ObjectInfo{}, errors.New("temporary target confirmation failure")
+	}
+	return b.fakeBackend.HeadObject(ctx, bucket, key)
+}
+
+func (b *moveConfirmationFailureBackend) moveCount() int {
+	count := 0
+	for _, operation := range b.ops {
+		if strings.HasPrefix(operation, "move:") {
+			count++
+		}
+	}
+	return count
+}
+
 func TestDirectoryRenameWaitsForEarlierChildWrite(t *testing.T) {
 	backend := newFakeBackend()
 	backend.objects["/dir/"] = storageops.ObjectInfo{Key: "dir/", IsDir: true}

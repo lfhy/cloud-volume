@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"remote-storage/go/mount/metadata"
 	s3ops "remote-storage/go/s3"
 )
 
@@ -325,32 +326,66 @@ func (a *bucketAccess) InvalidateExternalRename(oldPath, newPath string, isDir b
 
 // projectMetadataDelete projects an accepted Desired tombstone while retaining
 // metadata as the remote-state authority for the worker and future refreshes.
-func (a *bucketAccess) projectMetadataDelete(virtualPath string, isDir bool) {
+func (a *bucketAccess) projectMetadataDelete(projection metadata.PathProjection, isDir bool) {
 	if a == nil {
 		return
 	}
-	clean := cleanVirtualPath(virtualPath)
 	a.writebackMu.Lock()
 	defer a.writebackMu.Unlock()
+	a.projectMetadataDeleteLocked(projection, isDir)
+}
+
+func (a *bucketAccess) projectMetadataDeleteLocked(projection metadata.PathProjection, isDir bool) {
+	if !a.metadataProjectionCurrentLocked(projection) {
+		return
+	}
+	clean := cleanVirtualPath(projection.Path)
 	a.cache.markDeletedRetainingBytes(clean, isDir)
 	a.cache.invalidatePath(clean)
 }
 
 // projectMetadataUpload clears path-keyed mount-local markers that would
 // otherwise override the newer metadata Desired entry in a mounted read view.
-func (a *bucketAccess) projectMetadataUpload(virtualPath string, isDir bool) {
+func (a *bucketAccess) projectMetadataUpload(projection metadata.PathProjection, isDir bool) {
 	if a == nil {
 		return
 	}
-	clean := cleanVirtualPath(virtualPath)
 	a.writebackMu.Lock()
 	defer a.writebackMu.Unlock()
+	a.projectMetadataUploadLocked(projection, isDir)
+}
+
+func (a *bucketAccess) projectMetadataUploadLocked(projection metadata.PathProjection, isDir bool) {
+	if !a.metadataProjectionCurrentLocked(projection) {
+		return
+	}
+	clean := cleanVirtualPath(projection.Path)
 	a.cache.clearLocalMarkers(clean, isDir)
 	a.cache.invalidatePath(clean)
 	a.cache.invalidatePath(parentVirtualPrefix(clean))
 }
 
-func (a *bucketAccess) projectMetadataRename(oldPath, newPath string, isDir bool) {
-	a.projectMetadataDelete(oldPath, isDir)
-	a.projectMetadataUpload(newPath, isDir)
+func (a *bucketAccess) projectMetadataRename(oldPath string, target metadata.PathProjection, isDir bool) {
+	if a == nil {
+		return
+	}
+	a.writebackMu.Lock()
+	defer a.writebackMu.Unlock()
+	a.projectMetadataDeleteLocked(metadata.PathProjection{Path: oldPath}, isDir)
+	a.projectMetadataUploadLocked(target, isDir)
+}
+
+// metadataProjectionCurrentLocked prevents an old page callback from changing
+// a mount cache after a newer mount mutation has advanced the Desired path.
+func (a *bucketAccess) metadataProjectionCurrentLocked(projection metadata.PathProjection) bool {
+	service := a.metadataService()
+	if service == nil {
+		return false
+	}
+	current, err := service.ProjectionCurrent(projection)
+	if err != nil {
+		log.Printf("[mount/metadata] projection-check path=%q error=%v", projection.Path, err)
+		return false
+	}
+	return current
 }

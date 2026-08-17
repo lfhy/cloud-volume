@@ -6,6 +6,7 @@ import (
 
 	storageconfig "remote-storage/go/config"
 	bucketmount "remote-storage/go/mount"
+	bucketmetadata "remote-storage/go/mount/metadata"
 	storageops "remote-storage/go/storage"
 )
 
@@ -48,14 +49,15 @@ func moveObject(args json.RawMessage) (any, error) {
 	if err := decodeArgs(args, &input); err != nil {
 		return nil, err
 	}
+	var projection bucketmetadata.PathProjection
 	if handled, err := metadataMutationFunc(metadataMutationRequest{
 		Kind: metadataMutationRename, Config: input.Config, Bucket: input.Bucket,
-		Path: input.SourceKey, TargetPath: input.TargetKey, TaskID: input.TaskID,
+		Path: input.SourceKey, TargetPath: input.TargetKey, TaskID: input.TaskID, Projection: &projection,
 	}); handled || err != nil {
 		if err != nil {
 			return nil, err
 		}
-		bucketmount.ProjectMetadataRename(input.Config, input.Bucket, input.SourceKey, input.TargetKey, input.IsDirectory)
+		bucketmount.ProjectMetadataRename(input.Config, input.Bucket, input.SourceKey, projection, input.IsDirectory)
 		return map[string]any{"ok": true}, nil
 	}
 	if err := storageops.ForConfig(input.Config).MoveObject(

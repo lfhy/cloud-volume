@@ -13,7 +13,25 @@ import (
 func (s *Service) CreateDirectoryPath(ctx context.Context, value string, opts WriteOptions) (uint64, error) {
 	s.pathWriteMu.Lock()
 	defer s.pathWriteMu.Unlock()
+	return s.createDirectoryPathLocked(ctx, value, opts)
+}
 
+// CreateDirectoryPathWithProjection returns the exact Desired version created
+// by this mutation so a platform cache cannot apply an older page projection.
+func (s *Service) CreateDirectoryPathWithProjection(
+	ctx context.Context, value string, opts WriteOptions,
+) (uint64, PathProjection, error) {
+	s.pathWriteMu.Lock()
+	defer s.pathWriteMu.Unlock()
+	inode, err := s.createDirectoryPathLocked(ctx, value, opts)
+	if err != nil {
+		return 0, PathProjection{}, err
+	}
+	projection, err := s.presentPathProjection(value)
+	return inode, projection, err
+}
+
+func (s *Service) createDirectoryPathLocked(ctx context.Context, value string, opts WriteOptions) (uint64, error) {
 	parent, name, err := resolveWriteParent(value)
 	if err != nil {
 		return 0, err
@@ -38,7 +56,31 @@ func (s *Service) WritePath(
 	// path rename/delete cannot split this write in two.
 	s.pathWriteMu.Lock()
 	defer s.pathWriteMu.Unlock()
+	return s.writePathLocked(ctx, value, source, size, opts)
+}
 
+// WritePathWithProjection retains the post-write inode revision while the
+// shared path lock is held, making a later mount write distinguishable.
+func (s *Service) WritePathWithProjection(
+	ctx context.Context,
+	value string,
+	source io.Reader,
+	size int64,
+	opts WriteOptions,
+) (uint64, ContentRef, PathProjection, error) {
+	s.pathWriteMu.Lock()
+	defer s.pathWriteMu.Unlock()
+	inode, ref, err := s.writePathLocked(ctx, value, source, size, opts)
+	if err != nil {
+		return 0, ContentRef{}, PathProjection{}, err
+	}
+	projection, err := s.presentPathProjection(value)
+	return inode, ref, projection, err
+}
+
+func (s *Service) writePathLocked(
+	ctx context.Context, value string, source io.Reader, size int64, opts WriteOptions,
+) (uint64, ContentRef, error) {
 	parent, name, err := resolveWriteParent(value)
 	if err != nil {
 		return 0, ContentRef{}, err
@@ -62,7 +104,23 @@ func (s *Service) WritePath(
 func (s *Service) RenamePath(ctx context.Context, source, target string, opts WriteOptions) error {
 	s.pathWriteMu.Lock()
 	defer s.pathWriteMu.Unlock()
+	return s.renamePathLocked(ctx, source, target, opts)
+}
 
+// RenamePathWithProjection returns the target version while source removal is
+// still ordered with the rename, for conditional mount-cache projection.
+func (s *Service) RenamePathWithProjection(
+	ctx context.Context, source, target string, opts WriteOptions,
+) (PathProjection, error) {
+	s.pathWriteMu.Lock()
+	defer s.pathWriteMu.Unlock()
+	if err := s.renamePathLocked(ctx, source, target, opts); err != nil {
+		return PathProjection{}, err
+	}
+	return s.presentPathProjection(target)
+}
+
+func (s *Service) renamePathLocked(ctx context.Context, source, target string, opts WriteOptions) error {
 	inode, err := s.resolvePath(ctx, source)
 	if err != nil {
 		return err
@@ -82,7 +140,23 @@ func (s *Service) RenamePath(ctx context.Context, source, target string, opts Wr
 func (s *Service) DeletePath(ctx context.Context, value string, opts WriteOptions) error {
 	s.pathWriteMu.Lock()
 	defer s.pathWriteMu.Unlock()
+	return s.deletePathLocked(ctx, value, opts)
+}
 
+// DeletePathWithProjection describes the now-absent path for a conditional
+// mount tombstone projection after the delete journal entry commits.
+func (s *Service) DeletePathWithProjection(
+	ctx context.Context, value string, opts WriteOptions,
+) (PathProjection, error) {
+	s.pathWriteMu.Lock()
+	defer s.pathWriteMu.Unlock()
+	if err := s.deletePathLocked(ctx, value, opts); err != nil {
+		return PathProjection{}, err
+	}
+	return absentPathProjection(value), nil
+}
+
+func (s *Service) deletePathLocked(ctx context.Context, value string, opts WriteOptions) error {
 	inode, err := s.resolvePath(ctx, value)
 	if err != nil {
 		return err
