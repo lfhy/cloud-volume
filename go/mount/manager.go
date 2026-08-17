@@ -94,8 +94,11 @@ func (m *manager) mountBucket(
 				return existing.status(), nil
 			}
 		}
-		// Either no longer active or config changed: unmount and remove.
-		m.unmountSessionLocked(existing)
+		// Do not replace a session that refused to stop: its durable writeback
+		// queue is still attached to the old remote configuration.
+		if err := m.unmountSessionLocked(existing); err != nil {
+			return existing.status(), err
+		}
 		delete(m.sessions, trimmedBucket)
 		delete(m.lastProbes, existing.mountTarget)
 	}
@@ -193,9 +196,8 @@ func (m *manager) openBucketMount(bucket string) (BucketMountStatus, error) {
 	return session.status(), nil
 }
 
-// syncSessionLocked checks if a session is still active and returns true if it is.
-// If not active, it stops the backend. The caller should remove the session from
-// the map when false is returned.
+// syncSessionLocked checks whether a session is still usable. A failed Stop can
+// deliberately leave a durable mount live, so callers must retain that session.
 func (m *manager) syncSessionLocked(session *mountSession) bool {
 	if session == nil || session.stopping {
 		return false
@@ -203,14 +205,20 @@ func (m *manager) syncSessionLocked(session *mountSession) bool {
 	active, err := m.cachedSessionActiveLocked(session)
 	if err != nil {
 		session.lastError = err.Error()
-		_ = session.backend.Stop(session)
+		if stopErr := session.backend.Stop(session); stopErr != nil {
+			session.lastError = fmt.Sprintf("%s\n停止挂载失败: %v", session.lastError, stopErr)
+			return session.mounted && !session.stopping
+		}
 		return false
 	}
 	if active {
 		session.mounted = true
 		return true
 	}
-	_ = session.backend.Stop(session)
+	if stopErr := session.backend.Stop(session); stopErr != nil {
+		session.lastError = stopErr.Error()
+		return session.mounted && !session.stopping
+	}
 	return false
 }
 
@@ -260,13 +268,23 @@ func (m *manager) cleanupMounts() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	log.Printf("[mount/manager] cleanup-start")
+	var firstErr error
 	for bucket, session := range m.sessions {
 		if err := m.unmountSessionLocked(session); err != nil {
 			log.Printf("[mount/manager] cleanup-session-error bucket=%q err=%v", bucket, err)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("cleanup mount %q: %w", bucket, err)
+			}
+			continue
 		}
 		delete(m.lastProbes, session.mountTarget)
+		delete(m.sessions, bucket)
 	}
-	m.sessions = make(map[string]*mountSession)
+	if firstErr != nil {
+		// A backend that deliberately kept its mount alive (for example after a
+		// macOS writeback drain timeout) must remain retriable in this process.
+		return firstErr
+	}
 	m.lastProbes = make(map[string]mountProbeSnapshot)
 	if err := cleanupAllManagedMounts(); err != nil {
 		log.Printf("[mount/manager] cleanup-managed-error err=%v", err)

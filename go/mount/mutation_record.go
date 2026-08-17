@@ -12,6 +12,7 @@ const mutationKindRename = "rename"
 // this data plus the observed provider state.
 type mutationRecord struct {
 	Version           int    `json:"version"`
+	Scope             string `json:"scope"`
 	ID                string `json:"id"`
 	TaskID            string `json:"taskId"`
 	Kind              string `json:"kind"`

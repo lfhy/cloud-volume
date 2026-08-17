@@ -395,9 +395,8 @@ func (fs *winFspBucketFS) Release(p string, fh uint64) int {
 	defer open.mu.Unlock()
 	if open.writable && open.dirty {
 		if stat, err := open.file.Stat(); err == nil {
-			fs.access.registerLocalWrite(open.virtualPath, open.localPath, stat.Size())
+			fs.access.stageLocalWrite(open.virtualPath, open.localPath, stat.Size())
 		}
-		fs.access.scheduleUpload(open.virtualPath, open.localPath)
 		open.dirty = false
 	}
 	if open.file != nil {

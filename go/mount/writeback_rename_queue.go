@@ -71,6 +71,7 @@ func (q *writebackQueue) enqueueMutation(
 	}
 	q.sourceRebases = append(q.sourceRebases, rebase)
 	q.rebasePendingSourcesLocked(rebase)
+	record.Scope = q.scope
 	record.UploadGeneration = barrier.generation
 	record.UpdatedAtUnixNs = time.Now().UnixNano()
 	if err := q.mutations.Upsert(record); err != nil {

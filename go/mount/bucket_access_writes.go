@@ -26,9 +26,28 @@ func (a *bucketAccess) readOnlyError() error {
 }
 
 func (a *bucketAccess) registerLocalWrite(virtualPath, localPath string, size int64) {
-	if a != nil && a.readOnly {
+	if a == nil || a.readOnly {
 		return
 	}
+	a.writebackMu.Lock()
+	defer a.writebackMu.Unlock()
+	a.registerLocalWriteLocked(virtualPath, localPath, size)
+}
+
+// stageLocalWrite publishes the local marker and durable queue entry as one
+// critical section so external invalidation cannot delete a newly staged file
+// between those two steps.
+func (a *bucketAccess) stageLocalWrite(virtualPath, localPath string, size int64) {
+	if a == nil || a.readOnly {
+		return
+	}
+	a.writebackMu.Lock()
+	defer a.writebackMu.Unlock()
+	a.registerLocalWriteLocked(virtualPath, localPath, size)
+	a.scheduleUploadLocked(virtualPath, localPath)
+}
+
+func (a *bucketAccess) registerLocalWriteLocked(virtualPath, localPath string, size int64) {
 	info := s3ops.ObjectInfo{
 		Key:          cleanVirtualPath(virtualPath),
 		Size:         size,
@@ -39,9 +58,15 @@ func (a *bucketAccess) registerLocalWrite(virtualPath, localPath string, size in
 }
 
 func (a *bucketAccess) scheduleUpload(virtualPath, localPath string) {
-	if a != nil && a.readOnly {
+	if a == nil || a.readOnly {
 		return
 	}
+	a.writebackMu.Lock()
+	defer a.writebackMu.Unlock()
+	a.scheduleUploadLocked(virtualPath, localPath)
+}
+
+func (a *bucketAccess) scheduleUploadLocked(virtualPath, localPath string) {
 	log.Printf(
 		"[mount/writeback] enqueue-request bucket=%q path=%q local_path=%q size=%d",
 		a.bucket,
@@ -145,16 +170,6 @@ func (a *bucketAccess) renamePath(
 		}
 	}
 	hadPendingWriteback := a.writeback.rename(oldClean, newClean, isDir)
-	if hadPendingWriteback {
-		a.applyRenamedLocalState(oldClean, newClean, isDir)
-		exists, err := a.probeRemotePath(timeoutCtx, oldClean, isDir)
-		if err != nil {
-			return err
-		}
-		if !exists {
-			return nil
-		}
-	}
 	if isDir && dirBarrier != nil && dirBarrier.rebasedCreate {
 		exists, err := a.probeRemotePath(timeoutCtx, oldClean, true)
 		if err != nil {
@@ -171,6 +186,15 @@ func (a *bucketAccess) renamePath(
 			if !hadPendingWriteback {
 				a.applyRenamedLocalState(oldClean, newClean, true)
 			}
+			return nil
+		}
+	}
+	if hadPendingWriteback {
+		exists, err := a.probeRemotePath(timeoutCtx, oldClean, isDir)
+		if err != nil {
+			return err
+		}
+		if !exists {
 			return nil
 		}
 	}

@@ -209,8 +209,7 @@ func (h *linuxFuseFileHandle) publishLocked() syscall.Errno {
 		fileSize(h.localPath),
 	)
 	h.autoSyncQueued = false
-	h.access.registerLocalWrite(h.virtualPath, h.localPath, fileSize(h.localPath))
-	h.access.scheduleUpload(h.virtualPath, h.localPath)
+	h.access.stageLocalWrite(h.virtualPath, h.localPath, fileSize(h.localPath))
 	h.dirty = false
 	return 0
 }

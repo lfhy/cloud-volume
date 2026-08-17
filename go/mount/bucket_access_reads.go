@@ -267,8 +267,20 @@ func (a *bucketAccess) MarkExternalDelete(virtualPath string, isDir bool) {
 // the path plus its parent listings so the new entry becomes visible on the
 // next read without waiting for the list TTL.
 func (a *bucketAccess) InvalidateExternalUpload(virtualPath string, isDir bool) {
+	if a == nil {
+		return
+	}
+	a.writebackMu.Lock()
+	defer a.writebackMu.Unlock()
 	clean := cleanVirtualPath(virtualPath)
-	if a.writeback == nil || !a.writeback.hasPendingAtOrBelow(clean, isDir) {
+	pending := a.writeback != nil && a.writeback.hasPendingAtOrBelow(clean, isDir)
+	if !pending && !isDir {
+		_, pending = a.cache.localFile(clean)
+	}
+	if !pending && isDir {
+		pending = a.cache.isLocalDirectory(clean)
+	}
+	if !pending {
 		a.cache.removeLocalPath(clean, isDir)
 	} else {
 		log.Printf(

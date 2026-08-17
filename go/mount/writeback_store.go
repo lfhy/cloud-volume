@@ -2,6 +2,7 @@
 package mount
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	"github.com/panjf2000/ants/v2"
+
+	storageconfig "remote-storage/go/config"
 )
 
 var globalWritebackRegistry = &writebackRegistry{
@@ -28,9 +31,11 @@ type writebackRegistry struct {
 type writebackStore struct {
 	dirPath  string
 	filePath string
+	scope    string
 }
 
 type writebackRecord struct {
+	Scope           string `json:"scope"`
 	TaskID          string `json:"taskId"`
 	VirtualPath     string `json:"virtualPath"`
 	LocalPath       string `json:"localPath"`
@@ -43,16 +48,20 @@ type writebackRecord struct {
 
 func acquireWritebackQueue(access *bucketAccess) (*writebackQueue, error) {
 	storeDir := filepath.Join(access.sessionRoot, writebackStoreDirName)
+	scope := writebackScope(access.config, access.bucket)
 
 	globalWritebackRegistry.mu.Lock()
 	if existing, ok := globalWritebackRegistry.queues[storeDir]; ok {
 		globalWritebackRegistry.mu.Unlock()
+		if existing.scope != scope {
+			return nil, fmt.Errorf("writeback queue scope changed; unmount the active bucket before remounting")
+		}
 		existing.attach(access)
 		return existing, nil
 	}
 	globalWritebackRegistry.mu.Unlock()
 
-	store, err := openWritebackStore(storeDir)
+	store, err := openWritebackStore(storeDir, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -71,6 +80,7 @@ func acquireWritebackQueue(access *bucketAccess) (*writebackQueue, error) {
 		store:       store,
 		mutations:   mutations,
 		storeKey:    storeDir,
+		scope:       scope,
 		entries:     map[string]*pendingWriteback{},
 		running:     map[string]*pendingWriteback{},
 		queue:       make(chan *pendingWriteback, 512),
@@ -98,7 +108,25 @@ func acquireWritebackQueue(access *bucketAccess) (*writebackQueue, error) {
 	return q, nil
 }
 
-func openWritebackStore(dirPath string) (*writebackStore, error) {
+// writebackScope binds persisted local content to one account, endpoint, and
+// view root. A same-named bucket must never replay an old queue into another
+// remote account after configuration changes.
+func writebackScope(config storageconfig.RemoteStorageConfig, bucket string) string {
+	normalized := config.Normalized()
+	raw := strings.Join([]string{
+		normalized.ProfileID,
+		normalized.StorageType,
+		normalized.Endpoint,
+		normalized.Bucket,
+		normalized.RootPrefix,
+		normalized.AccessKeyID,
+		normalizeBucketName(bucket),
+	}, "\x00")
+	sum := sha256.Sum256([]byte(raw))
+	return fmt.Sprintf("%x", sum[:])
+}
+
+func openWritebackStore(dirPath, scope string) (*writebackStore, error) {
 	if err := os.MkdirAll(dirPath, 0o755); err != nil {
 		return nil, fmt.Errorf("create writeback store dir: %w", err)
 	}
@@ -106,6 +134,7 @@ func openWritebackStore(dirPath string) (*writebackStore, error) {
 	store := &writebackStore{
 		dirPath:  dirPath,
 		filePath: filePath,
+		scope:    scope,
 	}
 	if err := store.ensureFile(); err != nil {
 		return nil, err
@@ -176,7 +205,12 @@ func (s *writebackStore) upsert(entry *pendingWriteback) error {
 	if err != nil {
 		return err
 	}
-	records[cleanVirtualPath(entry.virtualPath)] = writebackRecord{
+	scope := entry.scope
+	if scope == "" {
+		scope = s.scope
+	}
+	records[writebackRecordKey(scope, entry.virtualPath)] = writebackRecord{
+		Scope:           scope,
 		TaskID:          entry.taskID,
 		VirtualPath:     entry.virtualPath,
 		LocalPath:       entry.localPath,
@@ -197,8 +231,18 @@ func (s *writebackStore) delete(virtualPath string) error {
 	if err != nil {
 		return err
 	}
-	delete(records, cleanVirtualPath(virtualPath))
+	delete(records, writebackRecordKey(s.scope, virtualPath))
 	return s.writeOwnRecords(records)
+}
+
+// writebackRecordKey keeps same-named paths from independent account scopes
+// separate while they share the historical per-bucket queue directory.
+func writebackRecordKey(scope, virtualPath string) string {
+	clean := cleanVirtualPath(virtualPath)
+	if clean == "" {
+		return ""
+	}
+	return scope + ":" + clean
 }
 
 func (s *writebackStore) list() ([]writebackRecord, error) {
@@ -216,7 +260,11 @@ func (s *writebackStore) list() ([]writebackRecord, error) {
 		if err != nil {
 			return nil, err
 		}
-		for key, record := range records {
+		for _, record := range records {
+			key := writebackRecordKey(record.Scope, record.VirtualPath)
+			if key == "" {
+				continue
+			}
 			existing, ok := merged[key]
 			if !ok || record.ModTimeUnixNano >= existing.ModTimeUnixNano {
 				merged[key] = record
@@ -229,6 +277,9 @@ func (s *writebackStore) list() ([]writebackRecord, error) {
 	}
 	sort.Slice(records, func(i, j int) bool {
 		if records[i].DueAtUnixNano == records[j].DueAtUnixNano {
+			if records[i].VirtualPath == records[j].VirtualPath {
+				return records[i].Scope < records[j].Scope
+			}
 			return records[i].VirtualPath < records[j].VirtualPath
 		}
 		return records[i].DueAtUnixNano < records[j].DueAtUnixNano
@@ -242,11 +293,11 @@ func (s *writebackStore) replaceWithMerged(records []writebackRecord) error {
 	}
 	merged := map[string]writebackRecord{}
 	for _, record := range records {
-		key := cleanVirtualPath(record.VirtualPath)
+		key := writebackRecordKey(record.Scope, record.VirtualPath)
 		if key == "" {
 			continue
 		}
-		record.VirtualPath = key
+		record.VirtualPath = cleanVirtualPath(record.VirtualPath)
 		merged[key] = record
 	}
 	if err := s.writeOwnRecords(merged); err != nil {
@@ -321,6 +372,7 @@ func (s *writebackStore) close() error {
 
 func (r writebackRecord) toPendingWriteback() *pendingWriteback {
 	return &pendingWriteback{
+		scope:           r.Scope,
 		taskID:          r.TaskID,
 		virtualPath:     cleanVirtualPath(r.VirtualPath),
 		localPath:       r.LocalPath,

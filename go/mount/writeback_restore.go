@@ -16,12 +16,13 @@ func (q *writebackQueue) restorePersistedEntries() error {
 	if err != nil {
 		return err
 	}
-	records = q.filterRestorableRecords(records)
-	if err := q.store.replaceWithMerged(records); err != nil {
+	restoredRecords, dormantRecords := q.filterRestorableRecords(records)
+	persistedRecords := append(dormantRecords, restoredRecords...)
+	if err := q.store.replaceWithMerged(persistedRecords); err != nil {
 		return err
 	}
 	now := time.Now()
-	for _, record := range records {
+	for _, record := range restoredRecords {
 		entry := record.toPendingWriteback()
 		if entry.virtualPath == "" || entry.taskID == "" {
 			continue
@@ -40,19 +41,29 @@ func (q *writebackQueue) restorePersistedEntries() error {
 
 func (q *writebackQueue) filterRestorableRecords(
 	records []writebackRecord,
-) []writebackRecord {
+) ([]writebackRecord, []writebackRecord) {
 	access := q.currentAccess()
 	if access == nil {
-		return records
+		return records, nil
 	}
-	filtered := make([]writebackRecord, 0, len(records))
+	restored := make([]writebackRecord, 0, len(records))
+	dormant := make([]writebackRecord, 0, len(records))
 	for _, record := range records {
+		if record.Scope != q.scope {
+			log.Printf(
+				"[mount/writeback] restore-defer-scope bucket=%q path=%q",
+				q.bucketName(),
+				record.VirtualPath,
+			)
+			dormant = append(dormant, record)
+			continue
+		}
 		if !q.canRestoreRecord(access, record) {
 			continue
 		}
-		filtered = append(filtered, record)
+		restored = append(restored, record)
 	}
-	return filtered
+	return restored, dormant
 }
 
 func (q *writebackQueue) canRestoreRecord(
@@ -116,7 +127,15 @@ func (q *writebackQueue) restorePersistedMutations() error {
 	restoredOps := make([]*queuedWritebackRename, 0, len(live))
 	maxGeneration := q.generation
 	ids := make([]string, 0, len(live))
-	for id := range live {
+	for id, record := range live {
+		if record.Scope != q.scope {
+			log.Printf(
+				"[mount/writeback] rename-restore-skip-scope bucket=%q id=%s",
+				q.bucketName(),
+				id,
+			)
+			continue
+		}
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)

@@ -149,8 +149,7 @@ func (n *linuxFuseNode) Setattr(
 		return errno
 	}
 	if !overlayOnly {
-		n.access.registerLocalWrite(virtualPath, localPath, fileSize(localPath))
-		n.access.scheduleUpload(virtualPath, localPath)
+		n.access.stageLocalWrite(virtualPath, localPath, fileSize(localPath))
 	}
 	info, err := os.Stat(localPath)
 	if err != nil {

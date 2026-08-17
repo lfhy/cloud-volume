@@ -3,6 +3,7 @@ package mount
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -31,6 +32,8 @@ type dirSyncQueue struct {
 	mu        sync.Mutex
 	entries   map[string]*dirSyncEntry
 	closed    bool
+	errorPath string
+	errorText string
 	queue     chan *dirSyncEntry
 	pool      *ants.Pool
 	enqueueWG sync.WaitGroup
@@ -184,6 +187,7 @@ func (q *dirSyncQueue) dispatch() {
 			continue
 		}
 		q.wg.Done()
+		q.recordFailure(entry.path, err)
 		q.finish(entry)
 		log.Printf(
 			"[mount/dir-sync] bucket=%q path=%q pool-submit-error=%v",
@@ -207,9 +211,47 @@ func (q *dirSyncQueue) flush(entry *dirSyncEntry) {
 	ctx, cancel := context.WithTimeout(context.Background(), q.access.requestTimeout)
 	defer cancel()
 	if err := q.access.createRemoteDirectory(ctx, virtualPath); err != nil {
+		q.recordFailure(virtualPath, err)
 		log.Printf("[mount/dir-sync] bucket=%q path=%q error=%v", q.access.bucket, virtualPath, err)
+	} else {
+		q.clearFailure(virtualPath)
 	}
 	q.finish(entry)
+}
+
+// lastError exposes the most recent in-process marker failure through the
+// existing mount-status channel. Entries still finish their fences on failure
+// so a failed marker cannot block every later writeback operation.
+func (q *dirSyncQueue) lastError() string {
+	if q == nil {
+		return ""
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.errorText
+}
+
+func (q *dirSyncQueue) recordFailure(virtualPath string, err error) {
+	if q == nil || err == nil {
+		return
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.errorPath = cleanVirtualPath(virtualPath)
+	q.errorText = fmt.Sprintf("[dir-sync] 创建目录 %q 失败: %v", q.errorPath, err)
+}
+
+func (q *dirSyncQueue) clearFailure(virtualPath string) {
+	if q == nil {
+		return
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.errorPath != cleanVirtualPath(virtualPath) {
+		return
+	}
+	q.errorPath = ""
+	q.errorText = ""
 }
 
 func (q *dirSyncQueue) cancelLocked(entry *dirSyncEntry) {

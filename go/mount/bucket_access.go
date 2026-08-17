@@ -37,6 +37,7 @@ type bucketAccess struct {
 	uploadWorkers   int
 	quotaProvider   storageops.BucketQuotaProvider
 	quotaMu         sync.Mutex
+	writebackMu     sync.Mutex
 	quotaCachedAt   time.Time
 	quotaTotal      int64
 	quotaUsed       int64
@@ -209,6 +210,7 @@ type writebackQueue struct {
 	store         *writebackStore
 	mutations     *mutationStore
 	storeKey      string
+	scope         string
 	mu            sync.Mutex
 	entries       map[string]*pendingWriteback
 	running       map[string]*pendingWriteback
@@ -229,6 +231,7 @@ type writebackQueue struct {
 }
 
 type pendingWriteback struct {
+	scope           string
 	taskID          string
 	virtualPath     string
 	localPath       string

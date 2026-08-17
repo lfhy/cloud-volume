@@ -72,8 +72,7 @@ func TestNotifyExternalDeleteClearsCachedEntry(t *testing.T) {
 func TestMarkExternalDeleteCancelsWritebackAndProjects(t *testing.T) {
 	access := newTestBucketAccess(t)
 	stagedPath := createTempFile(t, access.cacheRoot, "pending.txt", "hello")
-	access.registerLocalWrite("pending.txt", stagedPath, 5)
-	access.scheduleUpload("pending.txt", stagedPath)
+	access.stageLocalWrite("pending.txt", stagedPath, 5)
 	if !access.writeback.hasPendingAtOrBelow("pending.txt", false) {
 		t.Fatal("expected pending writeback before external delete")
 	}
@@ -115,8 +114,7 @@ func TestInvalidateExternalUploadProjectsCreatedPath(t *testing.T) {
 func TestInvalidateExternalUploadPreservesPendingLocalFile(t *testing.T) {
 	access := newTestBucketAccess(t)
 	stagedPath := createTempFile(t, access.cacheRoot, "pending.txt", "hello")
-	access.registerLocalWrite("pending.txt", stagedPath, 5)
-	access.scheduleUpload("pending.txt", stagedPath)
+	access.stageLocalWrite("pending.txt", stagedPath, 5)
 
 	access.InvalidateExternalUpload("pending.txt", false)
 
@@ -131,18 +129,20 @@ func TestInvalidateExternalUploadPreservesPendingLocalFile(t *testing.T) {
 	}
 }
 
-func TestInvalidateExternalUploadDropsSettledLocalFile(t *testing.T) {
+func TestInvalidateExternalUploadPreservesUnqueuedLocalMarker(t *testing.T) {
 	access := newTestBucketAccess(t)
-	stagedPath := createTempFile(t, access.cacheRoot, "settled.txt", "hello")
-	access.cache.storeLocalFile("settled.txt", stagedPath, s3ops.ObjectInfo{Size: 5})
+	stagedPath := createTempFile(t, access.cacheRoot, "opened.txt", "hello")
+	// FUSE/WebDAV can register a writable local handle before Close schedules
+	// its upload. That marker is pending data too and must survive invalidation.
+	access.registerLocalWrite("opened.txt", stagedPath, 5)
 
-	access.InvalidateExternalUpload("settled.txt", false)
+	access.InvalidateExternalUpload("opened.txt", false)
 
-	if _, err := os.Stat(stagedPath); !os.IsNotExist(err) {
-		t.Fatalf("settled local content was not removed: %v", err)
+	if _, err := os.Stat(stagedPath); err != nil {
+		t.Fatalf("unqueued local content was removed: %v", err)
 	}
-	if _, ok := access.cache.localFile("settled.txt"); ok {
-		t.Fatal("settled local cache marker remains")
+	if _, ok := access.cache.localFile("opened.txt"); !ok {
+		t.Fatal("unqueued local cache marker was removed")
 	}
 }
 

@@ -412,3 +412,52 @@ func TestDrainContextReturnsDeadlineWithoutDiscardingPendingWork(t *testing.T) {
 		t.Fatal("deadline discarded the running writeback entry")
 	}
 }
+
+func TestDrainContextRestoresEveryUnsentEntryAfterQueueBackpressure(t *testing.T) {
+	first := &pendingWriteback{taskID: "first", virtualPath: "first.txt"}
+	second := &pendingWriteback{taskID: "second", virtualPath: "second.txt"}
+	queue := &writebackQueue{
+		entries: map[string]*pendingWriteback{
+			"first.txt":  first,
+			"second.txt": second,
+		},
+		running: map[string]*pendingWriteback{},
+		queue:   make(chan *pendingWriteback, 1),
+		stop:    make(chan struct{}),
+	}
+	// No dispatcher drains this sentinel, so drainContext must hit its deadline
+	// while trying to enqueue the first ready entry.
+	queue.queue <- &pendingWriteback{taskID: "sentinel", virtualPath: "sentinel"}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if err := queue.drainContext(ctx); err != context.DeadlineExceeded {
+		t.Fatalf("drain context error = %v, want deadline exceeded", err)
+	}
+	if first.queued || second.queued {
+		t.Fatalf("backpressured drain stranded queued entries: first=%t second=%t", first.queued, second.queued)
+	}
+}
+
+func TestRenameRekeysPendingEntryToMovedLocalPath(t *testing.T) {
+	access := newTestBucketAccess(t)
+	oldPath := createTempFile(t, access.cacheRoot, "old.txt", "payload")
+	access.stageLocalWrite("old.txt", oldPath, int64(len("payload")))
+
+	if err := access.renamePath(context.Background(), "old.txt", "new.txt", false); err != nil {
+		t.Fatalf("rename local-only pending write: %v", err)
+	}
+	entry := access.writeback.entries["new.txt"]
+	if entry == nil {
+		t.Fatal("renamed writeback entry is missing")
+	}
+	wantPath := access.cachePathFor("new.txt")
+	if entry.localPath != wantPath {
+		t.Fatalf("renamed entry local path = %q, want %q", entry.localPath, wantPath)
+	}
+	if _, err := os.Stat(wantPath); err != nil {
+		t.Fatalf("renamed local content is missing: %v", err)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("old local content remains after rename: %v", err)
+	}
+}

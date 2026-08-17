@@ -34,6 +34,7 @@ class _BucketMountActions extends StatelessWidget {
     final secondaryAction = mounted ? onUnmountBucket : onConfigureBucket;
     final secondaryLabel = mounted ? '卸载' : '配置';
     final secondaryIcon = mounted ? LucideIcons.x : LucideIcons.settings2;
+    final statusError = status?.lastError?.trim() ?? '';
 
     if (busy) {
       return SizedBox(
@@ -41,14 +42,17 @@ class _BucketMountActions extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (statusError.isNotEmpty) ...[
+              _iconOnlySlot(
+                _errorIndicator(statusError, theme.colorScheme.destructive),
+              ),
+              const SizedBox(width: 4),
+            ],
             _iconOnlySlot(
               SizedBox(
                 width: 12,
                 height: 12,
-                child: AppLoadingIndicator(
-                  strokeWidth: 1.5,
-                  color: foreground,
-                ),
+                child: AppLoadingIndicator(strokeWidth: 1.5, color: foreground),
               ),
             ),
             const SizedBox(width: 4),
@@ -76,6 +80,12 @@ class _BucketMountActions extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (statusError.isNotEmpty) ...[
+            _iconOnlySlot(
+              _errorIndicator(statusError, theme.colorScheme.destructive),
+            ),
+            const SizedBox(width: 4),
+          ],
           _iconOnlySlot(
             _iconButton(
               tooltip: primaryLabel,
@@ -112,6 +122,13 @@ class _BucketMountActions extends StatelessWidget {
     return SizedBox(
       width: 32,
       child: Align(alignment: Alignment.center, child: child),
+    );
+  }
+
+  Widget _errorIndicator(String message, Color color) {
+    return AppTooltip(
+      message: message,
+      child: Icon(LucideIcons.circleAlert, size: 15, color: color),
     );
   }
 

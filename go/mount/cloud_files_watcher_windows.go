@@ -263,8 +263,7 @@ func (w *windowsSyncWatcher) scheduleUpload(
 		localPath,
 		info.Size(),
 	)
-	w.access.registerLocalWrite(clean, localPath, info.Size())
-	w.access.scheduleUpload(clean, localPath)
+	w.access.stageLocalWrite(clean, localPath, info.Size())
 	return true
 }
 

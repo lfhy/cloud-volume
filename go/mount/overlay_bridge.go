@@ -129,8 +129,7 @@ func (a *bucketAccess) stageOverlayFile(oldVirtualPath, newVirtualPath string) e
 	if err := copyFile(cachePath, localPath); err != nil {
 		return err
 	}
-	a.registerLocalWrite(newVirtualPath, cachePath, info.Size())
-	a.scheduleUpload(newVirtualPath, cachePath)
+	a.stageLocalWrite(newVirtualPath, cachePath, info.Size())
 	return nil
 }
 

@@ -72,10 +72,21 @@ func (s *mountSession) status() BucketMountStatus {
 	if s == nil {
 		return BucketMountStatus{}
 	}
-	lastError := s.lastError
-	if lastError == "" && s.access != nil && s.access.writeback != nil {
-		lastError = s.access.writeback.mutationLastError()
+	errors := make([]string, 0, 3)
+	if message := strings.TrimSpace(s.lastError); message != "" {
+		errors = append(errors, message)
 	}
+	if s.access != nil && s.access.writeback != nil {
+		if message := strings.TrimSpace(s.access.writeback.mutationLastError()); message != "" {
+			errors = append(errors, message)
+		}
+	}
+	if s.access != nil && s.access.dirSync != nil {
+		if message := strings.TrimSpace(s.access.dirSync.lastError()); message != "" {
+			errors = append(errors, message)
+		}
+	}
+	lastError := strings.Join(errors, "\n")
 	return BucketMountStatus{
 		Mounted:     s.mounted,
 		Bucket:      s.bucket,
