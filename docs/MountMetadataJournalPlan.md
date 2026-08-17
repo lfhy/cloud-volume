@@ -23,9 +23,9 @@
 
 ## 现状盘点：统一视图前必须知道的耦合（2026-08-17 review）
 
-### 页面与 mount 的现有数据通路
+### 页面与 mount 的旧数据通路（M7 已替换 metadata profile 路径）
 
-- `bridge/dispatch_paging.go` `listObjectPage` → `mount.ListMountedObjectPage`：**只有该桶当前挂载会话存在时**，页面才使用挂载视图；否则直接 `storageops.ForConfig(...).ListObjectsPage` 连远端。
+- 历史行为：`bridge/dispatch_paging.go` 的 `listObjectPage` 曾经先走 `mount.ListMountedObjectPage`，只有该桶当前挂载会话存在时页面才使用挂载视图；否则直接 `storageops.ForConfig(...).ListObjectsPage` 连远端。现在有 `ProfileID` 的页面请求先走 metadata，`ListMountedObjectPage` 只保留给无身份 legacy fallback。
 - `go/mount/object_page.go`：挂载视图来自 `bucketAccess.cache`（内存）+ `localOverlay` + `pageViews`（2 分钟、最多 16 份的快照分页）。未挂载时这套东西完全不存在。
 - `bridge/dispatch.go` / `go/webapi/invoke.go` 的上传/建目录/删除/重命名：先写远端，成功后调用 `mount.NotifyExternal{Upload,Delete,Rename}` 反向修补挂载缓存。也就是“页面操作 = 远端真源 + 旁路失效通知”，与“mount 操作 = 本地先行 + 异步写回”方向相反。
 - P2P：`peer_refresh.go` 直接调 `pollRemoteDirectory`；轮询：`remote_poller.go` 只刷新最近最多 12 个被访问目录，且依赖后端 `SupportsMountRemotePolling`。
@@ -229,7 +229,7 @@ metadata.db
 - Metadata-enabled mount operations now route mkdir, staged file close, rename, and delete through the path facade before success reaches WebDAV/FUSE/WinFsp/Cloud Files callers. The local cache remains a byte/read cache, but it no longer owns the remote mutation; the metadata worker is the only uploader/mover/deleter for that namespace.
 - The worker executes writes from their immutable journal parent/name Remote edge, checks an existing fingerprint before mutation, and lets a later rename move that source. Directory rename/delete waits for earlier descendant work, preventing a renamed parent from overtaking its child upload.
 - Confirmation keeps an inode `pending` while a later same-inode journal operation remains unfinished, so a refresh between write confirmation and rename execution cannot revive the old Remote key or lose the Desired OID. When a pending rename's destination directory is first materialized, a same-name remote object is ignored unless it matches the inode's confirmed Remote edge; otherwise it could falsely turn the source move into a no-op. Cloud Files rename completion arrives after Explorer has already moved sync-root bytes; its metadata path therefore rebinds the cache marker to the supplied destination instead of attempting a second physical move.
-- A successful remote move records a durable `MoveApplied` phase before target confirmation. Restart/retry therefore confirms the target instead of moving a now-missing source again; the narrow remote-success-to-bbolt window reconciles only when the source is absent and the target has the expected fingerprint (or a provider-valid directory marker absence).
+- Before its first provider side effect, a move freezes its actual source/target and confirmation parent/name in the journal. A successful remote move then records a durable `MoveApplied` phase before target confirmation, so a later local rename cannot redirect replay. Restart/retry confirms the frozen target; the narrow remote-success-to-bbolt window probes even generic provider errors and reconciles only when the source is absent and a target fingerprint (or explicit directory marker fingerprint) matches. Missing source and target stays retryable/conflicted rather than being silently accepted.
 - Legacy writeback/dir-sync/delete queues remain constructed only for fallback/control compatibility. Metadata-enabled sessions neither restore old records nor enqueue new ones, preventing parallel remote writes. Pending metadata drafts now retain their OID in platform projection.
 - Schema v3 marks a path-facade `ContentRef` as awaiting a journal owner. Failed staging/journal append rolls back a newly allocated inode; startup removes an unowned marked ref and its phantom inode after a crash. Raw low-level `StageWrite` stays available for its explicit caller contract.
 - **Recorded P2 review risk:** WinFsp currently clears an open handle's `dirty` flag even when metadata staging/journal admission fails during release. The handle close path needs a recoverable retry record before metadata-only sessions can guarantee that failed close is replayable; this is not silently treated as a successful remote mutation.
@@ -242,6 +242,11 @@ metadata.db
 - **Recorded P2 design gaps:** page task IDs are currently admission IDs rather than worker transfer IDs (`metadata-op-<seq>` remains the worker snapshot); a pending page-upload's chunks are not yet a mount byte-read source, so a mount read before remote confirmation still asks the provider. These require durable task ownership and chunk-backed read plumbing, respectively, and are outside the first MVP closure.
 - **Recorded P2/P3 review scope:** the browser/Web API transport still performs direct provider mutations when a `ProfileID` exists, so it must be moved to a shared durable adapter (or fail closed for streaming uploads) before it can co-exist safely with a metadata-backed WebDAV session. Desktop page `create`/`rename` inputs also normalize `.`/`..` segments instead of rejecting them at the bridge boundary; keep that low-severity validation fix separate from the durable mutation contract.
 
+### M7 unified reads and acceptance (completed 2026-08-17)
+
+- Profile-scoped `list_object_page`, legacy `list_objects`, and `head_object` now read the persistent namespace first. A metadata manager/acquire failure is returned to the caller rather than silently falling into a mounted-session or provider-direct alternate view. `ListMountedObjectPage` remains only for configs without `ProfileID`, where no durable namespace exists by contract.
+- Cross-view acceptance holds one manager handle for a mount and another for a page, then verifies pending mkdir/write/rename/delete are visible immediately through mount list/stat. Reopen-before-worker preserves a pending rename, and forced reset rebuilds an idle namespace from the remote base. Existing rename complexity and crash/replay tests remain the regression anchors.
+
 ## 推荐实施顺序（锁定）
 
 **先完成本地 inode metadata + 页面/mount 统一视图，再做远端同步和跨设备 feed。** 远端 change feed 的 receiver 必须把事件应用到唯一的本地树，才能正确判断“本地 pending”与“远端已变”；在两套缓存并存时先做 feed，只会重新制造 `NotifyExternal*` 式旁路修补。
@@ -251,21 +256,21 @@ metadata.db
 1. **Slice A：持久 inode B+Tree。** 引入 `ProfileID`、metadata namespace、bbolt inode/dirent/journal/content-ref schema，以及 crash/replay/rename complexity 测试。本地是开发环境，现有 `bucketCache`/writeback/JSONL 状态**不做迁移、不保留兼容开关**：新 metadata namespace 直接从远端重建，旧 per-bucket runtime/cache 状态视为一次性开发数据丢弃。
 2. **Slice B：统一读取视图。** 页面 `listObjectPage/stat` 与 mount `listDirectory/statPath` 都改读 metadata API；未挂载页面不再直连后端绕过视图。首次目录访问由 metadata service 惰性物化并记录 `listing_state`。开发环境中 metadata 损坏或 schema 不识别时，直接清空 namespace 从远端重建，不做旧格式升级。
 3. **Slice C：统一写入入口。** 页面与 mount 的 create/write/rename/delete 均先提交 inode transaction + journal；`NotifyExternal*` 被替换为远端确认后的对账 ingest 入口。此时目录 rename 已不再依赖 `strings.HasPrefix`。
-4. **Slice D：journal 驱动的远端同步器。** 直接移除 writeback/dirSync/mutation/delete 旧队列，改为 inode dependency worker，不保留旧队列 feature flag；回滚方式是清空本地 metadata 并从远端重建。
+4. **Slice D：journal 驱动的远端同步器。** 最小 inode dependency worker 已落地并负责 metadata-enabled session 的单项上传/move/delete；遗留 writeback/dirSync/mutation/delete 队列仅为无 `ProfileID` fallback 保留。后续再删除 fallback、实现 journal compact 与 durable batch copy；回滚方式是清空本地 metadata 并从远端重建。
 5. **Slice E：远端 change feed 与双机对账。** 只有 Slice C/D 后，才能把 A 的 confirmed mutation 发布到 feed，并让 B 可靠应用到自己的统一视图和 mount projection。
 
 Phase 0 的止血修复可以并行落地，但不改变上述主线顺序。
 
 ## 第一阶段 MVP 范围（元数据重构 + 页面/mount 统一视图，锁定）
 
-**MVP 定义：** 页面文件管理器与所有平台 mount 的读视图都来自同一个持久 inode metadata service；目录 rename 只改 inode 父边和两个 dirent B+Tree，不再按路径前缀重写缓存。远端仍是真源；本地 metadata 可清空重建；远端同步器与跨设备 feed 不在 MVP 内。
+**MVP 定义：** 页面文件管理器与所有平台 mount 的读视图都来自同一个持久 inode metadata service；目录 rename 只改 inode 父边和两个 dirent B+Tree，不再按路径前缀重写缓存。远端仍是真源；本地 metadata 可清空重建；最小单项 journal worker 已随 M6 落地，远端 batch compact 与跨设备 feed 仍不在 MVP 内。
 
 ### MVP 必须交付
 
 1. **存储与身份**
    - 不可变 `ProfileID` 存入 profile；namespace = `ProfileID + canonical backend identity + bucket + rootPrefix`。
    - `RuntimeDir()/metadata/v1/<namespace>/metadata.db`（bbolt），schema version、root inode=1、单调 inode allocator；schema 不匹配/损坏时由 reset guard 清空重建。
-   - buckets：`inodes`、`dirents[父inode]`、`journal`、`listing_state`、`content_refs`。`ready_ops`/`inode_ops` 留给 Slice D，MVP 只保留 key 结构占位，不实现调度。
+   - buckets：`inodes`、`dirents[父inode]`、`journal`、`listing_state`、`content_refs`、`ready_ops`、`inode_ops`。后两者驱动最小 worker 的调度与 inode dependency；后续 compact 仍是单独阶段。
 
 2. **统一读取 API（单入口）**
    - `metadata.Service` 提供 `ListPage(dir inode, cursor)`、`Stat(path)`、`StatInode(inode)`、`Path(inode)`、`ResolveParent(parent, nameKey)`。
@@ -275,17 +280,17 @@ Phase 0 的止血修复可以并行落地，但不改变上述主线顺序。
 3. **双端读路径接入**
    - Flutter `listObjectPage/headObject/listObjects`（桌面端）通过 bridge 调 metadata service，不再依赖“该桶是否挂载”的分支；未挂载页面与 mount 返回同一视图。
    - macOS WebDAV `listDirectory/statPath`、Linux FUSE readdir/getattr、Windows WinFsp readdir/stat、Cloud Files placeholder 枚举均读 metadata service。
-   - `ListMountedObjectPage` 与 `bucketCache.listCache/objectCache/localEntries/deletedPaths` 在 MVP 中被替换/退役；`localOverlay` 仍保留系统临时目录（.Trash/.fseventsd/AppleDouble），不进入 metadata。
+   - 带 `ProfileID` 的 `ListMountedObjectPage` 会话分支与进程内快照已被 metadata 替换；无身份 legacy fallback 仍保留 `bucketCache`/`localOverlay` 行为。系统临时目录（.Trash/.fseventsd/AppleDouble）不进入 metadata。
 
 4. **inode rename 事务**
    - `Rename(inode, newParent, newName)` 单事务：旧/新 dirent B+Tree 更新 + inode Desired 边更新 + journal append；不遍历子树、不移动子内容文件。
    - 目标覆盖、非空目录覆盖、ancestor cycle、case/Unicode nameKey 冲突返回显式错误。
    - inode/OID 由内部 metadata store 分配并持久化，是唯一身份。各平台只要能把展示的文件号稳定解析回 OID 即可，不强求外部文件号等于 OID：Linux FUSE 建议 `StableAttr.Ino = OID`；WinFsp 可直接用 `FileIndex=OID`，也可在 adapter 内维护 FileIndex→OID；Cloud Files placeholder FileIdentity 可编码 OID 或由 adapter 查表解析；macOS WebDAV 外部 inode 由 webdavfs 生成，属于协议限制，云卷只需保证自己的内部对象映射一致。验收标准是页面与各 mount 呈现同一 Desired/Confirmed 视图，而不是外部 inode 数值一致。
-   - mount 侧目录 rename 在 MVP 中先更新本地 Desired 树；远端 move/同步仍可暂时沿用现有路径，但不能反向改写 metadata 的 Desired 树。
+   - mount 侧目录 rename 先更新本地 Desired 树；metadata worker 用冻结的 Remote/Desired 快照执行远端 move，不能反向按路径前缀改写 metadata 的 Desired 树。
 
-5. **写入/失效的最低闭环（不要求完整远端同步器）**
+5. **写入/失效的最低闭环（不要求 batch 同步器）**
    - mount 与页面写操作在 MVP 中必须同步写 metadata Desired 状态（create/mkdir/rename/delete/write 至少更新视图与 journal 记录），避免读视图出现旧路径幽灵条目。
-   - 远端确认路径（现有上传/删除/rename 成功点）调用 metadata ingest：更新 Remote 边/fingerprint/verified 状态；不删除仍有 pending journal 的内容。
+   - metadata worker 的远端确认路径更新 Remote 边/fingerprint/verified 状态；不删除仍有 pending journal 的内容。
    - remote listing 对账：页面强制刷新与打开目录时按 `listing_state` 重新拉取并合并 dirents；MVP 不要求后台全量同步。
 
 6. **平台一致性投影（最低集）**
@@ -305,7 +310,7 @@ Phase 0 的止血修复可以并行落地，但不改变上述主线顺序。
 
 ### MVP 明确不做
 
-- journal 驱动的远端上传/move/delete worker（Slice D）。
+- journal compact、批量 copy/递归目录上传等完整同步器能力（Slice D 后续）。
 - 远端 immutable change feed、P2P 协议升级、双机离线补拉（Slice E）。
 - 旧 writeback/mutation JSONL 迁移、feature flag、A/B 校验。
 - trash 全量统一（保留现有 trash 视图，但 mount 隐藏逻辑可读取 metadata 树；完整 trash 归并后续做）。
@@ -316,10 +321,10 @@ Phase 0 的止血修复可以并行落地，但不改变上述主线顺序。
 1. **M1 存储核心**：ProfileID、namespace registry、bbolt schema、inode allocator、dirent B+Tree、事务 API、reset guard、单元测试。
 2. **M2 物化与读 API**：远端 listing ingest、listing_state、ListPage/Stat/Path、stale cursor、分页 API。
 3. **M3 mount 读接入（已完成）**：WebDAV/FUSE/WinFsp/Cloud Files readdir/stat 全部改读 metadata；本地 overlay 保持旁路，轮询刷新同一持久远端基底。
-4. **M4 页面读接入**：bridge list/stat 改走 metadata；删除 ListMountedObjectPage 会话分支；页面分页适配 stale cursor。
+4. **M4 页面读接入（已完成）**：bridge list/stat 改走 metadata；有持久身份的页面不再走 `ListMountedObjectPage` 会话分支；页面分页适配 stale cursor。
 5. **M5 rename 事务与内部身份关联（已完成）**：inode rename；各平台 adapter 保证 metadata-backed 项的展示文件号能稳定解析回 OID（Linux FUSE 直接用 `Ino=OID`，WinFsp/Cloud Files 直用 OID，macOS WebDAV 保持内部映射）。
 6. **M6 写入口最小同步（已完成）**：M6a facade、M6b mount 写入口和 M6c 页面 create/upload/rename/move/delete 已接入 Desired+journal；worker 的确认事务更新 Remote 边。复杂 copy/递归目录上传在有持久身份时 fail-closed，等待专门的 durable batch op。
-7. **M7 一致性与验收**：双端视图一致性测试、rename 复杂度测试、重建测试、全量 `go test ./...` + `flutter analyze`。
+7. **M7 一致性与验收（已完成）**：双端视图一致性、rename crash/replay、重开和 reset rebuild 覆盖已补齐；提交前执行全量 `go test ./...` + `flutter analyze`。
 
 ### Phase 0 — 先止血（不依赖新架构）
 
@@ -340,23 +345,23 @@ Phase 0 的止血修复可以并行落地，但不改变上述主线顺序。
 
 ### Phase 1 — 统一元数据存储核心（页面与 mount 共用）
 
-- [ ] 新建 `go/mount/metadata` 包，选 bbolt（已有依赖）而非新增 SQLite；存储生命周期与 mount session 解耦（按稳定 `ProfileID+backend+bucket+rootPrefix` namespace 常驻，不随 unmount 销毁）。
+- [x] 新建 `go/mount/metadata` 包，选 bbolt（已有依赖）而非新增 SQLite；存储生命周期与 mount session 解耦（按稳定 `ProfileID+backend+bucket+rootPrefix` namespace 常驻，不随 unmount 销毁）。
 - [x] 给 profile 存储引入不可变 `ProfileID`，并定义 metadata namespace registry；Flutter config JSON 同步保留该 identity，`DefaultManager` 为进程级共享实例。禁止用 `safeSegment(bucket)` 作为 metadata DB 身份；开发环境不迁移旧 namespace，直接重建。
-- [ ] 创建独立的 `RuntimeDir()/metadata/v1/<namespace-hash>/metadata.db`；不要放到 `CacheDirectory` 或 `config.db`。定义 schema version、root inode=1、单调且永不复用的 uint64 inode allocator；schema 不匹配或 db 损坏时删除重建，不写旧格式升级路径。
-- [ ] 落地 bbolt inode B+Tree：`inodes[inode]`、每目录 `dirents[parent inode][nameKey] -> child inode`、`journal[seq]`、`ready_ops`、`inode_ops`、`listing_state`、`content_refs`。所有键使用固定二进制编码，避免字符串拼接/前缀歧义。
-- [ ] 数据结构：
+- [x] 创建独立的 `RuntimeDir()/metadata/v1/<namespace-hash>/metadata.db`；不要放到 `CacheDirectory` 或 `config.db`。定义 schema version、root inode=1、单调且永不复用的 uint64 inode allocator；schema 不匹配或 db 损坏时删除重建，不写旧格式升级路径。
+- [x] 落地 bbolt inode B+Tree：`inodes[inode]`、每目录 `dirents[parent inode][nameKey] -> child inode`、`journal[seq]`、`ready_ops`、`inode_ops`、`listing_state`、`content_refs`。所有键使用固定二进制编码，避免字符串拼接/前缀歧义。
+- [x] 数据结构（MVP 不含 symlink/rmdir）：
   - `Inode{ID, Kind(file/dir/symlink), DesiredParentID, DesiredName, RemoteParentID, RemoteName, Size, MTime, LocalRevision, RemoteFingerprint, State(local-only/pending/synced/conflict/tombstone), ContentGeneration}`
   - `Dirent{ChildID, DisplayName, NameKey}`，同一目录的 dirent 存在该目录自己的 bbolt B+Tree 中。
  - `Op{Seq, Type(create/write/rename/mkdir/rmdir/delete), InodeID, ParentInodeIDs, ExpectedLocalRevision, ExpectedRemoteFingerprint, Origin(ui/mount/p2p/reconcile), State(pending/applying/applied/failed), Retry, LastError}`；路径只能作为审计快照，不作为执行真源。
   - `Op.Write` 额外固定 `ContentGeneration`，执行时只能读取该 generation 的块列表；连续写同一 inode 时每个操作独立上传/retire，不能回读 inode 当前 generation。
   - `ListingCursor{DirectoryInodeID, DirectoryRevision, LastNameKey, RemoteCursor, VerifiedAt, RemoteRevHint}`。
-- [ ] 单事务保证：本地视图变更 + journal append 原子提交。
-- [ ] 实现 `Rename(inode, destinationParent, destinationName)` 单事务：两个 dirent B+Tree 更新 + 一个 inode 边更新 + journal append；不枚举子孙 inode，不移动子孙内容文件。实现目标覆盖、非空目录、ancestor cycle、case/Unicode collision 的明确错误语义。
+- [x] 单事务保证：本地视图变更 + journal append 原子提交。
+- [x] 实现 `Rename(inode, destinationParent, destinationName)` 单事务：两个 dirent B+Tree 更新 + 一个 inode 边更新 + journal append；不枚举子孙 inode，不移动子孙内容文件。实现目标覆盖、非空目录、ancestor cycle、case/Unicode collision 的明确错误语义。
 - [x] 内容持久化协议（2026-08-17）：写入按固定 4 MiB 分块、SHA-256 内容寻址；块先 fsync + 原子 rename 到 cache root，再提交 `ContentRef{chunks[]}` 与 `chunks[hash].nlink++`。上传时临时拼接完整文件；确认/删除后 `nlink--`，归零删块。启动 sweep 清除孤儿块和中断的拼接临时文件；仅已 StageWrite 的内容以及 pending/running/failed journal 均计入 reset guard。
 - [x] 缓存挂钩（2026-08-17）：缓存统计显示 protected pending 块；按规则清理与清空缓存都跳过 `protection.json` 标记的 pending 块，清单缺失或损坏时保护整个 namespace。已同步读缓存尚未迁移到块存储。
 - [ ] journal append-only；verified seq 之后才允许 compact。
-- [ ] 读 API 同时覆盖页面分页与 mount readdir/stat：`ListPage(prefix, cursor)`、`Stat(path)`、`GetOID(oid)`；页面 `list_object_page` 已在持有 `profileId` 时走 metadata，但 `ListMountedObjectPage` 回退和 mount readdir/stat 尚未替换。
-- [ ] 将分页 cursor 改为 `directory inode + directory revision + last nameKey`；若目录 revision 已变，返回明确 stale-cursor 错误给页面 reload，不保留当前进程内 2 分钟快照作为一致性承诺。
+- [x] 读 API 同时覆盖页面分页与 mount readdir/stat：`ListPage(prefix, cursor)`、`Stat(path)`、`GetOID(oid)`；有 `profileId` 的 `list_object_page` / `list_objects` / `head_object` 和 mount readdir/stat 都走 metadata，无身份才保留 legacy fallback。
+- [x] 将分页 cursor 改为 `directory inode + directory revision + last nameKey`；若目录 revision 已变，返回明确 stale-cursor 错误给页面 reload，不保留当前进程内 2 分钟快照作为一致性承诺。
 - [ ] 冷启动策略：根目录优先惰性物化，后台按需拉子目录；大桶不阻塞首屏，同时 UI 标注“未完全物化”。
 - [ ] 单元测试：崩溃后重放 journal、OID rename 后路径索引更新、tombstone、compact 幂等、页面与 mount 读同一份 delta；断言百万子项目录 rename 只触碰 inode/两个 dirent bucket，不扫描子树。
 

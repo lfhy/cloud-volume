@@ -2,9 +2,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	bucketmetadata "remote-storage/go/mount/metadata"
 
@@ -117,6 +120,70 @@ func TestListObjectPageFromMetadataRestartsOnStaleCursor(t *testing.T) {
 	}
 	if len(refreshed.Items) != 2 {
 		t.Fatalf("forceRefresh must rematerialize the directory: %+v", refreshed.Items)
+	}
+}
+
+func TestListObjectsUsesMetadataWhenHandled(t *testing.T) {
+	original := swapMetadataListFunc(func(objectPageArgs) (objectPageWire, bool, error) {
+		return objectPageWire{Items: []objectInfoWire{{Key: "pending.txt", Size: 7}}}, true, nil
+	})
+	defer swapMetadataListFunc(original)
+	args, err := json.Marshal(objectListArgs{
+		Config: storageconfig.RemoteStorageConfig{ProfileID: "page-read-profile"}, Bucket: "bucket",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := listObjects(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, ok := result.([]storageops.ObjectInfo)
+	if !ok || len(items) != 1 || items[0].Key != "pending.txt" || items[0].Size != 7 {
+		t.Fatalf("list_objects did not return metadata page: %#v", result)
+	}
+}
+
+func TestHeadObjectUsesMetadataWhenHandled(t *testing.T) {
+	original := swapMetadataHeadFunc(func(objectHeadArgs) (storageops.ObjectInfo, bool, error) {
+		return storageops.ObjectInfo{Key: "pending.txt", Size: 7}, true, nil
+	})
+	defer swapMetadataHeadFunc(original)
+	args, err := json.Marshal(objectHeadArgs{
+		Config: storageconfig.RemoteStorageConfig{ProfileID: "page-read-profile"}, Bucket: "bucket", Key: "pending.txt",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := headObject(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, ok := result.(storageops.ObjectInfo)
+	if !ok || item.Key != "pending.txt" || item.Size != 7 {
+		t.Fatalf("head_object did not return metadata object: %#v", result)
+	}
+}
+
+func TestMetadataHeadViaHandleReadsPendingDesiredObject(t *testing.T) {
+	backend := newBridgeFakeBackend()
+	manager := bucketmetadata.NewManager(t.TempDir())
+	defer manager.RemoveAllForTest()
+	config := storageconfig.RemoteStorageConfig{ProfileID: "pending-head-profile", CacheDirectory: t.TempDir()}
+	handle, err := manager.AcquireWithBackend(config, "bucket", backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer handle.Release()
+	handle.Service.SetQuietPeriod(time.Hour)
+	if _, _, err := handle.Service.WritePath(
+		context.Background(), "pending.txt", strings.NewReader("payload"), 7, bucketmetadata.WriteOptions{Origin: "page"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	item, handled, err := metadataHeadViaHandle(handle, objectHeadArgs{Config: config, Bucket: "bucket", Key: "pending.txt"})
+	if err != nil || !handled || item.Key != "pending.txt" || item.Size != 7 {
+		t.Fatalf("metadata head pending object item=%+v handled=%t err=%v", item, handled, err)
 	}
 }
 

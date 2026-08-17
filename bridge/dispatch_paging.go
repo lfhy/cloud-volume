@@ -31,14 +31,13 @@ func listObjectPage(args json.RawMessage) (any, error) {
 	if err := decodeArgs(args, &input); err != nil {
 		return nil, err
 	}
-	if input.ForceRefresh {
-		bucketmount.InvalidateListCacheForPrefix(input.Config, input.Bucket, input.Prefix)
-	}
-	// Unified read view: page listings always consult the persistent metadata
-	// namespace first; mount-session caches and provider-direct listing are
-	// only fallbacks (M2 of the metadata journal plan).
+	// Profile-scoped pages use their durable metadata namespace without touching
+	// a mount session. Legacy profiles retain the old mounted/direct fallback.
 	if page, handled, err := metadataListFunc(input); handled || err != nil {
 		return page, err
+	}
+	if input.ForceRefresh {
+		bucketmount.InvalidateListCacheForPrefix(input.Config, input.Bucket, input.Prefix)
 	}
 	if page, handled, err := bucketmount.ListMountedObjectPage(
 		input.Config,

@@ -269,6 +269,14 @@ func listObjects(args json.RawMessage) (any, error) {
 	if err := decodeArgs(args, &input); err != nil {
 		return nil, err
 	}
+	if page, handled, err := metadataListFunc(objectPageArgs{
+		Config: input.Config, Bucket: input.Bucket, Prefix: input.Prefix, PageSize: 1000,
+	}); handled || err != nil {
+		if err != nil {
+			return nil, err
+		}
+		return objectInfosFromWire(page.Items), nil
+	}
 	page, err := storageops.ForConfig(input.Config).ListObjectsPage(
 		context.Background(),
 		input.Bucket,
@@ -286,6 +294,9 @@ func headObject(args json.RawMessage) (any, error) {
 	var input objectHeadArgs
 	if err := decodeArgs(args, &input); err != nil {
 		return nil, err
+	}
+	if item, handled, err := metadataHeadFunc(input); handled || err != nil {
+		return item, err
 	}
 	return storageops.ForConfig(input.Config).HeadObject(context.Background(), input.Bucket, input.Key)
 }

@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 
 	bucketmetadata "remote-storage/go/mount/metadata"
 
 	storageconfig "remote-storage/go/config"
+	storageops "remote-storage/go/storage"
 )
 
 // objectInfoWire matches the bridge ObjectInfo JSON shape shared with Dart.
@@ -57,6 +59,23 @@ func objectPageAdapter(page bucketmetadata.Page) objectPageWire {
 		})
 	}
 	return objectPageWire{Items: items, NextToken: page.NextToken}
+}
+
+func objectInfoFromMetadata(object bucketmetadata.Object) storageops.ObjectInfo {
+	return storageops.ObjectInfo{
+		Key: object.Key, Size: object.Size, LastModified: object.LastModified,
+		ETag: object.ETag, IsDir: object.IsDir,
+	}
+}
+
+func objectInfosFromWire(items []objectInfoWire) []storageops.ObjectInfo {
+	infos := make([]storageops.ObjectInfo, 0, len(items))
+	for _, item := range items {
+		infos = append(infos, storageops.ObjectInfo{
+			Key: item.Key, Size: item.Size, LastModified: item.LastModified, ETag: item.ETag, IsDir: item.IsDir,
+		})
+	}
+	return infos
 }
 
 // resolveDirectoryInode walks ancestor materialization for a prefix path.
@@ -116,6 +135,9 @@ func listObjectPageFromMetadata(input objectPageArgs) (objectPageWire, bool, err
 	manager, err := bucketmetadata.DefaultManager()
 	if err != nil {
 		log.Printf("[bridge/metadata] manager-unavailable err=%v", err)
+		if strings.TrimSpace(input.Config.ProfileID) != "" {
+			return objectPageWire{}, true, err
+		}
 		return objectPageWire{}, false, nil
 	}
 	handle, err := manager.Acquire(input.Config, input.Bucket)
@@ -128,6 +150,51 @@ func listObjectPageFromMetadata(input objectPageArgs) (objectPageWire, bool, err
 	}
 	defer manager.Release(handle)
 	return metadataListViaHandle(handle, input)
+}
+
+// metadataHeadFunc allows tests to substitute the manager/backend wiring for
+// stat requests, just as metadataListFunc does for paginated directories.
+var metadataHeadFunc = headObjectFromMetadata
+
+func swapMetadataHeadFunc(next func(objectHeadArgs) (storageops.ObjectInfo, bool, error)) func(objectHeadArgs) (storageops.ObjectInfo, bool, error) {
+	previous := metadataHeadFunc
+	metadataHeadFunc = next
+	return previous
+}
+
+func headObjectFromMetadata(input objectHeadArgs) (storageops.ObjectInfo, bool, error) {
+	manager, err := bucketmetadata.DefaultManager()
+	if err != nil {
+		if strings.TrimSpace(input.Config.ProfileID) != "" {
+			return storageops.ObjectInfo{}, true, err
+		}
+		return storageops.ObjectInfo{}, false, nil
+	}
+	handle, err := manager.Acquire(input.Config, input.Bucket)
+	if errors.Is(err, bucketmetadata.ErrNoProfileID) {
+		return storageops.ObjectInfo{}, false, nil
+	}
+	if err != nil {
+		return storageops.ObjectInfo{}, true, err
+	}
+	defer manager.Release(handle)
+	return metadataHeadViaHandle(handle, input)
+}
+
+func metadataHeadViaHandle(
+	handle *bucketmetadata.AcquireHandle, input objectHeadArgs,
+) (storageops.ObjectInfo, bool, error) {
+	if handle == nil || handle.Service == nil {
+		return storageops.ObjectInfo{}, true, fmt.Errorf("metadata: head handle is unavailable")
+	}
+	object, err := handle.Service.StatPath(context.Background(), trimPrefixPath(input.Key))
+	if errors.Is(err, bucketmetadata.ErrNotFound) {
+		return storageops.ObjectInfo{}, true, os.ErrNotExist
+	}
+	if err != nil {
+		return storageops.ObjectInfo{}, true, err
+	}
+	return objectInfoFromMetadata(object), true, nil
 }
 
 // listPageWithStaleRestart transparently restarts pagination from page one
