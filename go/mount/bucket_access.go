@@ -14,6 +14,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	storageconfig "remote-storage/go/config"
+	"remote-storage/go/mount/metadata"
 	s3ops "remote-storage/go/s3"
 	storageops "remote-storage/go/storage"
 )
@@ -53,6 +54,9 @@ type bucketAccess struct {
 	writeback *writebackQueue
 	deletes   *deleteQueue
 	syncState syncStateProjector
+	// metadataHandle keeps the shared namespace alive for the actual mount
+	// lifetime, rather than letting short-lived page reads close its worker/DB.
+	metadataHandle *metadata.AcquireHandle
 
 	// externalDelete projects remote-first deletions into platform mount state.
 	// It is installed by backends that expose a real sync root (Windows Cloud Files).
@@ -113,6 +117,17 @@ func newBucketAccess(
 	if err != nil {
 		return nil, fmt.Errorf("create mount overlay dir: %w", err)
 	}
+	var metadataHandle *metadata.AcquireHandle
+	if cfg.ProfileID != "" {
+		manager, err := metadata.DefaultManager()
+		if err != nil {
+			return nil, fmt.Errorf("open mount metadata manager: %w", err)
+		}
+		metadataHandle, err = manager.Acquire(cfg, bucket)
+		if err != nil {
+			return nil, fmt.Errorf("acquire mount metadata: %w", err)
+		}
+	}
 
 	access := &bucketAccess{
 		config:            cfg,
@@ -133,6 +148,7 @@ func newBucketAccess(
 		pageViews:         newMountedDirectoryPageSnapshots(),
 		overlay:           overlay,
 		directoryActivity: newDirectoryActivityTracker(),
+		metadataHandle:    metadataHandle,
 	}
 	if quota, fresh, ok := storageops.CachedBucketQuotaForMount(cfg, bucket); ok {
 		if fresh {
@@ -155,6 +171,7 @@ func newBucketAccess(
 	writeback, err := newWritebackQueue(access)
 	if err != nil {
 		access.dirSync.shutdown()
+		access.releaseMetadata()
 		return nil, err
 	}
 	access.writeback = writeback
@@ -166,6 +183,7 @@ func (a *bucketAccess) close() error {
 	if a == nil {
 		return nil
 	}
+	defer a.releaseMetadata()
 	if a.dirSync != nil {
 		a.dirSync.shutdown()
 	}
@@ -197,10 +215,19 @@ func (a *bucketAccess) release() {
 	if a == nil {
 		return
 	}
+	a.releaseMetadata()
 	a.syncState = nil
 	if a.dirSync != nil {
 		a.dirSync.shutdown()
 		a.dirSync = nil
+	}
+}
+
+// releaseMetadata is safe for every platform stop path because the handle
+// itself balances only its first Release call.
+func (a *bucketAccess) releaseMetadata() {
+	if a != nil && a.metadataHandle != nil {
+		a.metadataHandle.Release()
 	}
 }
 

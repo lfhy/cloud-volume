@@ -24,7 +24,7 @@ type WriteOptions struct {
 func (s *Service) CreateDirectory(parent uint64, name string, opts WriteOptions) (uint64, error) {
 	s.operationMu.RLock()
 	defer s.operationMu.RUnlock()
-	if s.readOnly {
+	if s.isReadOnly() {
 		return 0, ErrReadOnly
 	}
 	name = strings.TrimSpace(name)
@@ -74,7 +74,7 @@ func (s *Service) CreateDirectory(parent uint64, name string, opts WriteOptions)
 		return appendOp(tx, Op{
 			Type: OpMkdir, InodeID: inode, NewParent: parent, NewName: name,
 			State: OpStatePending, Origin: origin(opts), CreatedAtUnixNano: nowUnix(),
-			NextAttemptUnixNano: time.Now().Add(s.quiet).UnixNano(),
+			NextAttemptUnixNano: time.Now().Add(s.quietPeriod()).UnixNano(),
 		})
 	})
 	return inode, err
@@ -92,7 +92,7 @@ func (s *Service) StageWrite(inode, generation uint64, source io.Reader, size in
 func (s *Service) StageWriteForName(parent uint64, name string, generation uint64, source io.Reader, size int64) (uint64, ContentRef, error) {
 	s.operationMu.RLock()
 	defer s.operationMu.RUnlock()
-	if s.readOnly {
+	if s.isReadOnly() {
 		return 0, ContentRef{}, ErrReadOnly
 	}
 	inode, err := s.ensureWriteInode(parent, name)
@@ -147,7 +147,7 @@ func (s *Service) ensureWriteInode(parent uint64, name string) (uint64, error) {
 func (s *Service) Write(parent uint64, name string, ref ContentRef, opts WriteOptions) (uint64, error) {
 	s.operationMu.RLock()
 	defer s.operationMu.RUnlock()
-	if s.readOnly {
+	if s.isReadOnly() {
 		return 0, ErrReadOnly
 	}
 	name = strings.TrimSpace(name)
@@ -205,7 +205,7 @@ func (s *Service) Write(parent uint64, name string, ref ContentRef, opts WriteOp
 			Type: OpWrite, InodeID: inode, ContentGeneration: ref.Generation, NewParent: parent, NewName: name,
 			ExpectedRemoteFingerprint: expectedFingerprint(record), State: OpStatePending,
 			Origin: origin(opts), CreatedAtUnixNano: nowUnix(),
-			NextAttemptUnixNano: time.Now().Add(s.quiet).UnixNano(),
+			NextAttemptUnixNano: time.Now().Add(s.quietPeriod()).UnixNano(),
 		})
 	})
 	return inode, err
@@ -215,7 +215,7 @@ func (s *Service) Write(parent uint64, name string, ref ContentRef, opts WriteOp
 func (s *Service) Rename(inode, newParent uint64, newName string, opts WriteOptions) error {
 	s.operationMu.RLock()
 	defer s.operationMu.RUnlock()
-	if s.readOnly {
+	if s.isReadOnly() {
 		return ErrReadOnly
 	}
 	newName = strings.TrimSpace(newName)
@@ -298,7 +298,7 @@ func (s *Service) Rename(inode, newParent uint64, newName string, opts WriteOpti
 			OldParent: oldParent(record), NewParent: newParent,
 			OldName: record.RemoteName, NewName: newName, State: OpStatePending,
 			Origin: origin(opts), CreatedAtUnixNano: nowUnix(),
-			NextAttemptUnixNano: time.Now().Add(s.quiet).UnixNano(),
+			NextAttemptUnixNano: time.Now().Add(s.quietPeriod()).UnixNano(),
 		})
 	})
 }
@@ -307,7 +307,7 @@ func (s *Service) Rename(inode, newParent uint64, newName string, opts WriteOpti
 func (s *Service) Delete(inode uint64, opts WriteOptions) error {
 	s.operationMu.RLock()
 	defer s.operationMu.RUnlock()
-	if s.readOnly {
+	if s.isReadOnly() {
 		return ErrReadOnly
 	}
 	return s.store.update(func(tx boltTxT) error {
@@ -335,7 +335,7 @@ func (s *Service) Delete(inode uint64, opts WriteOptions) error {
 		return appendOp(tx, Op{
 			Type: OpDelete, InodeID: inode, OldParent: record.RemoteParentID,
 			OldName: record.RemoteName, State: OpStatePending, Origin: origin(opts),
-			CreatedAtUnixNano: nowUnix(), NextAttemptUnixNano: time.Now().Add(s.quiet).UnixNano(),
+			CreatedAtUnixNano: nowUnix(), NextAttemptUnixNano: time.Now().Add(s.quietPeriod()).UnixNano(),
 		})
 	})
 }

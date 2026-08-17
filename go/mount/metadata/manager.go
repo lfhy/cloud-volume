@@ -110,8 +110,18 @@ func NamespaceID(config storageconfig.RemoteStorageConfig, bucket string) string
 // AcquireHandle pairs a retained service with the manager handle used to
 // release it. Holding the handle prevents premature worker/database shutdown.
 type AcquireHandle struct {
-	Service *Service
-	manager *Manager
+	Service     *Service
+	manager     *Manager
+	releaseOnce sync.Once
+}
+
+// Release drops this handle exactly once, regardless of which mount lifecycle
+// callback observes the real platform session ending first.
+func (h *AcquireHandle) Release() {
+	if h == nil || h.manager == nil {
+		return
+	}
+	h.manager.Release(h)
 }
 
 // ErrNoProfileID marks configs that lack the immutable identity required to
@@ -134,8 +144,9 @@ func (m *Manager) Acquire(config storageconfig.RemoteStorageConfig, bucket strin
 		existing.refs++
 		// Refresh per-acquisition policy so a later bucket read-only or quiet
 		// setting change is honored by the retained namespace service.
-		existing.service.SetQuietPeriod(quietDuration(normalized))
-		existing.service.SetReadOnly(normalized.BucketSettingsFor(bucket).ReadOnly)
+		existing.service.setPolicy(
+			quietDuration(normalized), normalized.BucketSettingsFor(bucket).ReadOnly,
+		)
 		managed = existing
 	} else {
 		service, err := m.openService(id, normalized, bucket)
@@ -161,6 +172,9 @@ func (m *Manager) AcquireWithBackend(
 	defer m.mu.Unlock()
 	if existing, ok := m.services[id]; ok {
 		existing.refs++
+		existing.service.setPolicy(
+			quietDuration(normalized), normalized.BucketSettingsFor(bucket).ReadOnly,
+		)
 		return &AcquireHandle{Service: existing.service, manager: m}, nil
 	}
 	namespace, err := m.namespace(id, normalized, bucket)
@@ -172,8 +186,7 @@ func (m *Manager) AcquireWithBackend(
 		return nil, err
 	}
 	service := NewService(store, backend)
-	service.SetQuietPeriod(quietDuration(normalized))
-	service.SetReadOnly(normalized.BucketSettingsFor(bucket).ReadOnly)
+	service.setPolicy(quietDuration(normalized), normalized.BucketSettingsFor(bucket).ReadOnly)
 	managed := &managedService{service: service, worker: NewWorker(service), refs: 1}
 	m.services[id] = managed
 	return &AcquireHandle{Service: service, manager: m}, nil
@@ -191,8 +204,7 @@ func (m *Manager) openService(id string, normalized storageconfig.RemoteStorageC
 	// Metadata paths are view-relative, so its provider must retain the account
 	// RootPrefix wrapper just like page-level object reads do.
 	service := NewService(store, storageops.ForConfig(normalized))
-	service.SetQuietPeriod(quietDuration(normalized))
-	service.SetReadOnly(normalized.BucketSettingsFor(bucket).ReadOnly)
+	service.setPolicy(quietDuration(normalized), normalized.BucketSettingsFor(bucket).ReadOnly)
 	managed := &managedService{service: service, worker: NewWorker(service), refs: 1}
 	m.services[id] = managed
 	return managed, nil
@@ -222,6 +234,10 @@ func (m *Manager) Release(handle *AcquireHandle) {
 	if handle == nil || handle.Service == nil || handle.manager != m {
 		return
 	}
+	handle.releaseOnce.Do(func() { m.release(handle) })
+}
+
+func (m *Manager) release(handle *AcquireHandle) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for id, managed := range m.services {

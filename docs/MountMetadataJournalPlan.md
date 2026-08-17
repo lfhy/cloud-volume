@@ -198,6 +198,12 @@ metadata.db
 
 ## TODO
 
+### M3a lifecycle guard (completed 2026-08-17)
+
+- Mount sessions with an immutable `ProfileID` now retain a `metadata.AcquireHandle` from `newBucketAccess` until their real platform stop path reaches `close()` or `release()`. Missing identities alone keep the legacy fallback; any other metadata-acquire error fails mount startup rather than creating a second read view.
+- `AcquireHandle.Release` is idempotent, and shared service policy (`readOnly` and quiet period) is synchronized and refreshed for both `Acquire` variants. This lets short-lived page handles come and go without closing a namespace held by a mount.
+- The next M3 read batch must still merge metadata only as the remote base: overlay and tombstones before provider materialization, then local files, restored/queued writeback, and directory-marker state. Legacy writes remain outside the metadata journal until M6.
+
 ## 推荐实施顺序（锁定）
 
 **先完成本地 inode metadata + 页面/mount 统一视图，再做远端同步和跨设备 feed。** 远端 change feed 的 receiver 必须把事件应用到唯一的本地树，才能正确判断“本地 pending”与“远端已变”；在两套缓存并存时先做 feed，只会重新制造 `NotifyExternal*` 式旁路修补。
