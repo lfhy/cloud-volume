@@ -33,6 +33,7 @@ class RemoteStorageConfig {
     required this.storageType,
     required this.providerType,
     required this.displayName,
+    this.profileId = '',
     required this.mappedBucketName,
     required this.region,
     required this.bucket,
@@ -87,6 +88,7 @@ class RemoteStorageConfig {
       storageType: StorageType.s3,
       providerType: StorageProviderType.s3,
       displayName: '',
+      profileId: '',
       mappedBucketName: '',
       region: '',
       bucket: '',
@@ -169,6 +171,7 @@ class RemoteStorageConfig {
       ),
       displayName: (json['displayName'] ?? json['display_name'] ?? '')
           .toString(),
+      profileId: (json['profileId'] ?? json['profile_id'] ?? '').toString(),
       mappedBucketName:
           (json['mappedBucketName'] ?? json['mapped_bucket_name'] ?? '')
               .toString(),
@@ -304,8 +307,10 @@ class RemoteStorageConfig {
       p2pEnabled:
           _boolFromDynamic(json['p2pEnabled'] ?? json['p2p_enabled']) ?? false,
       p2pChunkSizeMb:
-          _intFromDynamic(json['p2pChunkSizeMb'] ?? json['p2p_chunk_size_mb']) ??
-              4,
+          _intFromDynamic(
+            json['p2pChunkSizeMb'] ?? json['p2p_chunk_size_mb'],
+          ) ??
+          4,
       disabled: _boolFromDynamic(json['disabled']) ?? false,
     );
   }
@@ -314,6 +319,7 @@ class RemoteStorageConfig {
   final StorageType storageType;
   final StorageProviderType providerType;
   final String displayName;
+  final String profileId;
   final String mappedBucketName;
   final String region;
   final String bucket;
@@ -433,6 +439,7 @@ class RemoteStorageConfig {
       'storageType': storageType.storageValue,
       'providerType': providerType.storageValue,
       'displayName': displayName.trim(),
+      if (profileId.trim().isNotEmpty) 'profileId': profileId.trim(),
       'mappedBucketName': mappedBucketName.trim(),
       'region': region.trim(),
       'bucket': bucket.trim(),

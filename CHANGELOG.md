@@ -8,6 +8,7 @@
 - Page listings (`list_object_page`) now consult the persistent metadata namespace before mount-session caches or provider-direct listing (M2): buckets with a `profileId` are served by the durable inode view with stale-cursor reload semantics; configs without an identity fall back to the previous path. Added a `metadata_namespace_status` bridge diagnostic.
 - Pending metadata content now uses fixed 4 MiB SHA-256 content-addressed chunks with per-chunk reference counts. Chunks are deduplicated under the configured cache root, safely reconstructed for uploads, protected from cache cleanup while pending, and swept when orphaned after a restart.
 - Fixed metadata chunk staging so cache cleanup cannot evict an earlier block before a multi-chunk write commits; ordered same-inode write/rename operations; made the reset guard account for in-flight journal operations; and prevented exit draining from completing while an operation is still running.
+- Fixed metadata page reads to retain profile identity across Flutter/bridge JSON, share a process-wide namespace manager, and honor account `RootPrefix` scopes.
 
 - 修复 Windows Cloud Files 重挂载后客户端能看到文件、但 Explorer 中部分目录为空：复用缓存里的目录现在会重新启用按需枚举；如果目录已退化为普通 NTFS 目录，则原地转换回云占位目录并保留现有内容。并发目录枚举会传递真实失败结果，不再把一次失败误记为“已完整加载”。
 - 修复 Windows Cloud Files 目录改名竞态：`go/mount/dir_sync_queue.go` 的 `rebaseAndFence` 现在把目录创建请求与远端改名统一排进同一个 fence；`bucket_access_writes.go` 在远端源已确认缺失时复用已改名的目标，绝不再向严格后端发送一次“源不存在”的 `MoveObject`。

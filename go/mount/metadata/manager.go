@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,29 @@ type Manager struct {
 	baseDir  string
 	services map[string]*managedService
 }
+
+type managerRegistry struct {
+	mu      sync.Mutex
+	manager *Manager
+	baseDir string
+}
+
+func (r *managerRegistry) acquire(baseDir string) (*Manager, error) {
+	baseDir = filepath.Clean(baseDir)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.manager == nil {
+		r.manager = NewManager(baseDir)
+		r.baseDir = baseDir
+		return r.manager, nil
+	}
+	if r.baseDir != baseDir {
+		return nil, fmt.Errorf("metadata: default manager root changed from %q to %q", r.baseDir, baseDir)
+	}
+	return r.manager, nil
+}
+
+var defaultManagers managerRegistry
 
 // RemoveAllForTest stops and removes every open namespace; test helper.
 func (m *Manager) RemoveAllForTest() {
@@ -52,13 +76,14 @@ func NewManager(baseDir string) *Manager {
 	return &Manager{baseDir: filepath.Join(baseDir, "v1"), services: map[string]*managedService{}}
 }
 
-// DefaultManager resolves the shared manager rooted under the app runtime dir.
+// DefaultManager returns the process-wide manager rooted under the app runtime
+// directory, so page and mount callers share one namespace lifecycle.
 func DefaultManager() (*Manager, error) {
 	runtimeDir, err := storageconfig.RuntimeDir()
 	if err != nil {
 		return nil, err
 	}
-	return NewManager(filepath.Join(runtimeDir, "metadata")), nil
+	return defaultManagers.acquire(filepath.Join(runtimeDir, "metadata"))
 }
 
 // NamespaceID derives a collision-safe namespace from account and view identity.
@@ -163,11 +188,9 @@ func (m *Manager) openService(id string, normalized storageconfig.RemoteStorageC
 	if err != nil {
 		return nil, err
 	}
-	// The namespace already encodes RootPrefix. Clear it before building the
-	// provider backend, otherwise scopedBackend would prefix keys twice.
-	backendCfg := normalized
-	backendCfg.RootPrefix = ""
-	service := NewService(store, storageops.ForConfig(backendCfg))
+	// Metadata paths are view-relative, so its provider must retain the account
+	// RootPrefix wrapper just like page-level object reads do.
+	service := NewService(store, storageops.ForConfig(normalized))
 	service.SetQuietPeriod(quietDuration(normalized))
 	service.SetReadOnly(normalized.BucketSettingsFor(bucket).ReadOnly)
 	managed := &managedService{service: service, worker: NewWorker(service), refs: 1}

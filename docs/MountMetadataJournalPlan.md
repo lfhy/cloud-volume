@@ -289,7 +289,7 @@ Phase 0 的止血修复可以并行落地，但不改变上述主线顺序。
 ### Phase 1 — 统一元数据存储核心（页面与 mount 共用）
 
 - [ ] 新建 `go/mount/metadata` 包，选 bbolt（已有依赖）而非新增 SQLite；存储生命周期与 mount session 解耦（按稳定 `ProfileID+backend+bucket+rootPrefix` namespace 常驻，不随 unmount 销毁）。
-- [ ] 给 profile 存储引入不可变 `ProfileID`，并定义 metadata namespace registry；禁止用 `safeSegment(bucket)` 作为 metadata DB 身份。开发环境不迁移旧 namespace，直接重建。
+- [x] 给 profile 存储引入不可变 `ProfileID`，并定义 metadata namespace registry；Flutter config JSON 同步保留该 identity，`DefaultManager` 为进程级共享实例。禁止用 `safeSegment(bucket)` 作为 metadata DB 身份；开发环境不迁移旧 namespace，直接重建。
 - [ ] 创建独立的 `RuntimeDir()/metadata/v1/<namespace-hash>/metadata.db`；不要放到 `CacheDirectory` 或 `config.db`。定义 schema version、root inode=1、单调且永不复用的 uint64 inode allocator；schema 不匹配或 db 损坏时删除重建，不写旧格式升级路径。
 - [ ] 落地 bbolt inode B+Tree：`inodes[inode]`、每目录 `dirents[parent inode][nameKey] -> child inode`、`journal[seq]`、`ready_ops`、`inode_ops`、`listing_state`、`content_refs`。所有键使用固定二进制编码，避免字符串拼接/前缀歧义。
 - [ ] 数据结构：
@@ -303,7 +303,7 @@ Phase 0 的止血修复可以并行落地，但不改变上述主线顺序。
 - [x] 内容持久化协议（2026-08-17）：写入按固定 4 MiB 分块、SHA-256 内容寻址；块先 fsync + 原子 rename 到 cache root，再提交 `ContentRef{chunks[]}` 与 `chunks[hash].nlink++`。上传时临时拼接完整文件；确认/删除后 `nlink--`，归零删块。启动 sweep 清除孤儿块和中断的拼接临时文件；仅已 StageWrite 的内容以及 pending/running/failed journal 均计入 reset guard。
 - [x] 缓存挂钩（2026-08-17）：缓存统计显示 protected pending 块；按规则清理与清空缓存都跳过 `protection.json` 标记的 pending 块，清单缺失或损坏时保护整个 namespace。已同步读缓存尚未迁移到块存储。
 - [ ] journal append-only；verified seq 之后才允许 compact。
-- [ ] 读 API 同时覆盖页面分页与 mount readdir/stat：`ListPage(prefix, cursor)`、`Stat(path)`、`GetOID(oid)`；页面不再依赖 `ListMountedObjectPage` 的挂载会话分支。
+- [ ] 读 API 同时覆盖页面分页与 mount readdir/stat：`ListPage(prefix, cursor)`、`Stat(path)`、`GetOID(oid)`；页面 `list_object_page` 已在持有 `profileId` 时走 metadata，但 `ListMountedObjectPage` 回退和 mount readdir/stat 尚未替换。
 - [ ] 将分页 cursor 改为 `directory inode + directory revision + last nameKey`；若目录 revision 已变，返回明确 stale-cursor 错误给页面 reload，不保留当前进程内 2 分钟快照作为一致性承诺。
 - [ ] 冷启动策略：根目录优先惰性物化，后台按需拉子目录；大桶不阻塞首屏，同时 UI 标注“未完全物化”。
 - [ ] 单元测试：崩溃后重放 journal、OID rename 后路径索引更新、tombstone、compact 幂等、页面与 mount 读同一份 delta；断言百万子项目录 rename 只触碰 inode/两个 dirent bucket，不扫描子树。
