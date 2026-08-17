@@ -178,6 +178,13 @@ func (w *Worker) claimDue() []Op {
 			if _, busy := w.running[op.InodeID]; busy {
 				continue
 			}
+			// Dependency ordering: a write/mkdir must wait for an unfinished
+			// parent mkdir/rename, and any op must wait for a pending delete of
+			// its own inode recorded earlier in the journal.
+			if blocked, reason := w.blocked(tx, op); blocked {
+				_ = reason
+				continue
+			}
 			w.running[op.InodeID] = struct{}{}
 			previous := op
 			op.State = OpStateRunning
@@ -189,6 +196,57 @@ func (w *Worker) claimDue() []Op {
 		return nil
 	})
 	return claimed
+}
+
+// blocked reports whether one op must wait on another journal operation. Only
+// earlier-sequence unfinished ops of the dependency kinds are considered so a
+// failed child can never wedge a parent that already completed.
+func (w *Worker) blocked(tx boltTxT, op Op) (bool, string) {
+	if op.Type == OpRename || op.Type == OpDelete {
+		return false, ""
+	}
+	parent, err := getInode(tx, op.InodeID)
+	if err != nil {
+		return false, ""
+	}
+	for _, ancestor := range []uint64{parent.DesiredParentID} {
+		if ancestor == rootInode || ancestor == 0 {
+			continue
+		}
+		if pendingOpForInode(tx, ancestor, op.Seq) {
+			return true, "parent mkdir/rename pending"
+		}
+	}
+	if pendingOpForInode(tx, op.InodeID, op.Seq) {
+		return true, "earlier op on same inode pending"
+	}
+	return false, ""
+}
+
+func pendingOpForInode(tx boltTxT, inode, beforeSeq uint64) bool {
+	found := false
+	_ = tx.Bucket([]byte(bucketInodeOps)).ForEach(func(key, _ []byte) error {
+		seq := decodeUint64(key[8:])
+		if seq >= beforeSeq {
+			return nil
+		}
+		raw := tx.Bucket([]byte(bucketJournal)).Get(encodeUint64(seq))
+		if raw == nil {
+			return nil
+		}
+		var prior Op
+		if decodeJSON(raw, &prior) != nil {
+			return nil
+		}
+		if prior.InodeID != inode {
+			return nil
+		}
+		if prior.State == OpStatePending || prior.State == OpStateRunning {
+			found = true
+		}
+		return nil
+	})
+	return found
 }
 
 func (w *Worker) releaseInode(inode uint64) {
@@ -272,14 +330,22 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 		if err != nil {
 			return err
 		}
-		if record.RemoteParentID == 0 {
-			_ = s.deleteInodeRecord(op.InodeID)
-			return nil
+		if record.RemoteParentID != 0 {
+			if err := s.backend.DeleteObject(ctx, s.store.namespace.Bucket, record.RemoteName, record.Kind == KindDirectory, fmt.Sprintf("metadata-op-%d", op.Seq)); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
 		}
-		if err := s.backend.DeleteObject(ctx, s.store.namespace.Bucket, record.RemoteName, record.Kind == KindDirectory, fmt.Sprintf("metadata-op-%d", op.Seq)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		// Directory deletes must purge descendants too; otherwise their inode
+		// records and staged content leak forever while Status().InodeCount
+		// drifts upward.
+		descendants, err := s.collectSubtreeInodes(op.InodeID)
+		if err != nil {
 			return err
 		}
-		return s.deleteInodeRecord(op.InodeID)
+		if err := s.deleteInodeRecord(op.InodeID); err != nil {
+			return err
+		}
+		return s.purgeInodeRecords(descendants)
 	default:
 		return fmt.Errorf("metadata worker: unknown op type %d", op.Type)
 	}

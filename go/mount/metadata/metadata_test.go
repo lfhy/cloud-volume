@@ -72,8 +72,16 @@ func (b *fakeBackend) CreateDirectory(_ context.Context, _, prefix, name string)
 	return nil
 }
 
-func (b *fakeBackend) DeleteObject(_ context.Context, _, key string, _ bool, _ string) error {
+func (b *fakeBackend) DeleteObject(_ context.Context, _, key string, isDir bool, _ string) error {
 	delete(b.objects, "/"+key)
+	if isDir {
+		prefix := "/" + strings.TrimSuffix(key, "/") + "/"
+		for candidate := range b.objects {
+			if strings.HasPrefix(candidate, prefix) {
+				delete(b.objects, candidate)
+			}
+		}
+	}
 	b.ops = append(b.ops, "delete:"+key)
 	return nil
 }

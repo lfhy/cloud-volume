@@ -18,11 +18,11 @@ var configBackupSettingsKey = []byte("config_backup_settings")
 // BackupPassword is the user-chosen encryption passphrase; the AES key is
 // derived from it so backups stay decryptable regardless of endpoint changes.
 type ConfigBackupTarget struct {
-	ProfileName     string               `json:"profileName"`
-	Standalone      *RemoteStorageConfig `json:"standalone,omitempty"`
-	Bucket          string               `json:"bucket"`
-	Prefix          string               `json:"prefix"`
-	BackupPassword  string               `json:"backupPassword,omitempty"`
+	ProfileName    string               `json:"profileName"`
+	Standalone     *RemoteStorageConfig `json:"standalone,omitempty"`
+	Bucket         string               `json:"bucket"`
+	Prefix         string               `json:"prefix"`
+	BackupPassword string               `json:"backupPassword,omitempty"`
 }
 
 type ConfigBackupSettings struct {

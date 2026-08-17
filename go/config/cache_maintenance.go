@@ -15,10 +15,10 @@ import (
 
 // CacheStats summarises the resolved cache directory for the settings UI.
 type CacheStats struct {
-	Path        string `json:"path"`
-	Exists      bool   `json:"exists"`
-	SizeBytes   int64  `json:"sizeBytes"`
-	FileCount   int64  `json:"fileCount"`
+	Path         string `json:"path"`
+	Exists       bool   `json:"exists"`
+	SizeBytes    int64  `json:"sizeBytes"`
+	FileCount    int64  `json:"fileCount"`
 	LastModified string `json:"lastModified"`
 }
 

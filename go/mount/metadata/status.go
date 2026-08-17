@@ -48,11 +48,23 @@ func (s *Service) remoteTarget(inode uint64) (Inode, error) {
 		return Inode{}, err
 	}
 	if record.RemoteParentID != 0 {
-		remotePath, err := s.remotePathLocked(record.RemoteParentID, record.RemoteName)
-		if err != nil {
-			return Inode{}, err
+		// Resolve through Remote edges first; a never-synced child under a
+		// synced directory still has RemoteParentID set but an empty RemoteName,
+		// in which case fall back to the Desired path so deletes target the
+		// only location the provider could know.
+		if strings.TrimSpace(record.RemoteName) != "" {
+			remotePath, remoteErr := s.remotePathLocked(record.RemoteParentID, record.RemoteName)
+			if remoteErr == nil {
+				record.RemoteName = remotePath
+				return record, nil
+			}
+			if !errors.Is(remoteErr, ErrNotFound) {
+				return Inode{}, remoteErr
+			}
 		}
-		record.RemoteName = remotePath
+		if desired, pathErr := s.Path(inode); pathErr == nil {
+			record.RemoteName = desired
+		}
 	}
 	return record, nil
 }

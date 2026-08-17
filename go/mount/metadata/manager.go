@@ -175,7 +175,9 @@ func (m *Manager) List() []Status {
 	return result
 }
 
-// DrainAll attempts to finish every due operation before app exit.
+// DrainAll attempts to finish every due operation before app exit. Workers run
+// concurrently so one slow provider cannot serialize every namespace into the
+// exit timeout; the first failure is reported.
 func (m *Manager) DrainAll(ctx context.Context) error {
 	m.mu.Lock()
 	workers := make([]*Worker, 0, len(m.services))
@@ -183,13 +185,22 @@ func (m *Manager) DrainAll(ctx context.Context) error {
 		workers = append(workers, managed.worker)
 	}
 	m.mu.Unlock()
-	var firstErr error
-	for _, worker := range workers {
-		if err := worker.Drain(ctx); err != nil && firstErr == nil {
-			firstErr = err
+	results := make([]error, len(workers))
+	var wg sync.WaitGroup
+	for index, worker := range workers {
+		wg.Add(1)
+		go func(target *Worker, slot int) {
+			defer wg.Done()
+			results[slot] = target.Drain(ctx)
+		}(worker, index)
+	}
+	wg.Wait()
+	for _, err := range results {
+		if err != nil {
+			return err
 		}
 	}
-	return firstErr
+	return nil
 }
 
 func quietDuration(config storageconfig.RemoteStorageConfig) time.Duration {
