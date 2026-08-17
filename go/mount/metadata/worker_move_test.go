@@ -12,7 +12,9 @@ import (
 )
 
 func TestMoveConfirmationKeepsFrozenTargetAfterLaterRename(t *testing.T) {
-	backend := &moveConfirmationFailureBackend{fakeBackend: newFakeBackend(), failTargetHead: true}
+	backend := &moveConfirmationFailureBackend{
+		fakeBackend: newFakeBackend(), failTargetHead: true, failTargetKey: "middle.txt",
+	}
 	backend.objects["/old.txt"] = storageops.ObjectInfo{Key: "old.txt", Size: 3, ETag: "etag-old"}
 	service := newTestService(t, backend)
 	service.SetQuietPeriod(time.Nanosecond)
@@ -31,8 +33,11 @@ func TestMoveConfirmationKeepsFrozenTargetAfterLaterRename(t *testing.T) {
 	first := claimSingleMove(t, worker)
 	worker.execute(ctx, first)
 	afterFirst := journalOp(t, service, first.Seq)
-	if !afterFirst.MoveApplied || afterFirst.MoveSource != "old.txt" || afterFirst.MoveTarget != "middle.txt" {
+	if !afterFirst.MoveApplied || afterFirst.State != OpStatePending || afterFirst.MoveSource != "old.txt" || afterFirst.MoveTarget != "middle.txt" {
 		t.Fatalf("first move snapshot = %+v", afterFirst)
+	}
+	if moves := backend.moveCount(); moves != 1 {
+		t.Fatalf("move count after failed confirmation = %d, want 1", moves)
 	}
 	if err := service.Rename(inode, rootInode, "final.txt", WriteOptions{Origin: "test"}); err != nil {
 		t.Fatal(err)
@@ -52,7 +57,9 @@ func TestMoveConfirmationKeepsFrozenTargetAfterLaterRename(t *testing.T) {
 }
 
 func TestLocalOnlyMoveConfirmationKeepsFrozenTargetAfterLaterRename(t *testing.T) {
-	backend := &moveConfirmationFailureBackend{fakeBackend: newFakeBackend(), failTargetHead: true}
+	backend := &moveConfirmationFailureBackend{
+		fakeBackend: newFakeBackend(), failTargetHead: true, failTargetKey: "middle.txt",
+	}
 	service := newTestService(t, backend)
 	service.SetQuietPeriod(time.Nanosecond)
 	ctx := context.Background()
@@ -71,7 +78,7 @@ func TestLocalOnlyMoveConfirmationKeepsFrozenTargetAfterLaterRename(t *testing.T
 	first := claimSingleMove(t, worker)
 	worker.execute(ctx, first)
 	afterFirst := journalOp(t, service, first.Seq)
-	if !afterFirst.MoveApplied || afterFirst.MoveSource != "" || afterFirst.MoveTarget != "middle.txt" {
+	if !afterFirst.MoveApplied || afterFirst.State != OpStatePending || afterFirst.MoveSource != "" || afterFirst.MoveTarget != "middle.txt" {
 		t.Fatalf("local-only move snapshot = %+v", afterFirst)
 	}
 	if err := service.Rename(inode, rootInode, "final.txt", WriteOptions{Origin: "test"}); err != nil {

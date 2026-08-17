@@ -207,6 +207,11 @@ func (b webDAVBackend) propfind(ctx context.Context, key, depth string) ([]webDA
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		// Keep HeadObject aligned with the other provider backends: callers use
+		// os.ErrNotExist to distinguish a missing remote edge from a transport error.
+		return nil, os.ErrNotExist
+	}
 	if resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("webdav propfind: %s", resp.Status)
 	}

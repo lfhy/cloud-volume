@@ -248,10 +248,15 @@ func TestMoveReplayConfirmsAppliedRemoteMoveAfterReopen(t *testing.T) {
 type moveConfirmationFailureBackend struct {
 	*fakeBackend
 	failTargetHead bool
+	failTargetKey  string
 }
 
 func (b *moveConfirmationFailureBackend) HeadObject(ctx context.Context, bucket, key string) (storageops.ObjectInfo, error) {
-	if key == "new.txt" && b.failTargetHead {
+	target := b.failTargetKey
+	if target == "" {
+		target = "new.txt"
+	}
+	if key == target && b.failTargetHead {
 		b.failTargetHead = false
 		return storageops.ObjectInfo{}, errors.New("temporary target confirmation failure")
 	}
