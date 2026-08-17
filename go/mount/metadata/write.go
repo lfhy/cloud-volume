@@ -15,7 +15,6 @@ import (
 type WriteOptions struct {
 	Origin     string
 	TaskID     string
-	LocalPath  string
 	Size       int64
 	MTime      string
 	ForceRetry bool
@@ -81,40 +80,7 @@ func (s *Service) CreateDirectory(parent uint64, name string, opts WriteOptions)
 
 // StageWrite copies source bytes into durable pending content for one inode.
 func (s *Service) StageWrite(inode, generation uint64, source io.Reader, size int64) (ContentRef, error) {
-	dir := filepath.Join(s.store.namespace.Root, "pending-content", fmt.Sprintf("%d", inode), fmt.Sprintf("%d", generation))
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return ContentRef{}, err
-	}
-	target := filepath.Join(dir, "content")
-	file, err := os.Create(target)
-	if err != nil {
-		return ContentRef{}, err
-	}
-	written, copyErr := io.Copy(file, source)
-	closeErr := file.Close()
-	if copyErr != nil {
-		_ = os.Remove(target)
-		return ContentRef{}, copyErr
-	}
-	if closeErr != nil {
-		_ = os.Remove(target)
-		return ContentRef{}, closeErr
-	}
-	if err := syncFileAndParent(target); err != nil {
-		return ContentRef{}, err
-	}
-	if size < 0 {
-		size = written
-	}
-	ref := ContentRef{Inode: inode, Generation: generation, LocalPath: target, Size: size}
-	err = s.store.update(func(tx boltTxT) error {
-		data, err := encodeJSON(ref)
-		if err != nil {
-			return err
-		}
-		return tx.Bucket([]byte(bucketContentRefs)).Put(contentRefKey(inode, generation), data)
-	})
-	return ref, err
+	return s.stagePendingContent(inode, generation, source, size)
 }
 
 // StageWriteForName allocates (if needed) and returns the target inode before

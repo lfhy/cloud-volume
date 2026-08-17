@@ -79,7 +79,8 @@ func TestWorkerWaitsForPendingParentMkdir(t *testing.T) {
 func TestCrashReplayRestoresPendingWriteAfterReopen(t *testing.T) {
 	backend := newFakeBackend()
 	root := t.TempDir() + "/metadata"
-	store, err := OpenStore(Namespace{ID: "test", Root: root, Bucket: "bucket"})
+	cacheRoot := t.TempDir() + "/cache"
+	store, err := OpenStore(Namespace{ID: "test", Root: root, CacheRoot: cacheRoot, Bucket: "bucket"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +100,7 @@ func TestCrashReplayRestoresPendingWriteAfterReopen(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := OpenStore(Namespace{ID: "test", Root: root, Bucket: "bucket"})
+	reopened, err := OpenStore(Namespace{ID: "test", Root: root, CacheRoot: cacheRoot, Bucket: "bucket"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,8 +116,10 @@ func TestCrashReplayRestoresPendingWriteAfterReopen(t *testing.T) {
 	if backend.objects["/note.txt"].Size != 4 {
 		t.Fatalf("replayed upload missing: %+v", backend.objects)
 	}
-	if _, err := os.Stat(ref.LocalPath); !os.IsNotExist(err) {
-		t.Fatalf("pending content not retired after replay: %v", err)
+	for _, hash := range ref.Chunks {
+		if _, err := os.Stat(resumed.chunkPath(hash)); !os.IsNotExist(err) {
+			t.Fatalf("pending chunk %s not retired after replay: %v", hash, err)
+		}
 	}
 }
 
@@ -151,8 +154,10 @@ func TestMaterializePreservesPendingChildDroppedByRemote(t *testing.T) {
 	if object.State != StatePending {
 		t.Fatalf("pending inode dropped by rematerialization: %+v", object)
 	}
-	if _, err := os.Stat(ref.LocalPath); err != nil {
-		t.Fatalf("pending content lost: %v", err)
+	for _, hash := range ref.Chunks {
+		if _, err := os.Stat(service.chunkPath(hash)); err != nil {
+			t.Fatalf("pending chunk %s lost: %v", hash, err)
+		}
 	}
 }
 

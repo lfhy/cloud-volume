@@ -2,6 +2,7 @@
 package metadata
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -144,7 +145,8 @@ func (s *stagedWrite) Read(p []byte) (int, error) {
 
 type uploadCaptureBackend struct {
 	*fakeBackend
-	uploaded map[string]string
+	uploaded      map[string]string
+	uploadedBytes map[string][]byte
 }
 
 func (b *uploadCaptureBackend) UploadFile(ctx context.Context, bucket, key, localPath, taskID string) error {
@@ -158,6 +160,10 @@ func (b *uploadCaptureBackend) UploadFile(ctx context.Context, bucket, key, loca
 	if err != nil {
 		return err
 	}
+	if b.uploadedBytes == nil {
+		b.uploadedBytes = map[string][]byte{}
+	}
+	b.uploadedBytes[key] = append([]byte(nil), data...)
 	b.objects["/"+key] = storageops.ObjectInfo{Key: key, Size: int64(len(data)), LastModified: "2026-01-01 00:00:00"}
 	b.ops = append(b.ops, "upload:"+key)
 	return nil
@@ -186,8 +192,13 @@ func TestWorkerUploadsStagedWriteAndRetiresContent(t *testing.T) {
 	if backend.objects["/uploaded.txt"].Size != 5 {
 		t.Fatalf("provider upload missing: %+v", backend.objects)
 	}
-	if _, err := os.Stat(ref.LocalPath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("pending content still exists: %v", err)
+	if !bytes.Equal(backend.uploadedBytes["uploaded.txt"], []byte("hello")) {
+		t.Fatalf("uploaded content = %q, want hello", backend.uploadedBytes["uploaded.txt"])
+	}
+	for _, hash := range ref.Chunks {
+		if _, err := os.Stat(service.chunkPath(hash)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("pending chunk %s still exists: %v", hash, err)
+		}
 	}
 
 	object, err := service.StatInode(context.Background(), inode)
@@ -231,6 +242,7 @@ func TestWorkerRenameOverFileSchedulesRemoteDelete(t *testing.T) {
 func TestManagerAcquireUsesUnscopedBackendAndRefLifecycle(t *testing.T) {
 	manager := NewManager(filepath.Join(t.TempDir(), "metadata"))
 	config := fakeConfig("profile-id")
+	config.CacheDirectory = t.TempDir()
 	first, err := manager.Acquire(config, "bucket")
 	if err != nil {
 		t.Fatal(err)

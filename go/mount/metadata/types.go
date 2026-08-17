@@ -11,7 +11,7 @@ import (
 
 // SchemaVersion gates forward compatibility. Development builds deliberately
 // delete-and-rebuild instead of upgrading older layouts.
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 const (
 	bucketSchema       = "schema"
@@ -20,6 +20,7 @@ const (
 	bucketJournal      = "journal"
 	bucketListingState = "listing_state"
 	bucketContentRefs  = "content_refs"
+	bucketChunks       = "chunks"
 	bucketReadyOps     = "ready_ops"
 	bucketInodeOps     = "inode_ops"
 
@@ -130,12 +131,13 @@ type ListingState struct {
 	VerifiedAtUnixNano int64  `json:"verifiedAtUnixNs"`
 }
 
-// ContentRef points at durable pending content staged under the namespace.
+// ContentRef maps one pending file generation to its ordered content-addressed
+// chunks. Chunk files contain no inode or path information.
 type ContentRef struct {
-	Inode      uint64 `json:"inode"`
-	Generation uint64 `json:"generation"`
-	LocalPath  string `json:"localPath"`
-	Size       int64  `json:"size"`
+	Inode      uint64   `json:"inode"`
+	Generation uint64   `json:"generation"`
+	Chunks     []string `json:"chunks"`
+	Size       int64    `json:"size"`
 }
 
 // Object extends the shared provider object shape with local identity fields.
@@ -167,10 +169,11 @@ type Cursor struct {
 
 // Namespace identifies one account/bucket/rootPrefix metadata database.
 type Namespace struct {
-	ID     string
-	Root   string
-	Config storageconfig.RemoteStorageConfig
-	Bucket string
+	ID        string
+	Root      string
+	CacheRoot string
+	Config    storageconfig.RemoteStorageConfig
+	Bucket    string
 }
 
 // Backend is the narrow provider surface required by the metadata service.

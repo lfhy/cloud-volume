@@ -4,6 +4,7 @@ package metadata
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 // Store owns one bbolt database and serializes every write transaction.
 type Store struct {
 	namespace Namespace
+	chunkRoot string
 	db        *bolt.DB
 	mu        sync.Mutex
 }
@@ -43,21 +45,33 @@ func (s *Store) ensureSchema() error {
 		if err != nil {
 			return err
 		}
-		for name := range map[string]struct{}{
-			bucketInodes: {}, bucketDirents: {}, bucketJournal: {}, bucketListingState: {},
-			bucketContentRefs: {}, bucketReadyOps: {}, bucketInodeOps: {},
-		} {
-			if _, err := tx.CreateBucketIfNotExists([]byte(name)); err != nil {
-				return err
-			}
-		}
 		versionData := schema.Get([]byte("version"))
 		if versionData != nil {
 			if version := decodeUint64(versionData); version != SchemaVersion {
 				return fmt.Errorf("metadata: unsupported schema version %d", version)
 			}
+			chunkRoot := string(schema.Get([]byte("chunkRoot")))
+			if chunkRoot == "" {
+				return fmt.Errorf("metadata: chunk root is missing")
+			}
+			s.chunkRoot = chunkRoot
+		}
+		for name := range map[string]struct{}{
+			bucketInodes: {}, bucketDirents: {}, bucketJournal: {}, bucketListingState: {},
+			bucketContentRefs: {}, bucketChunks: {}, bucketReadyOps: {}, bucketInodeOps: {},
+		} {
+			if _, err := tx.CreateBucketIfNotExists([]byte(name)); err != nil {
+				return err
+			}
+		}
+		if versionData != nil {
 			return nil
 		}
+		chunkRoot := s.namespace.CacheRoot
+		if chunkRoot == "" {
+			chunkRoot = s.namespace.Root
+		}
+		chunkRoot = filepath.Clean(chunkRoot)
 		if err := schema.Put([]byte("version"), encodeUint64(SchemaVersion)); err != nil {
 			return err
 		}
@@ -67,6 +81,10 @@ func (s *Store) ensureSchema() error {
 		if err := schema.Put([]byte("nextInode"), encodeUint64(rootInode)); err != nil {
 			return err
 		}
+		if err := schema.Put([]byte("chunkRoot"), []byte(chunkRoot)); err != nil {
+			return err
+		}
+		s.chunkRoot = chunkRoot
 		return putInode(tx, Inode{
 			ID: rootInode, Kind: KindDirectory, DesiredParentID: rootInode,
 			RemoteParentID: rootInode, State: StateSynced, LocalRevision: 1,

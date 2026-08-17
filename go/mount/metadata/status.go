@@ -2,9 +2,7 @@
 package metadata
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -180,38 +178,13 @@ func (s *Service) commitConfirmation(inode, parent uint64, name, fingerprint str
 }
 
 func (s *Service) retireContent(inode, generation uint64) error {
-	err := s.store.update(func(tx boltTxT) error {
-		return tx.Bucket([]byte(bucketContentRefs)).Delete(contentRefKey(inode, generation))
-	})
-	if err != nil {
-		return err
-	}
-	// Remove only the exact generation file; a newer staged generation for the
-	// same inode must survive concurrent uploads.
-	_ = os.Remove(contentRefDirPath(s, inode, generation))
-	return nil
+	// Remove only the exact generation; newer pending data for the same inode
+	// retains its own chunk references.
+	return s.releaseContent(inode, &generation, false)
 }
 
 func (s *Service) deleteInodeRecord(inode uint64) error {
-	return s.store.update(func(tx boltTxT) error {
-		if err := tx.Bucket([]byte(bucketInodes)).Delete(encodeUint64(inode)); err != nil {
-			return err
-		}
-		refs := tx.Bucket([]byte(bucketContentRefs))
-		prefix := make([]byte, 8)
-		binary.BigEndian.PutUint64(prefix, inode)
-		cursor := refs.Cursor()
-		for key, value := cursor.Seek(prefix); key != nil && bytes.HasPrefix(key, prefix); key, value = cursor.Next() {
-			var ref ContentRef
-			if decodeJSON(value, &ref) == nil && strings.TrimSpace(ref.LocalPath) != "" {
-				_ = os.Remove(ref.LocalPath)
-			}
-			if err := cursor.Delete(); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	return s.releaseContent(inode, nil, true)
 }
 
 func markInodeConflict(tx boltTxT, inode uint64) error {
@@ -236,12 +209,6 @@ func getOp(tx boltTx, seq uint64) (Op, error) {
 	return op, nil
 }
 
-func contentRefDirPath(s *Service, inode, generation uint64) string {
-	return strings.Join([]string{
-		s.store.namespace.Root, "pending-content", fmt.Sprintf("%d", inode), fmt.Sprintf("%d", generation), "content",
-	}, string(os.PathSeparator))
-}
-
 // Status summarizes namespace health for bridge diagnostics.
 type Status struct {
 	Namespace          string `json:"namespace"`
@@ -249,6 +216,7 @@ type Status struct {
 	InodeCount         int    `json:"inodeCount"`
 	MaterializedCount  int    `json:"materializedCount"`
 	PendingOps         int    `json:"pendingOps"`
+	PendingContent     int    `json:"pendingContent"`
 	FailedOps          int    `json:"failedOps"`
 	ConflictInodes     int    `json:"conflictInodes"`
 	LastVerifiedUnixNs int64  `json:"lastVerifiedUnixNs"`
@@ -270,6 +238,7 @@ func (s *Service) Status() Status {
 			}
 			return nil
 		})
+		status.PendingContent = tx.Bucket([]byte(bucketContentRefs)).Stats().KeyN
 		_ = tx.Bucket([]byte(bucketInodes)).ForEach(func(_, value []byte) error {
 			var record Inode
 			if decodeJSON(value, &record) == nil && record.State == StateConflict {
@@ -299,9 +268,15 @@ type ResetResult struct {
 // Reset deletes the namespace database after checking pending operations.
 func (s *Service) Reset(force bool) (ResetResult, error) {
 	status := s.Status()
-	if status.PendingOps > 0 || status.FailedOps > 0 {
+	if status.PendingOps > 0 || status.FailedOps > 0 || status.PendingContent > 0 {
 		if !force {
-			return ResetResult{Pending: status.PendingOps + status.FailedOps, Required: true}, nil
+			pending := status.PendingOps + status.FailedOps
+			if status.PendingContent > pending {
+				pending = status.PendingContent
+			}
+			return ResetResult{
+				Pending: pending, Required: true,
+			}, nil
 		}
 	}
 	if err := s.store.Close(); err != nil {
@@ -314,6 +289,9 @@ func (s *Service) Reset(force bool) (ResetResult, error) {
 		return ResetResult{}, err
 	}
 	s.store = store
+	if err := s.SweepChunkStore(); err != nil {
+		return ResetResult{}, err
+	}
 	return ResetResult{Reset: true}, nil
 }
 

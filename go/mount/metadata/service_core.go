@@ -1,7 +1,11 @@
 // Service wires durable metadata storage to a provider and local write policy.
 package metadata
 
-import "time"
+import (
+	"log"
+	"sync"
+	"time"
+)
 
 // Service exposes read/write APIs to page and mount adapters.
 type Service struct {
@@ -9,11 +13,16 @@ type Service struct {
 	backend  Backend
 	quiet    time.Duration
 	readOnly bool
+	chunkMu  sync.Mutex
 }
 
 // NewService wires a durable store to one provider backend.
 func NewService(store *Store, backend Backend) *Service {
-	return &Service{store: store, backend: backend, quiet: 10 * time.Second}
+	service := &Service{store: store, backend: backend, quiet: 10 * time.Second}
+	if err := service.SweepChunkStore(); err != nil {
+		log.Printf("[metadata/chunks] startup sweep namespace=%q err=%v", store.namespace.ID, err)
+	}
+	return service
 }
 
 // SetQuietPeriod configures local-write coalescing before remote work.

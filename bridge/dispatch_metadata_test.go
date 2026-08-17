@@ -65,10 +65,11 @@ func TestListObjectPageFromMetadataRestartsOnStaleCursor(t *testing.T) {
 	backend := newBridgeFakeBackend()
 	backend.objects["dir/"] = bridgeFakeObject("dir/", true, 0)
 	config := storageconfig.RemoteStorageConfig{
-		ProfileID:   "bridge-review-profile",
-		StorageType: storageconfig.StorageTypeS3,
-		Endpoint:    "https://example.test",
-		Bucket:      "bucket",
+		ProfileID:      "bridge-review-profile",
+		StorageType:    storageconfig.StorageTypeS3,
+		Endpoint:       "https://example.test",
+		Bucket:         "bucket",
+		CacheDirectory: t.TempDir(),
 	}
 	root := t.TempDir()
 	manager := bucketmetadata.NewManager(root)

@@ -33,8 +33,10 @@ func (m *Manager) RemoveAllForTest() {
 	}
 	m.mu.Unlock()
 	for _, entry := range managed {
+		chunkRoot := entry.service.chunkStoreRoot()
 		entry.worker.Stop()
 		_ = entry.service.Close()
+		_ = os.RemoveAll(chunkRoot)
 	}
 	_ = os.RemoveAll(m.baseDir)
 }
@@ -136,11 +138,11 @@ func (m *Manager) AcquireWithBackend(
 		existing.refs++
 		return &AcquireHandle{Service: existing.service, manager: m}, nil
 	}
-	root := filepath.Join(m.baseDir, id)
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	namespace, err := m.namespace(id, normalized, bucket)
+	if err != nil {
 		return nil, err
 	}
-	store, err := OpenStore(Namespace{ID: id, Root: root, Config: normalized, Bucket: bucket})
+	store, err := OpenStore(namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -153,11 +155,11 @@ func (m *Manager) AcquireWithBackend(
 }
 
 func (m *Manager) openService(id string, normalized storageconfig.RemoteStorageConfig, bucket string) (*managedService, error) {
-	root := filepath.Join(m.baseDir, id)
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	namespace, err := m.namespace(id, normalized, bucket)
+	if err != nil {
 		return nil, err
 	}
-	store, err := OpenStore(Namespace{ID: id, Root: root, Config: normalized, Bucket: bucket})
+	store, err := OpenStore(namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -171,6 +173,24 @@ func (m *Manager) openService(id string, normalized storageconfig.RemoteStorageC
 	managed := &managedService{service: service, worker: NewWorker(service), refs: 1}
 	m.services[id] = managed
 	return managed, nil
+}
+
+// namespace resolves the durable metadata DB root separately from the
+// user-configured cache root where content-addressed chunks are stored.
+func (m *Manager) namespace(
+	id string, normalized storageconfig.RemoteStorageConfig, bucket string,
+) (Namespace, error) {
+	root := filepath.Join(m.baseDir, id)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return Namespace{}, err
+	}
+	cacheRoot, err := storageconfig.ResolveCacheDir(normalized)
+	if err != nil {
+		return Namespace{}, err
+	}
+	return Namespace{
+		ID: id, Root: root, CacheRoot: cacheRoot, Config: normalized, Bucket: bucket,
+	}, nil
 }
 
 // Release drops one Acquire handle. Unbalanced calls are ignored so a stray
@@ -198,16 +218,31 @@ func (m *Manager) Release(handle *AcquireHandle) {
 
 // RemoveNamespace deletes one namespace database and stops its workers.
 func (m *Manager) RemoveNamespace(config storageconfig.RemoteStorageConfig, bucket string) error {
-	id := NamespaceID(config, bucket)
+	normalized := config.Normalized()
+	id := NamespaceID(normalized, bucket)
+	cacheRoot, err := storageconfig.ResolveCacheDir(normalized)
+	if err != nil {
+		return err
+	}
 	m.mu.Lock()
 	managed, ok := m.services[id]
 	if ok {
 		delete(m.services, id)
 	}
 	m.mu.Unlock()
+	chunkRoot := filepath.Join(cacheRoot, "metadata-chunks", id)
 	if ok {
+		chunkRoot = managed.service.chunkStoreRoot()
 		managed.worker.Stop()
 		_ = managed.service.Close()
+	} else if namespace, err := m.namespace(id, normalized, bucket); err == nil {
+		if store, err := OpenStore(namespace); err == nil {
+			chunkRoot = filepath.Join(store.chunkRoot, "metadata-chunks", id)
+			_ = store.Close()
+		}
+	}
+	if err := os.RemoveAll(chunkRoot); err != nil {
+		return err
 	}
 	return os.RemoveAll(filepath.Join(m.baseDir, id))
 }

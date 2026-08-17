@@ -218,10 +218,13 @@ class _SettingsCacheSectionState extends State<SettingsCacheSection> {
       return '暂无缓存';
     }
     final size = _humanizeBytes(stats.sizeBytes);
+    final protected = stats.protectedFiles > 0
+        ? ' · ${_humanizeBytes(stats.protectedBytes)} 待同步数据受保护'
+        : '';
     if (stats.fileCount == 0) {
-      return size;
+      return '$size$protected';
     }
-    return '$size · ${stats.fileCount} 个文件';
+    return '$size · ${stats.fileCount} 个文件$protected';
   }
 }
 

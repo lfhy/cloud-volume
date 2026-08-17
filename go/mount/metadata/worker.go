@@ -316,14 +316,16 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 		if err != nil {
 			return err
 		}
-		if strings.TrimSpace(ref.LocalPath) == "" {
-			return fmt.Errorf("metadata worker: inode %d write op %d has no staged content", op.InodeID, op.Seq)
-		}
 		target := s.desiredRemoteTarget(record)
 		taskID := fmt.Sprintf("metadata-op-%d", op.Seq)
-		s3ops.QueueTransfer(taskID, "upload", s.store.namespace.Bucket, target, ref.LocalPath, ref.Size)
+		localPath, err := s.spliceChunks(ref.Chunks, fmt.Sprintf("%d", op.Seq))
+		if err != nil {
+			return err
+		}
+		defer os.Remove(localPath)
+		s3ops.QueueTransfer(taskID, "upload", s.store.namespace.Bucket, target, localPath, ref.Size)
 		s3ops.SetTransferStatusDetail(taskID, "sync_wait")
-		if err := s.backend.UploadFile(ctx, s.store.namespace.Bucket, target, ref.LocalPath, taskID); err != nil {
+		if err := s.backend.UploadFile(ctx, s.store.namespace.Bucket, target, localPath, taskID); err != nil {
 			s3ops.FinishQueuedTransfer(taskID, err)
 			return err
 		}
@@ -394,11 +396,13 @@ func (w *Worker) executeMove(ctx context.Context, op Op) error {
 		if refErr != nil {
 			return refErr
 		}
-		if strings.TrimSpace(ref.LocalPath) == "" {
-			return fmt.Errorf("metadata worker: inode %d rename op %d has no staged content", op.InodeID, op.Seq)
-		}
 		taskID := fmt.Sprintf("metadata-op-%d", op.Seq)
-		if err := w.service.backend.UploadFile(ctx, w.service.store.namespace.Bucket, desiredPath, ref.LocalPath, taskID); err != nil {
+		localPath, err := w.service.spliceChunks(ref.Chunks, fmt.Sprintf("%d", op.Seq))
+		if err != nil {
+			return err
+		}
+		defer os.Remove(localPath)
+		if err := w.service.backend.UploadFile(ctx, w.service.store.namespace.Bucket, desiredPath, localPath, taskID); err != nil {
 			return err
 		}
 		if err := w.service.confirmRemote(ctx, op, record.DesiredParentID, record.DesiredName, true); err != nil {

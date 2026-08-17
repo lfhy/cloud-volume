@@ -132,7 +132,9 @@ func (b *fakeBackend) lastOperation(kind string) string {
 func newTestService(t *testing.T, backend Backend) *Service {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "metadata")
-	store, err := OpenStore(Namespace{ID: "test", Root: root, Bucket: "bucket"})
+	store, err := OpenStore(Namespace{
+		ID: "test", Root: root, CacheRoot: filepath.Join(filepath.Dir(root), "cache"), Bucket: "bucket",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

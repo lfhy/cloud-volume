@@ -390,6 +390,8 @@ class CacheStats {
     required this.exists,
     required this.sizeBytes,
     required this.fileCount,
+    this.protectedBytes = 0,
+    this.protectedFiles = 0,
     required this.lastModified,
   });
 
@@ -399,6 +401,8 @@ class CacheStats {
       exists: json['exists'] == true,
       sizeBytes: (json['sizeBytes'] ?? 0) as int,
       fileCount: (json['fileCount'] ?? 0) as int,
+      protectedBytes: (json['protectedBytes'] ?? 0) as int,
+      protectedFiles: (json['protectedFiles'] ?? 0) as int,
       lastModified: (json['lastModified'] ?? '').toString(),
     );
   }
@@ -407,6 +411,8 @@ class CacheStats {
   final bool exists;
   final int sizeBytes;
   final int fileCount;
+  final int protectedBytes;
+  final int protectedFiles;
   final String lastModified;
 }
 
@@ -417,6 +423,7 @@ class CleanCacheResult {
     required this.afterBytes,
     required this.removed,
     required this.freedBytes,
+    this.skippedProtected = 0,
   });
 
   factory CleanCacheResult.fromJson(Map<String, dynamic> json) {
@@ -425,6 +432,7 @@ class CleanCacheResult {
       afterBytes: (json['afterBytes'] ?? 0) as int,
       removed: (json['removed'] ?? 0) as int,
       freedBytes: (json['freedBytes'] ?? 0) as int,
+      skippedProtected: (json['skippedProtected'] ?? 0) as int,
     );
   }
 
@@ -432,6 +440,7 @@ class CleanCacheResult {
   final int afterBytes;
   final int removed;
   final int freedBytes;
+  final int skippedProtected;
 }
 
 class MountBucketOptions {
