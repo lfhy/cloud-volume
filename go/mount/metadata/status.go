@@ -106,7 +106,7 @@ func (s *Service) desiredRemoteTarget(record Inode) string {
 	return value
 }
 
-func (s *Service) pendingWrite(inode uint64) (Inode, ContentRef, error) {
+func (s *Service) pendingWrite(inode, generation uint64) (Inode, ContentRef, error) {
 	var record Inode
 	var ref ContentRef
 	err := s.store.view(func(tx boltTxT) error {
@@ -115,12 +115,15 @@ func (s *Service) pendingWrite(inode uint64) (Inode, ContentRef, error) {
 			return err
 		}
 		record = value
-		if record.ContentGeneration == 0 {
+		if generation == 0 {
+			generation = record.ContentGeneration
+		}
+		if generation == 0 {
 			return fmt.Errorf("metadata: inode %d has no staged content", inode)
 		}
-		raw := tx.Bucket([]byte(bucketContentRefs)).Get(contentRefKey(inode, record.ContentGeneration))
+		raw := tx.Bucket([]byte(bucketContentRefs)).Get(contentRefKey(inode, generation))
 		if raw == nil {
-			return fmt.Errorf("metadata: inode %d staged content for generation %d is missing", inode, record.ContentGeneration)
+			return fmt.Errorf("metadata: inode %d staged content for generation %d is missing", inode, generation)
 		}
 		return decodeJSON(raw, &ref)
 	})

@@ -3,6 +3,7 @@
 package metadata
 
 import (
+	"log"
 	"os"
 	"path/filepath"
 )
@@ -41,6 +42,16 @@ func (s *Service) syncChunkProtectionLocked() error {
 		return err
 	}
 	return s.writeChunkProtection(protected)
+}
+
+// syncChunkProtectionBestEffortLocked cannot change the outcome of a bbolt
+// commit. Its previous manifest is a safe over-approximation after failures,
+// so retrying a remotely completed journal operation would be worse than
+// logging and letting a later sweep repair the cache-cleaner view.
+func (s *Service) syncChunkProtectionBestEffortLocked() {
+	if err := s.syncChunkProtectionLocked(); err != nil {
+		log.Printf("[metadata/chunks] protection-sync namespace=%q err=%v", s.store.namespace.ID, err)
+	}
 }
 
 // protectChunkBeforeCommitLocked publishes a prospective chunk before moving

@@ -195,7 +195,7 @@ func (s *Service) Write(parent uint64, name string, ref ContentRef, opts WriteOp
 			return err
 		}
 		return appendOp(tx, Op{
-			Type: OpWrite, InodeID: inode, NewParent: parent, NewName: name,
+			Type: OpWrite, InodeID: inode, ContentGeneration: ref.Generation, NewParent: parent, NewName: name,
 			ExpectedRemoteFingerprint: expectedFingerprint(record), State: OpStatePending,
 			Origin: origin(opts), CreatedAtUnixNano: nowUnix(),
 			NextAttemptUnixNano: time.Now().Add(s.quiet).UnixNano(),

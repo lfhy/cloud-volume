@@ -210,6 +210,47 @@ func TestWorkerUploadsStagedWriteAndRetiresContent(t *testing.T) {
 	}
 }
 
+func TestWorkerRetiresQueuedWriteGenerationsIndependently(t *testing.T) {
+	backend := &uploadCaptureBackend{fakeBackend: newFakeBackend()}
+	service := newTestService(t, backend)
+	service.SetQuietPeriod(time.Nanosecond)
+	inode, first, err := service.StageWriteForName(rootInode, "rapid.txt", 1, strings.NewReader("first"), 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Write(rootInode, "rapid.txt", first, WriteOptions{Origin: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	_, second, err := service.StageWriteForName(rootInode, "rapid.txt", 2, strings.NewReader("second"), 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Write(rootInode, "rapid.txt", second, WriteOptions{Origin: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	worker := NewWorker(service)
+	defer worker.Stop()
+	if err := worker.Drain(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if status := service.Status(); status.PendingOps != 0 || status.PendingContent != 0 {
+		t.Fatalf("queued writes were not fully retired: %+v", status)
+	}
+	if !bytes.Equal(backend.uploadedBytes["rapid.txt"], []byte("second")) {
+		t.Fatalf("final upload = %q, want second", backend.uploadedBytes["rapid.txt"])
+	}
+	for _, ref := range []ContentRef{first, second} {
+		for _, hash := range ref.Chunks {
+			if _, err := os.Stat(service.chunkPath(hash)); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("generation %d chunk %s still exists: %v", ref.Generation, hash, err)
+			}
+		}
+	}
+	if object, err := service.StatInode(context.Background(), inode); err != nil || object.Size != 6 {
+		t.Fatalf("final inode = %+v, err=%v", object, err)
+	}
+}
+
 func TestWorkerRenameOverFileSchedulesRemoteDelete(t *testing.T) {
 	backend := newFakeBackend()
 	backend.objects["/victim.txt"] = storageops.ObjectInfo{Key: "victim.txt", Size: 1}

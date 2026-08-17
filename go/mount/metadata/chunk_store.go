@@ -205,7 +205,8 @@ func (s *Service) replaceContentRefLocked(ref ContentRef, sizes []int64) error {
 		return err
 	}
 	s.removeChunkFiles(remove)
-	return s.syncChunkProtectionLocked()
+	s.syncChunkProtectionBestEffortLocked()
+	return nil
 }
 
 // releaseContent removes one or all staged generations and decrements every
@@ -262,7 +263,8 @@ func (s *Service) releaseContent(inode uint64, generation *uint64, removeInode b
 		return err
 	}
 	s.removeChunkFiles(remove)
-	return s.syncChunkProtectionLocked()
+	s.syncChunkProtectionBestEffortLocked()
+	return nil
 }
 
 func chunkDeltas(oldHashes, newHashes []string) map[string]int64 {

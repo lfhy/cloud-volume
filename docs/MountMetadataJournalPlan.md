@@ -295,7 +295,8 @@ Phase 0 的止血修复可以并行落地，但不改变上述主线顺序。
 - [ ] 数据结构：
   - `Inode{ID, Kind(file/dir/symlink), DesiredParentID, DesiredName, RemoteParentID, RemoteName, Size, MTime, LocalRevision, RemoteFingerprint, State(local-only/pending/synced/conflict/tombstone), ContentGeneration}`
   - `Dirent{ChildID, DisplayName, NameKey}`，同一目录的 dirent 存在该目录自己的 bbolt B+Tree 中。
-  - `Op{Seq, Type(create/write/rename/mkdir/rmdir/delete), InodeID, ParentInodeIDs, ExpectedLocalRevision, ExpectedRemoteFingerprint, Origin(ui/mount/p2p/reconcile), State(pending/applying/applied/failed), Retry, LastError}`；路径只能作为审计快照，不作为执行真源。
+ - `Op{Seq, Type(create/write/rename/mkdir/rmdir/delete), InodeID, ParentInodeIDs, ExpectedLocalRevision, ExpectedRemoteFingerprint, Origin(ui/mount/p2p/reconcile), State(pending/applying/applied/failed), Retry, LastError}`；路径只能作为审计快照，不作为执行真源。
+  - `Op.Write` 额外固定 `ContentGeneration`，执行时只能读取该 generation 的块列表；连续写同一 inode 时每个操作独立上传/retire，不能回读 inode 当前 generation。
   - `ListingCursor{DirectoryInodeID, DirectoryRevision, LastNameKey, RemoteCursor, VerifiedAt, RemoteRevHint}`。
 - [ ] 单事务保证：本地视图变更 + journal append 原子提交。
 - [ ] 实现 `Rename(inode, destinationParent, destinationName)` 单事务：两个 dirent B+Tree 更新 + 一个 inode 边更新 + journal append；不枚举子孙 inode，不移动子孙内容文件。实现目标覆盖、非空目录、ancestor cycle、case/Unicode collision 的明确错误语义。

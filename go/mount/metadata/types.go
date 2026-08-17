@@ -109,6 +109,7 @@ type Op struct {
 	Seq                       uint64 `json:"seq"`
 	Type                      OpType `json:"type"`
 	InodeID                   uint64 `json:"inodeId"`
+	ContentGeneration         uint64 `json:"contentGeneration,omitempty"`
 	OldParent                 uint64 `json:"oldParent"`
 	NewParent                 uint64 `json:"newParent"`
 	OldName                   string `json:"oldName"`

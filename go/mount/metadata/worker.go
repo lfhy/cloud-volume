@@ -312,7 +312,7 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 		}
 		return s.confirmRemote(ctx, op, parentID, name, false)
 	case OpWrite:
-		record, ref, err := s.pendingWrite(op.InodeID)
+		record, ref, err := s.pendingWrite(op.InodeID, op.ContentGeneration)
 		if err != nil {
 			return err
 		}
@@ -392,7 +392,7 @@ func (w *Worker) executeMove(ctx context.Context, op Op) error {
 			}
 			return w.service.confirmRemote(ctx, op, record.DesiredParentID, record.DesiredName, false)
 		}
-		_, ref, refErr := w.service.pendingWrite(op.InodeID)
+		_, ref, refErr := w.service.pendingWrite(op.InodeID, 0)
 		if refErr != nil {
 			return refErr
 		}
