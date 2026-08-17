@@ -210,7 +210,13 @@ metadata.db
 - `metadata.Service.ListDirectory(path)` and `RefreshDirectory(path)` hide root inode and page-cursor details from mount adapters. Provider keys are accepted as either directory-relative or view-relative, but deep descendants returned by a malformed one-level listing are rejected instead of being flattened into the wrong directory.
 - `bucketAccess.listDirectory`, `statPath`, `ensureLocalFile`, WebDAV/FUSE/WinFsp callers, Cloud Files remote placeholder enumeration/stat, and the bounded remote poller now use that persistent metadata tree whenever the mount has a `ProfileID`. The unscoped mount backend remains only for byte transfer after the metadata path has authorized the object.
 - Metadata is the remote base, not an overlay replacement: system overlay and mount-trash handling stay first; legacy tombstones hide both exact paths and descendants; local files, restored writeback records, and directory markers override the base. File/directory collision merging is keyed by normalized path, so `name` and `name/` cannot render twice. Restored durable uploads repopulate their local cache marker before the first read.
-- Remote polling re-materializes the persistent directory then gives Cloud Files its metadata-only remote base; placeholder refresh also preserves local directory markers as well as pending writeback and tombstones. Stable platform OID projection and Desired+journal writes remain M5/M6 work.
+- Remote polling re-materializes the persistent directory then gives Cloud Files its metadata-only remote base; placeholder refresh also preserves local directory markers as well as pending writeback and tombstones. Desired+journal writes remain M6 work.
+
+### M5 stable platform identity (completed 2026-08-17)
+
+- Metadata-backed Linux FUSE nodes use their persistent OID for `StableAttr.Ino`; lookup, readdir, and getattr agree. Legacy local-only entries intentionally retain their path-hash fallback until M6 creates their Desired inode.
+- WinFsp enables `use_ino`, carries OIDs through cached directory/open-file projections, and publishes them through `Stat_t.Ino`/Explorer's file-index path. The root also resolves to metadata inode 1 when a namespace is available.
+- Cloud Files encodes `cloud-volume:v1:<namespace>:<oid>` in `FileIdentity`. Its remote fingerprint is now separate, so a same-OID, same-size ETag/mtime overwrite still updates/dehydrates the placeholder. Poll callbacks preserve OID-bearing metadata objects instead of downcasting them before projection.
 
 ## 推荐实施顺序（锁定）
 
@@ -287,7 +293,7 @@ Phase 0 的止血修复可以并行落地，但不改变上述主线顺序。
 2. **M2 物化与读 API**：远端 listing ingest、listing_state、ListPage/Stat/Path、stale cursor、分页 API。
 3. **M3 mount 读接入（已完成）**：WebDAV/FUSE/WinFsp/Cloud Files readdir/stat 全部改读 metadata；本地 overlay 保持旁路，轮询刷新同一持久远端基底。
 4. **M4 页面读接入**：bridge list/stat 改走 metadata；删除 ListMountedObjectPage 会话分支；页面分页适配 stale cursor。
-5. **M5 rename 事务与内部身份关联**：inode rename；各平台 adapter 保证展示文件号能稳定解析回 OID（Linux FUSE 可 `Ino=OID`，WinFsp/Cloud Files 可直用或查表，macOS WebDAV 保持内部映射）。
+5. **M5 rename 事务与内部身份关联（已完成）**：inode rename；各平台 adapter 保证 metadata-backed 项的展示文件号能稳定解析回 OID（Linux FUSE 直接用 `Ino=OID`，WinFsp/Cloud Files 直用 OID，macOS WebDAV 保持内部映射）。
 6. **M6 写入口最小同步**：mount/page 写操作更新 Desired+journal；远端成功点 ingest Remote 状态。
 7. **M7 一致性与验收**：双端视图一致性测试、rename 复杂度测试、重建测试、全量 `go test ./...` + `flutter analyze`。
 

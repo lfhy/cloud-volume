@@ -29,6 +29,13 @@ func (a *bucketAccess) metadataService() *metadata.Service {
 	return a.metadataHandle.Service
 }
 
+func (a *bucketAccess) metadataNamespaceID() string {
+	if service := a.metadataService(); service != nil {
+		return service.NamespaceID()
+	}
+	return ""
+}
+
 func (a *bucketAccess) metadataDirectory(
 	ctx context.Context,
 	virtualPrefix string,
@@ -74,6 +81,58 @@ func (a *bucketAccess) metadataStat(
 		return metadataMountObject{}, metadataMountReadError(err)
 	}
 	return metadataMountObjectFrom(object)
+}
+
+// metadataOIDForVisiblePath returns an OID only when metadata owns the visible
+// entry. Legacy local drafts remain intentionally unprojected until M6 writes
+// them into the Desired tree instead of manufacturing a path-derived identity.
+func (a *bucketAccess) metadataOIDForVisiblePath(ctx context.Context, virtualPath string) (uint64, bool) {
+	clean := cleanVirtualPath(virtualPath)
+	if a == nil || a.metadataService() == nil {
+		return 0, false
+	}
+	if a.overlay != nil && a.overlay.handles(clean) {
+		return 0, false
+	}
+	if a.cache != nil {
+		if a.cache.isMarkedDeleted(clean) {
+			return 0, false
+		}
+		if _, local := a.cache.localEntry(clean); local {
+			return 0, false
+		}
+		if a.cache.isLocalDirectory(parentVirtualPrefix(clean)) {
+			return 0, false
+		}
+	}
+	item, err := a.metadataStat(ctx, clean)
+	if err != nil || item.inode == 0 {
+		return 0, false
+	}
+	return item.inode, true
+}
+
+func (a *bucketAccess) metadataOIDMap(ctx context.Context, virtualPrefix string) map[string]uint64 {
+	if a == nil || a.metadataService() == nil {
+		return nil
+	}
+	items, err := a.metadataDirectory(ctx, virtualPrefix, false)
+	if err != nil {
+		return nil
+	}
+	result := make(map[string]uint64, len(items))
+	for _, item := range items {
+		path := cleanVirtualPath(item.info.Key)
+		if a.cache != nil {
+			if _, local := a.cache.localEntry(path); local || a.cache.isMarkedDeleted(path) {
+				continue
+			}
+		}
+		if item.inode != 0 {
+			result[path] = item.inode
+		}
+	}
+	return result
 }
 
 func metadataMountObjectFrom(object metadata.Object) (metadataMountObject, error) {

@@ -144,6 +144,12 @@ func (b *windowsCloudFilesBackend) Start(session *mountSession) error {
 	) error {
 		return hydrator.RefreshPlaceholders(virtualPrefix, items)
 	}
+	session.access.externalMetadataDirectoryRefresh = func(
+		virtualPrefix string,
+		items []metadataMountObject,
+	) error {
+		return hydrator.RefreshMetadataPlaceholders(virtualPrefix, items)
+	}
 	b.resetHealthState()
 	if err := b.checkHealthy(session, true); err != nil {
 		log.Printf(
@@ -234,6 +240,7 @@ func (b *windowsCloudFilesBackend) Stop(session *mountSession) error {
 	if session.access != nil {
 		session.access.syncState = nil
 		session.access.externalDirectoryRefresh = nil
+		session.access.externalMetadataDirectoryRefresh = nil
 		log.Printf("[mount/cloud-files] stop-phase bucket=%q step=access-close-start", session.bucket)
 		session.access.release()
 		log.Printf("[mount/cloud-files] stop-phase bucket=%q step=access-close-done err=%v", session.bucket, firstErr)

@@ -69,7 +69,10 @@ type bucketAccess struct {
 	// externalDirectoryRefresh lets a platform projection materialize entries
 	// found by the P0 remote-polling path without treating them as local writes.
 	externalDirectoryRefresh func(virtualPrefix string, items []s3ops.ObjectInfo) error
-	directoryActivity        *directoryActivityTracker
+	// externalMetadataDirectoryRefresh preserves metadata OIDs for platform
+	// projections that can encode a stable object identity (Cloud Files).
+	externalMetadataDirectoryRefresh func(virtualPrefix string, items []metadataMountObject) error
+	directoryActivity                *directoryActivityTracker
 }
 
 func newBucketAccess(

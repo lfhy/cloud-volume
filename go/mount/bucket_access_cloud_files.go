@@ -17,14 +17,29 @@ func (a *bucketAccess) listRemoteDirectory(
 	ctx context.Context,
 	virtualPrefix string,
 ) ([]s3ops.ObjectInfo, error) {
-	if a.metadataService() != nil {
-		items, err := a.metadataDirectory(ctx, virtualPrefix, false)
-		if err != nil {
-			return nil, err
-		}
-		return metadataObjectInfos(items), nil
+	items, err := a.listRemoteDirectoryMetadata(ctx, virtualPrefix)
+	if err != nil {
+		return nil, err
 	}
-	return a.fetchDirectory(ctx, virtualPrefix)
+	return metadataObjectInfos(items), nil
+}
+
+func (a *bucketAccess) listRemoteDirectoryMetadata(
+	ctx context.Context,
+	virtualPrefix string,
+) ([]metadataMountObject, error) {
+	if a.metadataService() != nil {
+		return a.metadataDirectory(ctx, virtualPrefix, false)
+	}
+	items, err := a.fetchDirectory(ctx, virtualPrefix)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]metadataMountObject, 0, len(items))
+	for _, item := range items {
+		result = append(result, metadataMountObject{info: item})
+	}
+	return result, nil
 }
 
 func (a *bucketAccess) statRemotePath(

@@ -5,6 +5,7 @@ package mount
 
 import (
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +26,7 @@ type cloudPlaceholderInfo struct {
 	FileSize     int64
 	ModTime      time.Time
 	FileID       string
+	Fingerprint  string
 	IsDirectory  bool
 }
 
@@ -99,18 +101,38 @@ func cloudFilesPlaceholderInfo(info s3ops.ObjectInfo) cloudPlaceholderInfo {
 		FileSize:     info.Size,
 		ModTime:      cloudFilesObjectModTime(info),
 		FileID:       cloudFilesObjectIdentity(info),
+		Fingerprint:  cloudFilesObjectFingerprint(info),
 		IsDirectory:  info.IsDir,
 	}
 }
 
-// cloudFilesObjectIdentity includes the ETag when present so a same-size
-// overwrite in the same timestamp tick still dehydrates stale Explorer bytes.
+func cloudFilesMetadataPlaceholderInfo(
+	item metadataMountObject,
+	namespace string,
+) cloudPlaceholderInfo {
+	placeholder := cloudFilesPlaceholderInfo(item.info)
+	if item.inode != 0 && namespace != "" {
+		placeholder.FileID = "cloud-volume:v1:" + namespace + ":" + strconv.FormatUint(item.inode, 10)
+	}
+	return placeholder
+}
+
+// cloudFilesObjectIdentity remains the legacy fallback when no metadata OID is
+// available; metadata-backed placeholders use a namespace-qualified OID while
+// cloudFilesObjectFingerprint independently drives dehydration.
 func cloudFilesObjectIdentity(info s3ops.ObjectInfo) string {
 	identity := info.Key
 	if etag := strings.TrimSpace(info.ETag); etag != "" {
 		identity += "\x1f" + etag
 	}
 	return identity
+}
+
+func cloudFilesObjectFingerprint(info s3ops.ObjectInfo) string {
+	return strings.Join([]string{
+		cleanVirtualPath(info.Key), strings.TrimSpace(info.ETag), info.LastModified,
+		strconv.FormatInt(info.Size, 10), strconv.FormatBool(info.IsDir),
+	}, "\x1f")
 }
 
 func isWindowsLocalOnlyPath(virtualPath string) bool {

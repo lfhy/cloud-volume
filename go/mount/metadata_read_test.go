@@ -182,6 +182,30 @@ func TestMetadataPollRefreshesPersistentRemoteBase(t *testing.T) {
 	}
 }
 
+func TestMetadataOIDOnlyProjectsVisibleMetadataObjects(t *testing.T) {
+	access := newTestBucketAccess(t)
+	backend := &metadataReadTestBackend{objects: map[string]storageops.ObjectInfo{
+		"remote.txt": {Key: "remote.txt", Size: 3},
+	}}
+	attachMetadataReadService(t, access, backend)
+	if _, err := access.listDirectory(context.Background(), ""); err != nil {
+		t.Fatalf("materialize metadata: %v", err)
+	}
+	first, ok := access.metadataOIDForVisiblePath(context.Background(), "remote.txt")
+	if !ok || first == 0 {
+		t.Fatalf("metadata object did not receive OID: oid=%d ok=%t", first, ok)
+	}
+	if namespace := access.metadataNamespaceID(); namespace == "" {
+		t.Fatal("metadata-backed access lost namespace identity")
+	}
+
+	localPath := createTempFile(t, access.cacheRoot, "remote.txt", "draft")
+	access.registerLocalWrite("remote.txt", localPath, 5)
+	if oid, ok := access.metadataOIDForVisiblePath(context.Background(), "remote.txt"); ok || oid != 0 {
+		t.Fatalf("legacy local draft received metadata OID: oid=%d ok=%t", oid, ok)
+	}
+}
+
 func objectKeys(items []storageops.ObjectInfo) map[string]bool {
 	keys := make(map[string]bool, len(items))
 	for _, item := range items {

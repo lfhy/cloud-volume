@@ -91,5 +91,14 @@ func (s *Service) isReadOnly() bool {
 // Store exposes the underlying store for lifecycle ownership.
 func (s *Service) Store() *Store { return s.store }
 
+// NamespaceID returns the durable namespace identity used in platform object
+// projections without exposing the rest of the storage implementation.
+func (s *Service) NamespaceID() string {
+	if s == nil || s.store == nil {
+		return ""
+	}
+	return s.store.namespace.ID
+}
+
 // Backend exposes the current provider backend for remote worker execution.
 func (s *Service) Backend() Backend { return s.backendSnapshot() }

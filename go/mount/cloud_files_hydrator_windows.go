@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 )
@@ -149,21 +148,11 @@ func (h *cloudFilesHydrator) OnFetchPlaceholders(localPath string) (resultErr er
 		localPath,
 		virtualPath,
 	)
-	items, err := h.access.listRemoteDirectory(context.Background(), virtualPath)
+	items, err := h.access.listRemoteDirectoryMetadata(context.Background(), virtualPath)
 	if err != nil {
 		return fmt.Errorf("list remote directory %q: %w", virtualPath, err)
 	}
-
-	placeholders := make([]cloudPlaceholderInfo, 0, len(items))
-	for _, item := range items {
-		relativeName := strings.TrimSuffix(baseName(item.Key), "/")
-		if relativeName == "" {
-			continue
-		}
-		placeholder := cloudFilesPlaceholderInfo(item)
-		placeholder.RelativePath = relativeName
-		placeholders = append(placeholders, placeholder)
-	}
+	placeholders := cloudFilesMetadataDirectoryPlaceholders(items, h.access.metadataNamespaceID())
 	log.Printf(
 		"[mount/cloud-files] fetch-placeholders-done local=%q virtual=%q count=%d",
 		localPath,
