@@ -2,13 +2,13 @@
 package metadata
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
-	"path"
 	"strings"
-	"time"
 
 	storageops "remote-storage/go/storage"
 )
@@ -105,28 +105,28 @@ func (s *Service) pendingWrite(inode uint64) (Inode, ContentRef, error) {
 			return err
 		}
 		record = value
+		if record.ContentGeneration == 0 {
+			return fmt.Errorf("metadata: inode %d has no staged content", inode)
+		}
 		raw := tx.Bucket([]byte(bucketContentRefs)).Get(contentRefKey(inode, record.ContentGeneration))
 		if raw == nil {
-			if record.RemoteFingerprint == "" {
-				return fmt.Errorf("metadata: inode %d has no staged content", inode)
-			}
-			return nil
+			return fmt.Errorf("metadata: inode %d staged content for generation %d is missing", inode, record.ContentGeneration)
 		}
 		return decodeJSON(raw, &ref)
 	})
 	return record, ref, err
 }
 
-func (s *Service) confirmRemote(ctx context.Context, inode, parent uint64, name string, isFile bool) error {
-	record, err := s.remoteTarget(inode)
-	if err != nil {
+func (s *Service) confirmRemote(ctx context.Context, op Op, parent uint64, name string, isFile bool) error {
+	inode := op.InodeID
+	if _, err := s.remoteTarget(inode); err != nil {
 		return err
 	}
-	target := record.RemoteName
-	if record.RemoteParentID != 0 && target == record.DesiredName {
-		if desired, pathErr := s.Path(inode); pathErr == nil {
-			target = desired
-		}
+	// The desired path is authoritative for confirmation: RemoteName reflects
+	// the previous remote location, which may be stale after a local rename.
+	target, pathErr := s.Path(inode)
+	if pathErr != nil {
+		target = name
 	}
 	info, headErr := s.backend.HeadObject(ctx, s.store.namespace.Bucket, RemoteKey(target))
 	if headErr != nil {
@@ -140,6 +140,13 @@ func (s *Service) confirmRemote(ctx context.Context, inode, parent uint64, name 
 	fingerprint := Fingerprint(storageops.ObjectInfo{
 		Size: info.Size, LastModified: info.LastModified, ETag: info.ETag,
 	})
+	// A provider change that happened under a previously confirmed object is a
+	// conflict, not a successful update, unless this operation is the write that
+	// introduced the object (no prior remote identity).
+	expected := strings.TrimSpace(op.ExpectedRemoteFingerprint)
+	if expected != "" && expected != fingerprint {
+		return fmt.Errorf("%w: expected=%s actual=%s", errConflict, expected, fingerprint)
+	}
 	return s.commitConfirmation(inode, parent, name, fingerprint)
 }
 
@@ -167,7 +174,9 @@ func (s *Service) retireContent(inode, generation uint64) error {
 	if err != nil {
 		return err
 	}
-	_ = os.RemoveAll(path.Dir(contentRefDirPath(s, inode, generation)))
+	// Remove only the exact generation file; a newer staged generation for the
+	// same inode must survive concurrent uploads.
+	_ = os.Remove(contentRefDirPath(s, inode, generation))
 	return nil
 }
 
@@ -176,7 +185,20 @@ func (s *Service) deleteInodeRecord(inode uint64) error {
 		if err := tx.Bucket([]byte(bucketInodes)).Delete(encodeUint64(inode)); err != nil {
 			return err
 		}
-		return tx.Bucket([]byte(bucketContentRefs)).Delete(encodeUint64(inode))
+		refs := tx.Bucket([]byte(bucketContentRefs))
+		prefix := make([]byte, 8)
+		binary.BigEndian.PutUint64(prefix, inode)
+		cursor := refs.Cursor()
+		for key, value := cursor.Seek(prefix); key != nil && bytes.HasPrefix(key, prefix); key, value = cursor.Next() {
+			var ref ContentRef
+			if decodeJSON(value, &ref) == nil && strings.TrimSpace(ref.LocalPath) != "" {
+				_ = os.Remove(ref.LocalPath)
+			}
+			if err := cursor.Delete(); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 
@@ -189,7 +211,8 @@ func markInodeConflict(tx boltTxT, inode uint64) error {
 	return putInode(tx, record)
 }
 
-func getOp(tx boltTxT, seq uint64) (Op, error) {
+func getOp(tx boltTx, seq uint64) (Op, error) {
+
 	raw := tx.Bucket([]byte(bucketJournal)).Get(encodeUint64(seq))
 	if raw == nil {
 		return Op{}, ErrNotFound
@@ -284,5 +307,3 @@ func (s *Service) Reset(force bool) (ResetResult, error) {
 
 // Close releases the backing database.
 func (s *Service) Close() error { return s.store.Close() }
-
-var _ = time.Now

@@ -36,6 +36,12 @@ func (s *Service) MaterializeDirectory(ctx context.Context, dirInode uint64) err
 			}
 			return nil
 		})
+		priorByKey := map[string]Inode{}
+		for key, dirent := range remoteByKey {
+			if prior, err := getInode(tx, dirent.ChildID); err == nil {
+				priorByKey[key] = prior
+			}
+		}
 		nextByKey := map[string]Dirent{}
 		for _, item := range items {
 			name, isDir, err := splitListedName(item.Key)
@@ -57,17 +63,23 @@ func (s *Service) MaterializeDirectory(ctx context.Context, dirInode uint64) err
 				Size: item.Size, MTime: item.LastModified, ETag: item.ETag,
 				RemoteFingerprint: Fingerprint(item), State: StateSynced,
 			}
-			if existing.ChildID != 0 {
-				if prior, err := getInode(tx, inode); err == nil {
-					if prior.State == StatePending || prior.State == StateConflict {
-						record.State = prior.State
-						record.DesiredParentID, record.DesiredName = prior.DesiredParentID, prior.DesiredName
-						record.LocalRevision = prior.LocalRevision
-					}
-				}
-			}
 			if isDir {
 				record.Kind = KindDirectory
+			}
+			// Preserve the whole prior record for local pending work. Rebuilding
+			// it from provider data would drop ContentGeneration and orphan
+			// staged pending content in pending-content/.
+			if prior, ok := priorByKey[nameKey]; ok && (prior.State == StatePending || prior.State == StateConflict) {
+				desiredParent, desiredName, state := record.DesiredParentID, record.DesiredName, record.State
+				record = prior
+				record.Kind = KindFile
+				if isDir {
+					record.Kind = KindDirectory
+				}
+				record.RemoteParentID, record.RemoteName = dirInode, name
+				record.ETag = item.ETag
+				record.RemoteFingerprint = Fingerprint(item)
+				record.DesiredParentID, record.DesiredName, record.State = desiredParent, desiredName, state
 			}
 			if err := putInode(tx, record); err != nil {
 				return err
@@ -78,8 +90,7 @@ func (s *Service) MaterializeDirectory(ctx context.Context, dirInode uint64) err
 			if _, ok := nextByKey[key]; ok {
 				continue
 			}
-			child, err := getInode(tx, dirent.ChildID)
-			if err == nil && (child.State == StatePending || child.State == StateConflict) {
+			if prior, ok := priorByKey[key]; ok && (prior.State == StatePending || prior.State == StateConflict) {
 				nextByKey[key] = dirent
 			}
 		}

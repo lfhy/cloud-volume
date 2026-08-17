@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,13 +44,12 @@ func DefaultManager() (*Manager, error) {
 }
 
 // NamespaceID derives a collision-safe namespace from account and view identity.
+// Callers must persist and supply ProfileID; the fallback exists only for
+// diagnostics/tests and must not create durable namespaces for saved profiles.
 func NamespaceID(config storageconfig.RemoteStorageConfig, bucket string) string {
 	normalized := config.Normalized()
 	profile := normalized.ProfileID
-
 	if profile == "" {
-		// Older in-flight configs can still bootstrap metadata before a
-		// persisted ProfileID exists; derive one from immutable backend fields.
 		profile = "unversioned-" + strings.ToLower(normalized.StorageType+"-"+normalized.Endpoint+"-"+normalized.AccessKeyID)
 	}
 	raw := strings.Join([]string{
@@ -64,50 +64,84 @@ func NamespaceID(config storageconfig.RemoteStorageConfig, bucket string) string
 	return hex.EncodeToString(sum[:16])
 }
 
-// Acquire returns a retained service, creating its bbolt namespace on demand.
-func (m *Manager) Acquire(config storageconfig.RemoteStorageConfig, bucket string) (*Service, error) {
-	id := NamespaceID(config, bucket)
+// AcquireHandle pairs a retained service with the manager handle used to
+// release it. Holding the handle prevents premature worker/database shutdown.
+type AcquireHandle struct {
+	Service *Service
+	manager *Manager
+}
+
+// Acquire returns a retained service handle, creating its bbolt namespace on
+// demand. A missing ProfileID is an error: a namespace derived from mutable
+// fallback fields would silently split/merge accounts after identity assignment.
+func (m *Manager) Acquire(config storageconfig.RemoteStorageConfig, bucket string) (*AcquireHandle, error) {
+	normalized := config.Normalized()
+	if normalized.ProfileID == "" {
+		return nil, fmt.Errorf("metadata: profile has no profileId; save the profile before acquiring metadata")
+	}
+	id := NamespaceID(normalized, bucket)
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	var managed *managedService
 	if existing, ok := m.services[id]; ok {
 		existing.refs++
-		return existing.service, nil
+		// Refresh per-acquisition policy so a later bucket read-only or quiet
+		// setting change is honored by the retained namespace service.
+		existing.service.SetQuietPeriod(quietDuration(normalized))
+		existing.service.SetReadOnly(normalized.BucketSettingsFor(bucket).ReadOnly)
+		managed = existing
+	} else {
+		service, err := m.openService(id, normalized, bucket)
+		if err != nil {
+			return nil, err
+		}
+		managed = service
 	}
+	return &AcquireHandle{Service: managed.service, manager: m}, nil
+}
+
+func (m *Manager) openService(id string, normalized storageconfig.RemoteStorageConfig, bucket string) (*managedService, error) {
 	root := filepath.Join(m.baseDir, id)
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, err
 	}
-	store, err := OpenStore(Namespace{ID: id, Root: root, Config: config.Normalized(), Bucket: bucket})
+	store, err := OpenStore(Namespace{ID: id, Root: root, Config: normalized, Bucket: bucket})
 	if err != nil {
 		return nil, err
 	}
-	backend := storageops.ForConfig(config.Normalized())
-	service := NewService(store, backend)
-	service.SetQuietPeriod(quietDuration(config))
-	service.SetReadOnly(config.BucketSettingsFor(bucket).ReadOnly)
-	managed := &managedService{service: service, worker: NewWorker(service)}
+	// The namespace already encodes RootPrefix. Clear it before building the
+	// provider backend, otherwise scopedBackend would prefix keys twice.
+	backendCfg := normalized
+	backendCfg.RootPrefix = ""
+	service := NewService(store, storageops.ForConfig(backendCfg))
+	service.SetQuietPeriod(quietDuration(normalized))
+	service.SetReadOnly(normalized.BucketSettingsFor(bucket).ReadOnly)
+	managed := &managedService{service: service, worker: NewWorker(service), refs: 1}
 	m.services[id] = managed
-	return service, nil
+	return managed, nil
 }
 
-// Release drops one reference, stopping the worker when the last holder leaves.
-func (m *Manager) Release(config storageconfig.RemoteStorageConfig, bucket string) {
-	id := NamespaceID(config, bucket)
+// Release drops one Acquire handle. Unbalanced calls are ignored so a stray
+// release cannot close a namespace another holder still uses.
+func (m *Manager) Release(handle *AcquireHandle) {
+	if handle == nil || handle.Service == nil || handle.manager != m {
+		return
+	}
 	m.mu.Lock()
-	managed, ok := m.services[id]
-	if !ok {
-		m.mu.Unlock()
+	defer m.mu.Unlock()
+	for id, managed := range m.services {
+		if managed.service != handle.Service {
+			continue
+		}
+		managed.refs--
+		if managed.refs > 0 {
+			return
+		}
+		delete(m.services, id)
+		managed.worker.Stop()
+		_ = managed.service.Close()
 		return
 	}
-	managed.refs--
-	if managed.refs > 0 {
-		m.mu.Unlock()
-		return
-	}
-	delete(m.services, id)
-	m.mu.Unlock()
-	managed.worker.Stop()
-	_ = managed.service.Close()
 }
 
 // RemoveNamespace deletes one namespace database and stops its workers.

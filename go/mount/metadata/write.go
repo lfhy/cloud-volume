@@ -92,12 +92,13 @@ func (s *Service) StageWrite(inode, generation uint64, source io.Reader, size in
 	}
 	written, copyErr := io.Copy(file, source)
 	closeErr := file.Close()
-	if copyErr == nil {
-		copyErr = closeErr
-	}
 	if copyErr != nil {
 		_ = os.Remove(target)
 		return ContentRef{}, copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(target)
+		return ContentRef{}, closeErr
 	}
 	if err := syncFileAndParent(target); err != nil {
 		return ContentRef{}, err
@@ -116,8 +117,63 @@ func (s *Service) StageWrite(inode, generation uint64, source io.Reader, size in
 	return ref, err
 }
 
+// StageWriteForName allocates (if needed) and returns the target inode before
+// copying durable pending content. Call Write after staging to journal the op.
+func (s *Service) StageWriteForName(parent uint64, name string, generation uint64, source io.Reader, size int64) (uint64, ContentRef, error) {
+	if s.readOnly {
+		return 0, ContentRef{}, ErrReadOnly
+	}
+	inode, err := s.ensureWriteInode(parent, name)
+	if err != nil {
+		return 0, ContentRef{}, err
+	}
+	ref, err := s.StageWrite(inode, generation, source, size)
+	return inode, ref, err
+}
+
+func (s *Service) ensureWriteInode(parent uint64, name string) (uint64, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || strings.Contains(name, "/") {
+		return 0, fmt.Errorf("metadata: file name is required")
+	}
+	nameKey := MakeNameKey(name)
+	var inode uint64
+	err := s.store.update(func(tx boltTxT) error {
+		parentRecord, err := getInode(tx, parent)
+		if err != nil {
+			return err
+		}
+		if parentRecord.Kind != KindDirectory {
+			return fmt.Errorf("metadata: parent %d is not a directory", parent)
+		}
+		existing, direntErr := getDirent(tx, parent, nameKey)
+		if direntErr == nil {
+			inode = existing.ChildID
+			return nil
+		}
+		if !errors.Is(direntErr, ErrNotFound) {
+			return direntErr
+		}
+		inode, err = allocateInode(tx)
+		if err != nil {
+			return err
+		}
+		record := Inode{ID: inode, Kind: KindFile, DesiredParentID: parent, DesiredName: name, State: StatePending, LocalRevision: 1}
+		if err := putInode(tx, record); err != nil {
+			return err
+		}
+		if err := putDirent(tx, parent, Dirent{ChildID: inode, DisplayName: name, NameKey: nameKey}); err != nil {
+			return err
+		}
+		parentRecord.LocalRevision++
+		return putInode(tx, parentRecord)
+	})
+	return inode, err
+}
+
 // Write records desired file content for an existing or new inode.
 func (s *Service) Write(parent uint64, name string, ref ContentRef, opts WriteOptions) (uint64, error) {
+
 	if s.readOnly {
 		return 0, ErrReadOnly
 	}
@@ -143,7 +199,7 @@ func (s *Service) Write(parent uint64, name string, ref ContentRef, opts WriteOp
 			if err != nil {
 				return err
 			}
-			if err := putInode(tx, Inode{ID: inode, Kind: KindFile, DesiredParentID: parent, DesiredName: name, State: StatePending, LocalRevision: 1}); err != nil {
+			if err := putInode(tx, Inode{ID: inode, Kind: KindFile, DesiredParentID: parent, DesiredName: name, State: StatePending, LocalRevision: 1, ContentGeneration: ref.Generation}); err != nil {
 				return err
 			}
 			if err := putDirent(tx, parent, Dirent{ChildID: inode, DisplayName: name, NameKey: nameKey}); err != nil {
@@ -174,7 +230,8 @@ func (s *Service) Write(parent uint64, name string, ref ContentRef, opts WriteOp
 		}
 		return appendOp(tx, Op{
 			Type: OpWrite, InodeID: inode, NewParent: parent, NewName: name,
-			State: OpStatePending, Origin: origin(opts), CreatedAtUnixNano: nowUnix(),
+			ExpectedRemoteFingerprint: expectedFingerprint(record), State: OpStatePending,
+			Origin: origin(opts), CreatedAtUnixNano: nowUnix(),
 			NextAttemptUnixNano: time.Now().Add(s.quiet).UnixNano(),
 		})
 	})
@@ -226,6 +283,9 @@ func (s *Service) Rename(inode, newParent uint64, newName string, opts WriteOpti
 				return err
 			}
 			if err := deleteDirent(tx, newParent, nameKey); err != nil {
+				return err
+			}
+			if err := appendReplacedDelete(tx, targetRecord, opts); err != nil {
 				return err
 			}
 		} else if !errors.Is(err, ErrNotFound) {
@@ -307,6 +367,9 @@ func markTombstone(tx boltTxT, inode uint64) error {
 	if err != nil {
 		return err
 	}
+	if record.State == StateTombstone {
+		return nil
+	}
 	record.State = StateTombstone
 	record.LocalRevision++
 	return putInode(tx, record)
@@ -331,14 +394,26 @@ func ensureNotDescendant(tx boltTxT, inode, candidate uint64) error {
 
 func appendOp(tx boltTxT, op Op) error {
 	journal := tx.Bucket([]byte(bucketJournal))
-	seq := uint64(journal.Stats().KeyN) + 1
-	// KeyN can be stale after compaction; derive from the last key instead.
 	cursor := journal.Cursor()
+	seq := uint64(1)
 	if key, _ := cursor.Last(); key != nil {
 		seq = decodeUint64(key) + 1
 	}
 	op.Seq = seq
-	return putOp(tx, op)
+	return putOp(tx, op, Op{})
+}
+
+func appendReplacedDelete(tx boltTxT, victim Inode, opts WriteOptions) error {
+	if victim.RemoteParentID == 0 && victim.RemoteName == "" {
+		// The replaced inode never reached the provider, so no remote delete is
+		// needed; its tombstone already hides it from desired listings.
+		return nil
+	}
+	return appendOp(tx, Op{
+		Type: OpDelete, InodeID: victim.ID, OldParent: victim.RemoteParentID,
+		OldName: victim.RemoteName, State: OpStatePending, Origin: origin(opts),
+		CreatedAtUnixNano: nowUnix(), NextAttemptUnixNano: nowUnix(),
+	})
 }
 
 func origin(opts WriteOptions) string {
@@ -348,21 +423,40 @@ func origin(opts WriteOptions) string {
 	return "local"
 }
 
+func expectedFingerprint(record Inode) string {
+	if record.RemoteParentID == 0 {
+		return ""
+	}
+	return record.RemoteFingerprint
+}
+
 func oldParent(record Inode) uint64 { return record.RemoteParentID }
 
 func nowUnix() int64 { return time.Now().UnixNano() }
 
 func syncFileAndParent(path string) error {
 	file, err := os.Open(path)
-	if err == nil {
-		_ = file.Sync()
-		_ = file.Close()
+	if err != nil {
+		return err
 	}
-	if dir, err := os.Open(filepath.Dir(path)); err == nil {
-		_ = dir.Sync()
-		_ = dir.Close()
+	syncErr := file.Sync()
+	closeErr := file.Close()
+	if syncErr != nil {
+		return syncErr
 	}
-	return nil
+	if closeErr != nil {
+		return closeErr
+	}
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	syncErr = dir.Sync()
+	closeErr = dir.Close()
+	if syncErr != nil {
+		return syncErr
+	}
+	return closeErr
 }
 
 func contentRefKey(inode, generation uint64) []byte {

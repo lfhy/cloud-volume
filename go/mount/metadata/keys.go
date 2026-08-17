@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
-	"sort"
 	"strings"
 
 	"golang.org/x/text/unicode/norm"
@@ -122,7 +121,10 @@ func getListingState(tx boltTx, inode uint64) (ListingState, error) {
 	return state, nil
 }
 
-func putOp(tx boltTx, op Op) error {
+// putOp stores one journal operation and keeps its ready_ops scheduling index
+// consistent with the previous state. The caller passes the prior op record so
+// state/attempt transitions remove the stale scheduling key.
+func putOp(tx boltTx, op Op, previous Op) error {
 	data, err := encodeJSON(op)
 	if err != nil {
 		return err
@@ -134,16 +136,27 @@ func putOp(tx boltTx, op Op) error {
 	if err := tx.Bucket([]byte(bucketInodeOps)).Put(inodeOpKey(op.InodeID, op.Seq), []byte{}); err != nil {
 		return err
 	}
-	if op.State == OpStatePending || op.State == OpStateFailed {
-		if err := tx.Bucket([]byte(bucketReadyOps)).Put(readyKey(op), []byte{}); err != nil {
-			return err
-		}
-	} else {
-		if err := tx.Bucket([]byte(bucketReadyOps)).Delete(readyKey(op)); err != nil {
+	if previous.Seq == op.Seq {
+		if err := tx.Bucket([]byte(bucketReadyOps)).Delete(readyKey(previous)); err != nil {
 			return err
 		}
 	}
+	if op.State == OpStatePending || op.State == OpStateFailed {
+		return tx.Bucket([]byte(bucketReadyOps)).Put(readyKey(op), []byte{})
+	}
 	return nil
+}
+
+// replaceOp loads the stored operation before applying fn and writes both the
+// journal record and scheduling index in one transaction.
+func replaceOp(tx boltTx, seq uint64, fn func(*Op)) error {
+	current, err := getOp(tx, seq)
+	if err != nil {
+		return err
+	}
+	previous := current
+	fn(&current)
+	return putOp(tx, current, previous)
 }
 
 func inodeOpKey(inode, seq uint64) []byte {
@@ -185,7 +198,10 @@ func JoinPath(segments []string) string {
 
 // RemoteKey builds a provider key from a virtual path.
 func RemoteKey(pathValue string) string {
-	return path.Clean("/" + strings.TrimSpace(pathValue))
+	if strings.TrimSpace(pathValue) == "" {
+		return ""
+	}
+	return path.Clean("/" + strings.TrimSpace(pathValue))[1:]
 }
 
 // Fingerprint chooses the strongest provider version signal available.
@@ -252,8 +268,4 @@ func reverse(values []string) {
 	for left, right := 0, len(values)-1; left < right; left, right = left+1, right-1 {
 		values[left], values[right] = values[right], values[left]
 	}
-}
-
-func sortDirents(values []Dirent) {
-	sort.Slice(values, func(i, j int) bool { return values[i].NameKey < values[j].NameKey })
 }

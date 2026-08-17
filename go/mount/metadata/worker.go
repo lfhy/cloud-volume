@@ -70,16 +70,26 @@ func (w *Worker) Drain(ctx context.Context) error {
 		if pending == 0 && failed == 0 {
 			return nil
 		}
+		if failed > 0 {
+			return fmt.Errorf("metadata worker: %d failed operations", failed)
+		}
 		if !next.IsZero() && next.After(time.Now()) && time.Now().Before(deadline) {
 			w.sleepUntil(minTime(next, deadline))
 			continue
 		}
+		before := pending
 		w.runDueOnce(ctx)
-		if pending, failed, _ = w.snapshotWork(); pending > 0 && failed == 0 {
-			continue
-		}
+		pending, failed, _ = w.snapshotWork()
 		if failed > 0 {
 			return fmt.Errorf("metadata worker: %d failed operations", failed)
+		}
+		if pending == 0 {
+			return nil
+		}
+		// Stop when a pass made no progress; otherwise a repeatedly deferred
+		// retry would turn Drain into a busy loop until its deadline.
+		if pending >= before {
+			return context.DeadlineExceeded
 		}
 		if time.Now().After(deadline) {
 			return context.DeadlineExceeded
@@ -162,15 +172,18 @@ func (w *Worker) claimDue() []Op {
 				continue
 			}
 			var op Op
-			if err := decodeJSON(journal.Get(key[17:]), &op); err != nil {
+			if err := decodeJSON(journal.Get(key[9:]), &op); err != nil {
 				continue
 			}
 			if _, busy := w.running[op.InodeID]; busy {
 				continue
 			}
 			w.running[op.InodeID] = struct{}{}
+			previous := op
 			op.State = OpStateRunning
-			_ = putOp(tx, op)
+			if err := putOp(tx, op, previous); err != nil {
+				return err
+			}
 			claimed = append(claimed, op)
 		}
 		return nil
@@ -187,42 +200,32 @@ func (w *Worker) releaseInode(inode uint64) {
 
 func (w *Worker) execute(ctx context.Context, op Op) {
 	err := w.executeOp(ctx, op)
-	_ = w.service.store.update(func(tx boltTxT) error {
-		current, getErr := getOp(tx, op.Seq)
-		if getErr != nil {
-			return nil
-		}
-		if current.State == OpStateRunning || errors.Is(err, errConflict) {
-			if err != nil {
-				current.LastError = err.Error()
+	updateErr := w.service.store.update(func(tx boltTxT) error {
+		return replaceOp(tx, op.Seq, func(current *Op) {
+			if current.State != OpStateRunning {
+				return
 			}
-			if errors.Is(err, errConflict) {
+			switch {
+			case err == nil:
+				current.State = OpStateApplied
+				current.AppliedAtUnixNano = time.Now().UnixNano()
+				current.LastError = ""
+			case errors.Is(err, errConflict):
 				current.State = OpStateFailed
+				current.LastError = err.Error()
 				_ = markInodeConflict(tx, op.InodeID)
-			} else {
+			default:
 				current.Retry++
 				current.State = OpStatePending
+				current.LastError = err.Error()
 				current.NextAttemptUnixNano = time.Now().Add(retryDelay(current.Retry)).UnixNano()
-				_ = putOp(tx, current)
 			}
-			if current.State == OpStateFailed {
-				_ = putOp(tx, current)
-			}
-			return nil
-		}
-		if err != nil {
-			current.LastError = err.Error()
-			current.Retry++
-			current.State = OpStatePending
-			current.NextAttemptUnixNano = time.Now().Add(retryDelay(current.Retry)).UnixNano()
-			return putOp(tx, current)
-		}
-		current.State = OpStateApplied
-		current.AppliedAtUnixNano = time.Now().UnixNano()
-		current.LastError = ""
-		return putOp(tx, current)
+		})
 	})
 	w.releaseInode(op.InodeID)
+	if updateErr != nil {
+		log.Printf("[metadata/worker] op=%d state update error=%v", op.Seq, updateErr)
+	}
 	if err != nil && !errors.Is(err, errConflict) {
 		log.Printf("[metadata/worker] op=%d type=%d retry pending error=%v", op.Seq, op.Type, err)
 	}
@@ -236,14 +239,17 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 		if err != nil {
 			return err
 		}
-		if err := s.backend.CreateDirectory(ctx, s.store.namespace.Bucket, filepath.ToSlash(filepath.Dir(path+"/")), name); err != nil && !strings.Contains(strings.ToLower(err.Error()), "exists") {
+		if err := s.backend.CreateDirectory(ctx, s.store.namespace.Bucket, parentPrefix(path), name); err != nil && !strings.Contains(strings.ToLower(err.Error()), "exists") {
 			return err
 		}
-		return s.confirmRemote(ctx, op.InodeID, parentID, name, false)
+		return s.confirmRemote(ctx, op, parentID, name, false)
 	case OpWrite:
 		record, ref, err := s.pendingWrite(op.InodeID)
 		if err != nil {
 			return err
+		}
+		if strings.TrimSpace(ref.LocalPath) == "" {
+			return fmt.Errorf("metadata worker: inode %d write op %d has no staged content", op.InodeID, op.Seq)
 		}
 		target := s.desiredRemoteTarget(record)
 		taskID := fmt.Sprintf("metadata-op-%d", op.Seq)
@@ -253,7 +259,7 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 			s3ops.FinishQueuedTransfer(taskID, err)
 			return err
 		}
-		if err := s.confirmRemote(ctx, op.InodeID, record.DesiredParentID, record.DesiredName, true); err != nil {
+		if err := s.confirmRemote(ctx, op, record.DesiredParentID, record.DesiredName, true); err != nil {
 			s3ops.FinishQueuedTransfer(taskID, err)
 			return err
 		}
@@ -291,20 +297,23 @@ func (w *Worker) executeMove(ctx context.Context, op Op) error {
 			return err
 		}
 		if record.Kind == KindDirectory {
-			if err := w.service.backend.CreateDirectory(ctx, w.service.store.namespace.Bucket, filepath.ToSlash(filepath.Dir(desiredPath+"/")), filepath.Base(desiredPath)); err != nil {
+			if err := w.service.backend.CreateDirectory(ctx, w.service.store.namespace.Bucket, parentPrefix(desiredPath), filepath.Base(desiredPath)); err != nil {
 				return err
 			}
-			return w.service.confirmRemote(ctx, op.InodeID, record.DesiredParentID, record.DesiredName, false)
+			return w.service.confirmRemote(ctx, op, record.DesiredParentID, record.DesiredName, false)
 		}
 		_, ref, refErr := w.service.pendingWrite(op.InodeID)
 		if refErr != nil {
 			return refErr
 		}
+		if strings.TrimSpace(ref.LocalPath) == "" {
+			return fmt.Errorf("metadata worker: inode %d rename op %d has no staged content", op.InodeID, op.Seq)
+		}
 		taskID := fmt.Sprintf("metadata-op-%d", op.Seq)
 		if err := w.service.backend.UploadFile(ctx, w.service.store.namespace.Bucket, desiredPath, ref.LocalPath, taskID); err != nil {
 			return err
 		}
-		if err := w.service.confirmRemote(ctx, op.InodeID, record.DesiredParentID, record.DesiredName, true); err != nil {
+		if err := w.service.confirmRemote(ctx, op, record.DesiredParentID, record.DesiredName, true); err != nil {
 			return err
 		}
 		return w.service.retireContent(op.InodeID, ref.Generation)
@@ -315,16 +324,28 @@ func (w *Worker) executeMove(ctx context.Context, op Op) error {
 		return err
 	}
 	if source == target {
-		return w.service.confirmRemote(ctx, op.InodeID, record.DesiredParentID, record.DesiredName, record.Kind == KindDirectory)
+		return w.service.confirmRemote(ctx, op, record.DesiredParentID, record.DesiredName, record.Kind == KindDirectory)
 	}
 	taskID := fmt.Sprintf("metadata-op-%d", op.Seq)
 	if err := w.service.backend.MoveObject(ctx, w.service.store.namespace.Bucket, source, target, record.Kind == KindDirectory, taskID); err != nil {
 		return err
 	}
-	return w.service.confirmRemote(ctx, op.InodeID, record.DesiredParentID, record.DesiredName, record.Kind == KindDirectory)
+	return w.service.confirmRemote(ctx, op, record.DesiredParentID, record.DesiredName, record.Kind == KindDirectory)
 }
 
 var errConflict = errors.New("metadata: remote fingerprint conflict")
+
+// parentPrefix returns the slash-separated parent prefix for a provider key.
+func parentPrefix(value string) string {
+	trimmed := strings.Trim(strings.TrimSpace(value), "/")
+	if trimmed == "" {
+		return ""
+	}
+	if index := strings.LastIndex(trimmed, "/"); index >= 0 {
+		return trimmed[:index]
+	}
+	return ""
+}
 
 func retryDelay(retry int) time.Duration {
 	if retry <= 1 {

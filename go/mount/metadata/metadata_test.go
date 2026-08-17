@@ -62,8 +62,13 @@ func (b *fakeBackend) HeadObject(_ context.Context, _, key string) (storageops.O
 }
 
 func (b *fakeBackend) CreateDirectory(_ context.Context, _, prefix, name string) error {
-	b.objects["/"+prefix+"/"+name+"/"] = storageops.ObjectInfo{Key: prefix + "/" + name + "/", IsDir: true}
-	b.ops = append(b.ops, "mkdir:"+prefix+"/"+name)
+	prefix = strings.Trim(prefix, "/")
+	full := name
+	if prefix != "" {
+		full = prefix + "/" + name
+	}
+	b.objects["/"+full+"/"] = storageops.ObjectInfo{Key: full + "/", IsDir: true}
+	b.ops = append(b.ops, "mkdir:"+full)
 	return nil
 }
 
@@ -94,10 +99,26 @@ func (b *fakeBackend) MoveObject(_ context.Context, _, source, target string, _ 
 	return nil
 }
 
-func (b *fakeBackend) UploadFile(_ context.Context, _, key, _, _ string) error {
-	b.objects["/"+key] = storageops.ObjectInfo{Key: key, Size: 4, LastModified: "2026-01-01 00:00:00"}
+func (b *fakeBackend) UploadFile(_ context.Context, _, key, localPath, _ string) error {
+	size := int64(4)
+	if info, err := os.Stat(localPath); err == nil {
+		size = info.Size()
+	} else if localPath != "" {
+		return err
+	}
+	b.objects["/"+key] = storageops.ObjectInfo{Key: key, Size: size, LastModified: "2026-01-01 00:00:00"}
 	b.ops = append(b.ops, "upload:"+key)
 	return nil
+}
+
+func (b *fakeBackend) lastOperation(kind string) string {
+	prefix := kind + ":"
+	for index := len(b.ops) - 1; index >= 0; index-- {
+		if len(b.ops[index]) > len(prefix) && b.ops[index][:len(prefix)] == prefix {
+			return b.ops[index][len(prefix):]
+		}
+	}
+	return ""
 }
 
 func newTestService(t *testing.T, backend Backend) *Service {
@@ -224,7 +245,10 @@ func TestReadOnlyRejectsWrites(t *testing.T) {
 }
 
 func TestResetGuardRequiresForceWithPendingOps(t *testing.T) {
+	// Keep the pending op far in the future so a background worker, if any,
+	// cannot consume it while the guard is being exercised.
 	service := newTestService(t, newFakeBackend())
+	service.SetQuietPeriod(time.Hour)
 	if _, err := service.CreateDirectory(rootInode, "pending", WriteOptions{Origin: "test"}); err != nil {
 		t.Fatal(err)
 	}
