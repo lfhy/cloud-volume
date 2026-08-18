@@ -15,6 +15,10 @@ const (
 	workerPoll      = 250 * time.Millisecond
 )
 
+// Provider HEAD/list confirmation must not leave a journal operation in
+// verifying forever when an endpoint accepts the upload but stops answering.
+var workerVerificationTimeout = 45 * time.Second
+
 // Worker executes pending journal operations against one backend.
 type Worker struct {
 	service *Service
@@ -356,6 +360,13 @@ func (w *Worker) cancelOperation(seq uint64) {
 	if cancel != nil {
 		cancel()
 	}
+}
+
+func verificationContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithTimeout(parent, workerVerificationTimeout)
 }
 
 func minTime(left, right time.Time) time.Time {

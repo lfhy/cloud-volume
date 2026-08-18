@@ -73,7 +73,7 @@ func (f *webDAVFS) Rename(ctx context.Context, oldName, newName string) error {
 func (f *webDAVFS) Stat(ctx context.Context, name string) (os.FileInfo, error) {
 	clean := normalizeWebDAVName(name)
 	if clean == "" {
-		return virtualFileInfo{name: "/", size: 0, mode: fs.ModeDir | 0o755, modTime: time.Now(), isDir: true}, nil
+		return virtualFileInfo{name: "/", size: 0, mode: fs.ModeDir | 0o755, modTime: time.Time{}, isDir: true}, nil
 	}
 	if f.access.overlay.handles(clean) {
 		info, err := f.access.overlay.statPath(clean)

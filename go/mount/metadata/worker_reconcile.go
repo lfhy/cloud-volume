@@ -47,10 +47,12 @@ func (w *Worker) reconcile(ctx context.Context, op Op) {
 func (w *Worker) reconcileVerification(ctx context.Context, op Op) error {
 	s := w.service
 	backend := s.backendSnapshot()
+	verifyCtx, cancel := verificationContext(ctx)
+	defer cancel()
 	var err error
 	switch op.Type {
 	case OpMkdir:
-		err = s.confirmRemote(ctx, backend, op, op.NewParent, op.NewName, false)
+		err = s.confirmRemote(verifyCtx, backend, op, op.NewParent, op.NewName, false)
 	case OpWrite:
 		_, ref, refErr := s.pendingWrite(op.InodeID, op.ContentGeneration)
 		if refErr != nil {
@@ -60,7 +62,7 @@ func (w *Worker) reconcileVerification(ctx context.Context, op Op) error {
 		if targetErr != nil {
 			return targetErr
 		}
-		err = s.confirmRemote(ctx, backend, op, parent, name, true)
+		err = s.confirmRemote(verifyCtx, backend, op, parent, name, true)
 		if err == nil {
 			err = s.retireContent(op.InodeID, ref.Generation)
 		}
@@ -72,9 +74,9 @@ func (w *Worker) reconcileVerification(ctx context.Context, op Op) error {
 		if recordErr != nil {
 			return recordErr
 		}
-		err = w.finishMoveConfirmation(ctx, backend, op, record.Kind)
+		err = w.finishMoveConfirmation(verifyCtx, backend, op, record.Kind)
 	case OpDelete:
-		err = w.reconcileDeleteVerification(ctx, op)
+		err = w.reconcileDeleteVerification(verifyCtx, op)
 	default:
 		return fmt.Errorf("metadata: unknown reconciliation op %d", op.Type)
 	}

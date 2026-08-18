@@ -61,14 +61,16 @@ func newReadableWebDAVFile(
 	virtualPath string,
 ) (*readableWebDAVFile, error) {
 	if virtualPath == "" {
-		return newDirectoryHandle(access, ""), nil
+		// Root stat has no durable source; a fixed zero time keeps Finder from
+		// seeing the root mtime jump on every refresh.
+		return newDirectoryHandle(access, "", s3ops.ObjectInfo{Key: "", IsDir: true}), nil
 	}
 	info, err := access.statPath(ctx, virtualPath)
 	if err != nil {
 		return nil, pathError("open", virtualPath, err)
 	}
-	if info.IsDir {
-		return newDirectoryHandle(access, virtualPath), nil
+	if info.IsDir { // parent directory open
+		return newDirectoryHandle(access, virtualPath, info), nil
 	}
 
 	readable := &readableWebDAVFile{
@@ -161,18 +163,14 @@ func seedWritableTempFile(
 	return err
 }
 
-func newDirectoryHandle(access *bucketAccess, virtualPath string) *readableWebDAVFile {
+func newDirectoryHandle(access *bucketAccess, virtualPath string, info s3ops.ObjectInfo) *readableWebDAVFile {
 	return &readableWebDAVFile{
 		ctx:    context.Background(),
 		access: access,
 		path:   virtualPath,
-		info: virtualFileInfo{
-			name:    baseName(virtualPath),
-			size:    0,
-			mode:    fs.ModeDir | 0o755,
-			modTime: time.Now(),
-			isDir:   true,
-		},
+		// Directory mtimes must be stable across PROPFIND refreshes; an
+		// ever-changing timestamp makes Finder treat the folder as modified.
+		info:     fileInfoFromObject(info),
 		dirInfos: nil,
 	}
 }
@@ -418,6 +416,10 @@ func fileInfoFromObject(info s3ops.ObjectInfo) os.FileInfo {
 	modTime := time.Now()
 	if parsed, err := time.Parse("2006-01-02 15:04:05", info.LastModified); err == nil {
 		modTime = parsed
+	} else if info.IsDir {
+		// Directory marker listings often omit LastModified. A moving fallback
+		// makes Finder report the folder as modified on every PROPFIND.
+		modTime = time.Unix(0, 0)
 	}
 	mode := fs.FileMode(0o644)
 	if info.IsDir {

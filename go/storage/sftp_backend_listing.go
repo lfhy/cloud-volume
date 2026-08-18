@@ -3,6 +3,8 @@ package storage
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"sort"
 	"strings"
@@ -85,7 +87,10 @@ func (b sftpBackend) HeadObject(
 
 	info, err := client.Stat(sftpRemotePath(key))
 	if err != nil {
-		return ObjectInfo{}, os.ErrNotExist
+		if errors.Is(err, os.ErrNotExist) {
+			return ObjectInfo{}, os.ErrNotExist
+		}
+		return ObjectInfo{}, fmt.Errorf("sftp stat %q: %w", key, err)
 	}
 	return sftpEntryFromStat(key, info), nil
 }
@@ -137,4 +142,3 @@ func sftpSortObjects(items []ObjectInfo) {
 		return strings.ToLower(left.Key) < strings.ToLower(right.Key)
 	})
 }
-

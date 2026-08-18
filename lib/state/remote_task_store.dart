@@ -152,11 +152,10 @@ class RemoteTaskStore extends ChangeNotifier {
     try {
       final page = await api.listRemoteTasks(filter);
       if (generation != _bindingGeneration || !identical(api, _api)) return;
-      if (filter.cursor.isEmpty) {
-        _mergeRemoteTasks(page.items);
-      } else {
-        _mergeRemoteTasks(page.items);
-      }
+      _mergeRemoteTasks(
+        page.items,
+        completeSnapshot: filter.cursor.isEmpty && page.nextCursor.isEmpty,
+      );
       if (filter.cursor.isNotEmpty || !_hasLoadedMore) {
         _nextCursor = page.nextCursor;
       }
@@ -290,9 +289,37 @@ class RemoteTaskStore extends ChangeNotifier {
     return removed;
   }
 
-  void _mergeRemoteTasks(Iterable<RemoteTask> incoming) {
+  void _mergeRemoteTasks(
+    Iterable<RemoteTask> incoming, {
+    bool completeSnapshot = false,
+  }) {
+    final incomingList = incoming.toList(growable: false);
+    final incomingIds = incomingList.map((task) => task.id).toSet();
     var changed = false;
-    for (final task in incoming) {
+    // Metadata physical snapshots were removed from the bridge projection in
+    // a later protocol revision. Purge them here too so a running app cannot
+    // keep displaying rows fetched by an older bridge binary.
+    final stalePhysicalIds = _tasks.keys
+        .where(
+          (id) =>
+              id.startsWith('transfer:metadata-op-') &&
+              !incomingIds.contains(id),
+        )
+        .toList(growable: false);
+    for (final id in stalePhysicalIds) {
+      _tasks.remove(id);
+      changed = true;
+    }
+    if (completeSnapshot) {
+      final staleIds = _tasks.keys
+          .where((id) => !incomingIds.contains(id))
+          .toList(growable: false);
+      for (final id in staleIds) {
+        _tasks.remove(id);
+        changed = true;
+      }
+    }
+    for (final task in incomingList) {
       if (_tasks[task.id] != task) changed = true;
       _tasks[task.id] = task;
     }

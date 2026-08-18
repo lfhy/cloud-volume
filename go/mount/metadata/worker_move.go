@@ -128,7 +128,9 @@ func (w *Worker) snapshotMove(op Op, record Inode) (Op, error) {
 }
 
 func (w *Worker) finishMoveConfirmation(ctx context.Context, backend Backend, op Op, kind Kind) error {
-	if err := w.confirmMoveTarget(ctx, backend, op, kind); err != nil {
+	verifyCtx, cancel := verificationContext(ctx)
+	defer cancel()
+	if err := w.confirmMoveTarget(verifyCtx, backend, op, kind); err != nil {
 		return err
 	}
 	if op.MoveSource != "" || kind == KindDirectory || op.ContentGeneration == 0 {

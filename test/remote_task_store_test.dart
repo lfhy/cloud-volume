@@ -79,6 +79,81 @@ void main() {
     },
   );
 
+  test('purges physical metadata snapshots left by an older bridge', () async {
+    final api = _FakeGateway()
+      ..page = const RemoteTaskPage(
+        items: <RemoteTask>[
+          RemoteTask(
+            id: 'transfer:metadata-op-old-7',
+            kind: RemoteTaskKind.write,
+            status: RemoteTaskStatus.verifying,
+          ),
+          RemoteTask(
+            id: 'sync:ns:g7',
+            kind: RemoteTaskKind.write,
+            status: RemoteTaskStatus.done,
+          ),
+        ],
+      );
+    RemoteTaskStore.instance.bindApi(api);
+    await Future<void>.delayed(Duration.zero);
+    expect(RemoteTaskStore.instance.tasks, hasLength(2));
+
+    api.page = const RemoteTaskPage(
+      items: <RemoteTask>[
+        RemoteTask(
+          id: 'sync:ns:g7',
+          kind: RemoteTaskKind.write,
+          status: RemoteTaskStatus.done,
+        ),
+      ],
+    );
+    await RemoteTaskStore.instance.refresh();
+    expect(
+      RemoteTaskStore.instance.tasks.any(
+        (task) => task.id == 'transfer:metadata-op-old-7',
+      ),
+      isFalse,
+    );
+    expect(RemoteTaskStore.instance.tasks, hasLength(1));
+  });
+
+  test(
+    'reconciles a complete remote page instead of retaining removed rows',
+    () async {
+      final api = _FakeGateway()
+        ..page = const RemoteTaskPage(
+          items: <RemoteTask>[
+            RemoteTask(
+              id: 'sync:ns:keep',
+              kind: RemoteTaskKind.upload,
+              status: RemoteTaskStatus.done,
+            ),
+            RemoteTask(
+              id: 'sync:ns:remove',
+              kind: RemoteTaskKind.upload,
+              status: RemoteTaskStatus.done,
+            ),
+          ],
+        );
+      RemoteTaskStore.instance.bindApi(api);
+      await Future<void>.delayed(Duration.zero);
+      api.page = const RemoteTaskPage(
+        items: <RemoteTask>[
+          RemoteTask(
+            id: 'sync:ns:keep',
+            kind: RemoteTaskKind.upload,
+            status: RemoteTaskStatus.done,
+          ),
+        ],
+      );
+      await RemoteTaskStore.instance.refresh();
+      expect(RemoteTaskStore.instance.tasks.map((task) => task.id), [
+        'sync:ns:keep',
+      ]);
+    },
+  );
+
   test('local lifecycle shortcuts update the registered task', () {
     const id = 'transfer:local-lifecycle';
     RemoteTaskStore.instance.publishLocalTask(

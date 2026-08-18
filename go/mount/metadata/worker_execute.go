@@ -107,7 +107,9 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 		if err := w.markVerifying(op.Seq); err != nil {
 			return err
 		}
-		return s.confirmRemote(ctx, backend, op, parentID, name, false)
+		verifyCtx, cancel := verificationContext(ctx)
+		defer cancel()
+		return s.confirmRemote(verifyCtx, backend, op, parentID, name, false)
 	case OpWrite:
 		_, ref, err := s.pendingWrite(op.InodeID, op.ContentGeneration)
 		if err != nil {
@@ -117,9 +119,12 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 		if err != nil {
 			return err
 		}
-		if err := s.verifyExpectedRemote(ctx, backend, op, target); err != nil {
+		verifyCtx, cancelVerify := verificationContext(ctx)
+		if err := s.verifyExpectedRemote(verifyCtx, backend, op, target); err != nil {
+			cancelVerify()
 			return err
 		}
+		cancelVerify()
 		taskID := physicalTaskID(s.store.namespace.ID, op.Seq)
 		localPath, err := s.spliceChunks(ref.Chunks, fmt.Sprintf("%d", op.Seq))
 		if err != nil {
@@ -137,10 +142,13 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 			s3ops.FinishQueuedTransfer(taskID, err)
 			return err
 		}
-		if err := s.confirmRemote(ctx, backend, op, parentID, name, true); err != nil {
+		verifyCtx, cancel := verificationContext(ctx)
+		if err := s.confirmRemote(verifyCtx, backend, op, parentID, name, true); err != nil {
+			cancel()
 			s3ops.FinishQueuedTransfer(taskID, err)
 			return err
 		}
+		cancel()
 		s3ops.FinishQueuedTransfer(taskID, nil)
 		return s.retireContent(op.InodeID, ref.Generation)
 	case OpRename:

@@ -7,6 +7,18 @@ import (
 	"time"
 )
 
+func TestVerificationContextHasBoundedDeadline(t *testing.T) {
+	ctx, cancel := verificationContext(context.Background())
+	defer cancel()
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("verification context has no deadline")
+	}
+	if remaining := time.Until(deadline); remaining <= 0 || remaining > workerVerificationTimeout {
+		t.Fatalf("verification deadline remaining=%v, timeout=%v", remaining, workerVerificationTimeout)
+	}
+}
+
 type blockingCreateBackend struct {
 	*fakeBackend
 	started chan struct{}
