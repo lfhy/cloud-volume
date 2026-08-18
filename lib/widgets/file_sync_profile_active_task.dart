@@ -1,67 +1,47 @@
-// 在同步配置卡片内展示该配置当前最新的一条进行中的队列任务。
+// Sync-profile cards consume the same RemoteTask projection as the main queue.
 
 import 'package:flutter/material.dart';
-import 'package:remote_storage/state/transfer_queue.dart';
+import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/utils/transfer_format.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
-/// 从同步任务 id（`sync-<profileId>-<relPath>`）解析配置 id。
-String? syncProfileIdFromTaskId(String taskId) {
-  if (!taskId.startsWith('sync-')) return null;
-  final body = taskId.substring(5);
-  final renameIdx = body.indexOf('-rename-');
-  if (renameIdx > 0) {
-    return body.substring(0, renameIdx);
-  }
-  final dash = body.indexOf('-');
-  if (dash <= 0) return null;
-  return body.substring(0, dash);
-}
-
-/// 队列按最新插入在前；返回该配置下第一条 pending/running 的同步任务。
-TransferTask? latestActiveSyncTaskForProfile(
-  Iterable<TransferTask> syncTasks,
+RemoteTask? latestActiveRemoteTaskForProfile(
+  Iterable<RemoteTask> tasks,
   String profileId,
 ) {
-  final prefix = 'sync-$profileId-';
-  for (final task in syncTasks) {
-    if (!task.isSyncTask || !task.id.startsWith(prefix)) continue;
-    if (task.status == TransferStatus.running ||
-        task.status == TransferStatus.pending) {
-      return task;
-    }
+  for (final task in tasks) {
+    if (task.profileId == profileId && task.status.isActive) return task;
   }
   return null;
 }
 
-/// 配置卡片内的单行「当前任务」摘要。
-class FileSyncProfileActiveTaskLine extends StatelessWidget {
-  const FileSyncProfileActiveTaskLine({super.key, required this.task});
+class FileSyncProfileRemoteTaskLine extends StatelessWidget {
+  const FileSyncProfileRemoteTaskLine({super.key, required this.task});
 
-  final TransferTask task;
+  final RemoteTask task;
 
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    final icon = switch (task.rawType) {
-      'sync_upload' => LucideIcons.upload,
-      'sync_download' => LucideIcons.download,
-      'sync_delete' => LucideIcons.trash2,
-      'sync_rename' => LucideIcons.pencilLine,
-      'sync_mkdir' => LucideIcons.folderPlus,
-      _ => LucideIcons.refreshCw,
-    };
-    final typeLabel = switch (task.rawType) {
-      'sync_upload' => '同步上传',
-      'sync_download' => '同步下载',
-      'sync_delete' => '同步删除',
-      'sync_rename' => '同步重命名',
-      'sync_mkdir' => '同步建目录',
+    final label = switch (task.kind) {
+      RemoteTaskKind.mkdir => '同步建目录',
+      RemoteTaskKind.write || RemoteTaskKind.upload => '同步上传',
+      RemoteTaskKind.download => '同步下载',
+      RemoteTaskKind.rename || RemoteTaskKind.move => '同步重命名',
+      RemoteTaskKind.delete => '同步删除',
       _ => '同步',
     };
-    final progress = task.totalBytes > 0
-        ? ' · ${formatBytes(task.bytesCompleted)}/${formatBytes(task.totalBytes)}'
+    final path = task.targetPath.isNotEmpty ? task.targetPath : task.sourcePath;
+    final progress = task.progress.totalBytes > 0
+        ? ' · ${formatBytes(task.progress.bytesCompleted)}/${formatBytes(task.progress.totalBytes)}'
         : '';
+    final status = switch (task.status) {
+      RemoteTaskStatus.blocked => '等待依赖',
+      RemoteTaskStatus.retryWait => '等待重试',
+      RemoteTaskStatus.cancelRequested => '正在取消',
+      RemoteTaskStatus.reconciling => '正在对账',
+      _ => '执行中',
+    };
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(top: 8),
@@ -75,22 +55,26 @@ class FileSyncProfileActiveTaskLine extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(icon, size: 14, color: theme.colorScheme.primary),
+          Icon(
+            LucideIcons.refreshCw,
+            size: 14,
+            color: theme.colorScheme.primary,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              '当前任务：$typeLabel · ${task.displayName}$progress',
+              '当前任务：$label · $path$progress',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 11.5,
                 color: theme.colorScheme.foreground,
               ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
             ),
           ),
           const SizedBox(width: 6),
           Text(
-            task.status == TransferStatus.running ? '执行中' : '排队中',
+            status,
             style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w600,

@@ -11,6 +11,7 @@ import 'package:remote_storage/models/cached_file_record.dart';
 import 'package:remote_storage/models/config_backup.dart';
 import 'package:remote_storage/models/paged_listings.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
+import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/models/s3_objects.dart';
 import 'package:remote_storage/models/share_record.dart';
 import 'package:remote_storage/models/system_proxy_info.dart';
@@ -19,7 +20,7 @@ import 'package:remote_storage/models/transfer_job.dart';
 import 'package:remote_storage/models/sync_profile.dart';
 import 'package:remote_storage/pages/transfers_page.dart';
 import 'package:remote_storage/services/remote_storage_api.dart';
-import 'package:remote_storage/state/transfer_queue.dart';
+import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/widgets/list_selection_controls.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -27,11 +28,11 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
-    TransferQueue.instance.resetForTest();
+    RemoteTaskStore.instance.resetForTest();
   });
 
   tearDown(() {
-    TransferQueue.instance.resetForTest();
+    RemoteTaskStore.instance.resetForTest();
   });
 
   testWidgets('batch cancel from header cancels eligible selected tasks', (
@@ -43,27 +44,30 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final api = _TransfersPageFakeApi();
-    final queue = TransferQueue.instance;
-    queue.bindApi(api);
-
-    final pendingUpload = queue.startTask(
-      kind: TransferKind.upload,
+    final pendingUpload = const RemoteTask(
+      id: 'sync:test:pending-upload',
+      kind: RemoteTaskKind.upload,
+      status: RemoteTaskStatus.waiting,
       bucket: 'bucket-a',
-      key: 'pending-upload.txt',
-      localPath: '/tmp/pending-upload.txt',
+      targetPath: 'pending-upload.txt',
+      cancelable: true,
     );
-    final runningDownload = queue.startTask(
-      kind: TransferKind.download,
+    final runningDownload = const RemoteTask(
+      id: 'sync:test:running-download',
+      kind: RemoteTaskKind.download,
+      status: RemoteTaskStatus.running,
       bucket: 'bucket-a',
-      key: 'running-download.txt',
-      localPath: '/tmp/running-download.txt',
-    )..status = TransferStatus.running;
-    final doneUpload = queue.startTask(
-      kind: TransferKind.upload,
+      targetPath: 'running-download.txt',
+      cancelable: true,
+    );
+    final doneUpload = const RemoteTask(
+      id: 'sync:test:done-upload',
+      kind: RemoteTaskKind.upload,
+      status: RemoteTaskStatus.done,
       bucket: 'bucket-a',
-      key: 'done-upload.txt',
-      localPath: '/tmp/done-upload.txt',
-    )..status = TransferStatus.done;
+      targetPath: 'done-upload.txt',
+    );
+    api.tasks.addAll([pendingUpload, runningDownload, doneUpload]);
 
     await tester.pumpWidget(
       ShadApp(
@@ -77,8 +81,8 @@ void main() {
     await tester.tap(find.byType(ListSelectionControl).first);
     await tester.pump();
 
-    expect(find.text('批量取消 2'), findsOneWidget);
-    await tester.tap(find.text('批量取消 2'));
+    expect(find.text('取消 2'), findsOneWidget);
+    await tester.tap(find.text('取消 2'));
     await tester.pump();
 
     expect(
@@ -86,16 +90,41 @@ void main() {
       containsAll([pendingUpload.id, runningDownload.id]),
     );
     expect(api.canceledTaskIds, isNot(contains(doneUpload.id)));
-    expect(queue.statusOf(pendingUpload.id), TransferStatus.canceled);
-    expect(queue.statusOf(runningDownload.id), TransferStatus.canceled);
-    expect(queue.statusOf(doneUpload.id), TransferStatus.done);
     await tester.pumpWidget(const SizedBox.shrink());
-    TransferQueue.instance.resetForTest();
+    RemoteTaskStore.instance.resetForTest();
   });
 }
 
 class _TransfersPageFakeApi implements RemoteStorageGateway {
   final List<String> canceledTaskIds = <String>[];
+  final List<RemoteTask> tasks = <RemoteTask>[];
+
+  @override
+  Future<RemoteTaskPage> listRemoteTasks([
+    RemoteTaskFilter filter = const RemoteTaskFilter(),
+  ]) async => RemoteTaskPage(items: List<RemoteTask>.from(tasks));
+
+  @override
+  Future<RemoteTask> getRemoteTask(String taskId) async =>
+      tasks.firstWhere((task) => task.id == taskId);
+
+  @override
+  Future<bool> cancelRemoteTask(String taskId) async {
+    canceledTaskIds.add(taskId);
+    return true;
+  }
+
+  @override
+  Future<bool> retryRemoteTask(String taskId) async => true;
+
+  @override
+  Future<bool> triggerRemoteTask(String taskId) async => true;
+
+  @override
+  Future<int> clearRemoteTaskHistory({
+    String profileId = '',
+    String bucket = '',
+  }) async => 0;
 
   @override
   RemoteStorageCapabilities get capabilities =>
@@ -243,8 +272,7 @@ class _TransfersPageFakeApi implements RemoteStorageGateway {
   Future<List<BucketInfo>> listBuckets(
     RemoteStorageConfig config, {
     bool force = false,
-  }) async =>
-      throw UnimplementedError();
+  }) async => throw UnimplementedError();
 
   @override
   Future<BucketInfo> getBucketQuota(
@@ -306,24 +334,21 @@ class _TransfersPageFakeApi implements RemoteStorageGateway {
   @override
   Future<List<ConfigBackupSnapshot>> listConfigBackupsWithTarget(
     ConfigBackupTarget target,
-  ) async =>
-      throw UnimplementedError();
+  ) async => throw UnimplementedError();
 
   @override
   Future<BootstrapState> restoreConfigBackupWithTarget(
     ConfigBackupTarget target,
     String key, {
     String? password,
-  }) async =>
-      throw UnimplementedError();
+  }) async => throw UnimplementedError();
 
   @override
   Future<bool> verifyBackupPassword(
     ConfigBackupTarget target,
     String key, {
     String? password,
-  }) async =>
-      throw UnimplementedError();
+  }) async => throw UnimplementedError();
 
   @override
   Future<ObjectInfo> headObject(
@@ -546,5 +571,4 @@ class _TransfersPageFakeApi implements RemoteStorageGateway {
   @override
   Future<void> setP2PEnabled(bool enabled) async =>
       throw UnsupportedError('P2P 不可用');
-
 }

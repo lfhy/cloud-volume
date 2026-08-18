@@ -3,10 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:remote_storage/models/bootstrap_state.dart';
 import 'package:remote_storage/models/file_manager_bucket_entry.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
+import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/models/sync_profile.dart';
 import 'package:remote_storage/services/remote_storage_api.dart';
 import 'package:remote_storage/state/sync_profile_notifier.dart';
-import 'package:remote_storage/state/transfer_queue.dart';
+import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/widgets/file_sync_profile_active_task.dart';
 import 'package:remote_storage/services/sync_directory_navigation.dart';
 import 'package:remote_storage/widgets/sync_directory_open_buttons.dart';
@@ -45,14 +46,14 @@ class _FileSyncTasksPageState extends State<FileSyncTasksPage> {
   @override
   void initState() {
     super.initState();
-    TransferQueue.instance.addListener(_onQueueChanged);
+    RemoteTaskStore.instance.addListener(_onQueueChanged);
     SyncProfileNotifier.instance.addListener(_onProfilesChanged);
     _loadBuckets();
   }
 
   @override
   void dispose() {
-    TransferQueue.instance.removeListener(_onQueueChanged);
+    RemoteTaskStore.instance.removeListener(_onQueueChanged);
     SyncProfileNotifier.instance.removeListener(_onProfilesChanged);
     super.dispose();
   }
@@ -68,14 +69,11 @@ class _FileSyncTasksPageState extends State<FileSyncTasksPage> {
     if (mounted) setState(() {});
   }
 
-  List<TransferTask> get _syncTasks =>
-      TransferQueue.instance.tasks.where((t) => t.isSyncTask).toList();
-
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final profiles = SyncProfileNotifier.instance.profiles;
-    final tasks = _syncTasks;
+    final remoteTasks = RemoteTaskStore.instance.tasks;
 
     return Padding(
       padding: const EdgeInsets.only(top: 56, left: 36, right: 36, bottom: 20),
@@ -111,7 +109,7 @@ class _FileSyncTasksPageState extends State<FileSyncTasksPage> {
               ],
             ),
             const SizedBox(height: 24),
-            _summaryCards(theme, profiles, tasks),
+            _summaryCards(theme, profiles, remoteTasks),
             const SizedBox(height: 24),
             Text(
               '同步配置',
@@ -125,8 +123,7 @@ class _FileSyncTasksPageState extends State<FileSyncTasksPage> {
             if (profiles.isEmpty)
               _emptyHint(theme, '还没有同步配置，点击右上角「新建配置」开始。')
             else
-              ...profiles.map((p) => _profileRow(theme, p, tasks)),
-
+              ...profiles.map((p) => _profileRow(theme, p, remoteTasks)),
           ],
         ),
       ),
@@ -136,13 +133,20 @@ class _FileSyncTasksPageState extends State<FileSyncTasksPage> {
   Widget _summaryCards(
     ShadThemeData theme,
     List<SyncProfileRuntime> profiles,
-    List<TransferTask> tasks,
+    List<RemoteTask> remoteTasks,
   ) {
     final enabled = profiles.where((p) => p.profile.enabled).length;
-    final syncing =
-        profiles.where((p) => p.status == SyncProfileStatus.syncing).length;
-    final running = tasks.where((t) => t.status == TransferStatus.running).length;
-    final failed = tasks.where((t) => t.status == TransferStatus.failed).length;
+    final syncing = profiles
+        .where((p) => p.status == SyncProfileStatus.syncing)
+        .length;
+    final running = remoteTasks.where((t) => t.status.isActive).length;
+    final failed = remoteTasks
+        .where(
+          (task) =>
+              task.status == RemoteTaskStatus.failed ||
+              task.status == RemoteTaskStatus.conflict,
+        )
+        .length;
     return Row(
       children: [
         _statCard(theme, LucideIcons.refreshCw, '$enabled', '已启用配置'),
@@ -206,8 +210,12 @@ class _FileSyncTasksPageState extends State<FileSyncTasksPage> {
   Widget _profileRow(
     ShadThemeData theme,
     SyncProfileRuntime runtime,
-    List<TransferTask> tasks,
+    List<RemoteTask> remoteTasks,
   ) {
+    final remoteActive = latestActiveRemoteTaskForProfile(
+      remoteTasks,
+      runtime.profile.id,
+    );
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 10),
@@ -246,7 +254,11 @@ class _FileSyncTasksPageState extends State<FileSyncTasksPage> {
             '${runtime.profile.bucket}/${runtime.profile.remotePrefix.isEmpty ? '' : runtime.profile.remotePrefix}',
           ),
           const SizedBox(height: 4),
-          _metaRow(theme, LucideIcons.arrowLeftRight, runtime.profile.direction.label),
+          _metaRow(
+            theme,
+            LucideIcons.arrowLeftRight,
+            runtime.profile.direction.label,
+          ),
           if (runtime.lastSyncAt.isNotEmpty) ...[
             const SizedBox(height: 4),
             _metaRow(theme, LucideIcons.clock, '上次同步：${runtime.lastSyncAt}'),
@@ -261,9 +273,8 @@ class _FileSyncTasksPageState extends State<FileSyncTasksPage> {
               ),
             ),
           ],
-          if (latestActiveSyncTaskForProfile(tasks, runtime.profile.id) case final active?) ...[
-            FileSyncProfileActiveTaskLine(task: active),
-          ],
+          if (remoteActive case final active?)
+            FileSyncProfileRemoteTaskLine(task: active),
           const SizedBox(height: 12),
           Row(
             children: [
@@ -285,9 +296,9 @@ class _FileSyncTasksPageState extends State<FileSyncTasksPage> {
                 onPressed: runtime.profile.localPath.trim().isEmpty
                     ? null
                     : () => SyncDirectoryOpenButtons.openLocal(
-                          context,
-                          runtime.profile.localPath.trim(),
-                        ),
+                        context,
+                        runtime.profile.localPath.trim(),
+                      ),
                 child: const Text('打开本地目录'),
               ),
               const SizedBox(width: 6),
@@ -320,7 +331,6 @@ class _FileSyncTasksPageState extends State<FileSyncTasksPage> {
     );
   }
 
-
   Widget _metaRow(ShadThemeData theme, IconData icon, String text) {
     return Row(
       children: [
@@ -350,7 +360,11 @@ class _FileSyncTasksPageState extends State<FileSyncTasksPage> {
       ),
       child: Text(
         status.label,
-        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: color),
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: color,
+        ),
       ),
     );
   }
@@ -367,7 +381,6 @@ class _FileSyncTasksPageState extends State<FileSyncTasksPage> {
         return (theme.colorScheme.primary, false);
     }
   }
-
 
   Widget _emptyHint(ShadThemeData theme, String text) {
     return Container(

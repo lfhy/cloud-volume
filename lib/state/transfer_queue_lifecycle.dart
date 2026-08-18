@@ -4,6 +4,7 @@ part of 'transfer_queue.dart';
 extension TransferQueueLifecycle on TransferQueue {
   void bindApi(RemoteStorageGateway api) {
     _api = api;
+    RemoteTaskStore.instance.bindApi(api);
     unawaited(restorePersistedTransferQueueState(this).then((_) => pollNow()));
     _ensurePolling();
   }

@@ -9,6 +9,7 @@ import 'package:remote_storage/models/cached_file_record.dart';
 import 'package:remote_storage/models/config_backup.dart';
 import 'package:remote_storage/models/paged_listings.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
+import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/models/s3_objects.dart';
 import 'package:remote_storage/models/share_record.dart';
 import 'package:remote_storage/models/system_proxy_info.dart';
@@ -263,6 +264,34 @@ abstract class RemoteStorageGateway {
   Future<void> cancelTransfer(String taskId);
   Future<bool> triggerTransfer(String taskId);
   Future<List<TransferSnapshot>> listTransferJobs();
+  /// Unified logical remote-operation queue. Implementations may temporarily
+  /// adapt legacy transfer snapshots while metadata projection is rolling out.
+  Future<RemoteTaskPage> listRemoteTasks([
+    RemoteTaskFilter filter = const RemoteTaskFilter(),
+  ]) async {
+    throw UnsupportedError('统一远端任务队列不可用');
+  }
+  Future<RemoteTask> getRemoteTask(String taskId) async {
+    throw UnsupportedError('统一远端任务队列不可用');
+  }
+  Future<bool> cancelRemoteTask(String taskId) async {
+    throw UnsupportedError('统一远端任务队列不可用');
+  }
+  Future<bool> retryRemoteTask(String taskId) async {
+    throw UnsupportedError('统一远端任务队列不可用');
+  }
+
+  Future<bool> triggerRemoteTask(String taskId) async {
+    throw UnsupportedError('统一远端任务队列不可用');
+  }
+
+  Future<int> clearRemoteTaskHistory({
+    String profileId = '',
+    String bucket = '',
+  }) async {
+    throw UnsupportedError('统一远端任务队列不可用');
+  }
+
   Future<BucketMountStatus> mountBucket(
     RemoteStorageConfig config,
     String bucket,
