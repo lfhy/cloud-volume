@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -62,6 +63,27 @@ func TestMountWebDAVRejectsEmptyMountPath(t *testing.T) {
 	}
 	if _, err := mountWebDAV("http://127.0.0.1:65075/云卷-测试/", "   "); err == nil {
 		t.Fatal("expected mountWebDAV to reject a whitespace-only mount path")
+	}
+}
+
+func TestMacOSUserMountPath(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := macOSUserMountPath("/Volumes/云卷-测试")
+	want := filepath.Join(home, "云卷", "云卷-测试")
+	if got != want {
+		t.Fatalf("fallback path = %q; want %q", got, want)
+	}
+}
+
+func TestIsManagedMacOSMountPath(t *testing.T) {
+	if !isManagedMacOSMountPath("/Volumes/云卷-测试") {
+		t.Fatal("default managed path was not recognized")
+	}
+	if isManagedMacOSMountPath("/Volumes/custom") {
+		t.Fatal("custom /Volumes path was treated as managed")
 	}
 }
 

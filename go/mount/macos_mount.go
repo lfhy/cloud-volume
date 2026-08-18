@@ -168,9 +168,11 @@ func mountWebDAV(serverURL, mountPath string) (string, error) {
 	if cleanPath == "" || cleanPath == "." || cleanPath == "/" {
 		return "", fmt.Errorf("mount bucket: invalid mount path %q", mountPath)
 	}
-	if err := os.MkdirAll(cleanPath, 0o755); err != nil {
+	preparedPath, err := prepareMacOSMountPath(cleanPath)
+	if err != nil {
 		return "", err
 	}
+	cleanPath = preparedPath
 	output, recovered, err := runLoggedCommandUntilSuccess(
 		macosMountCommandTimeout,
 		100*time.Millisecond,
@@ -193,6 +195,41 @@ func mountWebDAV(serverURL, mountPath string) (string, error) {
 		return "", fmt.Errorf("mount bucket with macOS mount_webdav: %w: %s", err, string(output))
 	}
 	return cleanPath, nil
+}
+
+// prepareMacOSMountPath creates a caller-selected mount directory. The
+// system /Volumes root is root-owned on normal macOS installs, so the default
+// managed path falls back to a user-owned directory when it cannot be created.
+func prepareMacOSMountPath(mountPath string) (string, error) {
+	cleanPath := filepath.Clean(strings.TrimSpace(mountPath))
+	err := os.MkdirAll(cleanPath, 0o755)
+	if err == nil {
+		return cleanPath, nil
+	} else if !isManagedMacOSMountPath(cleanPath) || !os.IsPermission(err) {
+		return "", err
+	}
+	fallback := macOSUserMountPath(cleanPath)
+	if fallback == "" {
+		return "", err
+	}
+	if fallbackErr := os.MkdirAll(fallback, 0o755); fallbackErr != nil {
+		return "", fmt.Errorf("create macOS mount path %q: %w (fallback %q: %v)", cleanPath, err, fallback, fallbackErr)
+	}
+	log.Printf("[mount/macos] default-path-not-writable requested=%q fallback=%q", cleanPath, fallback)
+	return fallback, nil
+}
+
+func isManagedMacOSMountPath(path string) bool {
+	clean := filepath.Clean(strings.TrimSpace(path))
+	return filepath.Dir(clean) == "/Volumes" && strings.HasPrefix(filepath.Base(clean), managedMountPrefix)
+}
+
+func macOSUserMountPath(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return ""
+	}
+	return filepath.Join(home, "云卷", filepath.Base(filepath.Clean(path)))
 }
 
 func recoverMountedWebDAVPath(serverURL, requestedPath string) string {

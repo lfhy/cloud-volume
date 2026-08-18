@@ -5,6 +5,7 @@ package mount
 
 import (
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -78,25 +79,39 @@ func cleanupAllManagedMounts() error {
 }
 
 func matchingBucketMountPaths(paths []string, mountName string) []string {
-	basePath := filepath.Join("/Volumes", mountName)
 	matches := make([]string, 0, len(paths))
 	for _, mountPath := range paths {
 		clean := filepath.Clean(strings.TrimSpace(mountPath))
-		if clean == basePath || strings.HasPrefix(clean, basePath+"-") {
-			matches = append(matches, clean)
+		for _, root := range macOSManagedMountRoots() {
+			basePath := filepath.Join(root, mountName)
+			if clean == basePath || strings.HasPrefix(clean, basePath+"-") {
+				matches = append(matches, clean)
+				break
+			}
 		}
 	}
 	return matches
 }
 
 func matchingManagedMountPaths(paths []string) []string {
-	basePrefix := filepath.Join("/Volumes", managedMountPrefix)
 	matches := make([]string, 0, len(paths))
 	for _, mountPath := range paths {
 		clean := filepath.Clean(strings.TrimSpace(mountPath))
-		if strings.HasPrefix(clean, basePrefix) {
-			matches = append(matches, clean)
+		for _, root := range macOSManagedMountRoots() {
+			basePrefix := filepath.Join(root, managedMountPrefix)
+			if strings.HasPrefix(clean, basePrefix) {
+				matches = append(matches, clean)
+				break
+			}
 		}
 	}
 	return matches
+}
+
+func macOSManagedMountRoots() []string {
+	roots := []string{"/Volumes"}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		roots = append(roots, filepath.Join(home, "云卷"))
+	}
+	return roots
 }
