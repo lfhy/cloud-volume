@@ -60,97 +60,7 @@ func (s *mountSession) start() error {
 	s.mountTarget = mountPath
 	s.mounted = true
 	log.Printf("[mount/session] mounted bucket=%q path=%q", s.bucket, mountPath)
-	// Pre-warm macOS webdavfs so the first user-visible access doesn't
-	// pay the ~90s statfs initialization penalty. A background filesystem
-	// stat forces webdavfs_agent to start its handshake immediately after
-	// the volume appears, rather than waiting for Finder to trigger it.
-	go prewarmWebDAVMount(mountPath)
 	return nil
-}
-
-// prewarmWebDAVMount triggers webdavfs_agent initialization without
-// blocking the mount path. It does a single os.Stat on the mount root
-// (which forces the VFS layer to query the WebDAV server), then a
-// ReadDir to populate the directory cache.
-//
-// os.Stat / os.ReadDir have no context parameter and cannot be interrupted
-// once blocked inside webdavfs_agent. To stay true to "non-blocking to the
-// caller", each call runs in its own goroutine and prewarmWebDAVMount waits
-// at most prewarmStatTimeout for it. A truly wedged webdavfs therefore leaves
-// a single leaked syscall goroutine behind, but prewarmWebDAVMount itself
-// always returns within the bound and the next stop()/unmount can proceed.
-const prewarmStatTimeout = 30 * time.Second
-
-func prewarmWebDAVMount(mountPath string) {
-	startedAt := time.Now()
-	info, ok := boundedStat(mountPath, prewarmStatTimeout)
-	if !ok {
-		log.Printf("[mount/macos] prewarm-stat-timeout path=%q duration=%s", mountPath, time.Since(startedAt).Round(time.Millisecond))
-		return
-	}
-	if info.err != nil {
-		log.Printf("[mount/macos] prewarm-stat-error path=%q err=%v duration=%s", mountPath, info.err, time.Since(startedAt).Round(time.Millisecond))
-		return
-	}
-	log.Printf("[mount/macos] prewarm-stat-done path=%q duration=%s size=%d", mountPath, time.Since(startedAt).Round(time.Millisecond), info.size)
-	// Read one directory entry to populate the webdavfs dirent cache.
-	// This is non-blocking to the caller and makes the first Finder
-	// window significantly faster.
-	entries, ok := boundedReadDir(mountPath, prewarmStatTimeout)
-	if !ok {
-		log.Printf("[mount/macos] prewarm-readdir-timeout path=%q duration=%s", mountPath, time.Since(startedAt).Round(time.Millisecond))
-		return
-	}
-	if entries.err != nil {
-		log.Printf("[mount/macos] prewarm-readdir-error path=%q err=%v duration=%s", mountPath, entries.err, time.Since(startedAt).Round(time.Millisecond))
-		return
-	}
-	log.Printf("[mount/macos] prewarm-done path=%q entries=%d duration=%s", mountPath, entries.count, time.Since(startedAt).Round(time.Millisecond))
-}
-
-type statResult struct {
-	size int64
-	err  error
-}
-
-// boundedStat runs os.Stat in a goroutine and returns ok=false if it does
-// not finish within timeout. The underlying syscall cannot be cancelled, so
-// on timeout the goroutine remains live until webdavfs releases it.
-func boundedStat(path string, timeout time.Duration) (statResult, bool) {
-	result := make(chan statResult, 1)
-	go func() {
-		info, err := os.Stat(path)
-		size := int64(-1)
-		if err == nil {
-			size = info.Size()
-		}
-		result <- statResult{size: size, err: err}
-	}()
-	select {
-	case r := <-result:
-		return r, true
-	case <-time.After(timeout):
-		return statResult{}, false
-	}
-}
-
-type readDirResult struct {
-	count int
-	err   error
-}
-
-func boundedReadDir(path string, timeout time.Duration) (readDirResult, bool) {
-	result := make(chan readDirResult, 1)
-	go func() {
-		entries, err := os.ReadDir(path)
-		result <- readDirResult{count: len(entries), err: err}
-	}()
-	select {
-	case r := <-result:
-		return r, true
-	case <-time.After(timeout):
-		return readDirResult{}, false
-	}
 }
 
 // mountWebDAV mounts the loopback WebDAV server at mountPath using the
@@ -173,21 +83,16 @@ func mountWebDAV(serverURL, mountPath string) (string, error) {
 		return "", err
 	}
 	cleanPath = preparedPath
-	output, recovered, err := runLoggedCommandUntilSuccess(
+	// Do not cancel the command merely because the mount table row appears.
+	// webdavfs_agent can still be initializing at that point; canceling here
+	// reports a false success and immediately tears the new volume down.
+	output, err := runLoggedCommand(
 		macosMountCommandTimeout,
-		100*time.Millisecond,
 		"mount-webdav-path",
-		func() (string, bool) {
-			mounted := probeMountedWebDAVPath(serverURL, cleanPath)
-			return mounted, mounted != ""
-		},
 		"/sbin/mount_webdav",
 		serverURL,
 		cleanPath,
 	)
-	if recovered != "" {
-		return recovered, nil
-	}
 	if err != nil {
 		if recovered := recoverMountedWebDAVPath(serverURL, cleanPath); recovered != "" {
 			return recovered, nil
