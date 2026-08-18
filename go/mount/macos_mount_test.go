@@ -66,6 +66,52 @@ func TestMountWebDAVRejectsEmptyMountPath(t *testing.T) {
 	}
 }
 
+func TestMountWebDAVWaitsForCommandCompletion(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	oldExecute := executeMountWebDAV
+	executeMountWebDAV = func(_ time.Duration, _ string, _ string, _ ...string) ([]byte, error) {
+		close(started)
+		<-release
+		return []byte("mounted"), nil
+	}
+	t.Cleanup(func() { executeMountWebDAV = oldExecute })
+
+	result := make(chan struct {
+		path string
+		err  error
+	}, 1)
+	go func() {
+		path, err := mountWebDAV(
+			"http://127.0.0.1:65075/云卷-测试/",
+			filepath.Join(t.TempDir(), "mount"),
+		)
+		result <- struct {
+			path string
+			err  error
+		}{path: path, err: err}
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("mount command did not start")
+	}
+	select {
+	case <-result:
+		t.Fatal("mount returned before the command completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case got := <-result:
+		if got.err != nil {
+			t.Fatalf("mountWebDAV: %v", got.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("mount did not return after the command completed")
+	}
+}
+
 func TestMacOSUserMountPath(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {

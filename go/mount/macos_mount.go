@@ -31,6 +31,7 @@ const macosOpenLaunchTimeout = 3 * time.Second
 var (
 	probeWebDAVMountActive = isWebDAVMountActive
 	executeUnmountWebDAV   = unmountWebDAV
+	executeMountWebDAV     = runLoggedCommand
 	launchFinder           = runMacOSFinderOpen
 )
 
@@ -86,7 +87,7 @@ func mountWebDAV(serverURL, mountPath string) (string, error) {
 	// Do not cancel the command merely because the mount table row appears.
 	// webdavfs_agent can still be initializing at that point; canceling here
 	// reports a false success and immediately tears the new volume down.
-	output, err := runLoggedCommand(
+	output, err := executeMountWebDAV(
 		macosMountCommandTimeout,
 		"mount-webdav-path",
 		"/sbin/mount_webdav",
