@@ -273,6 +273,7 @@ func clearRemoteTaskHistory(args json.RawMessage) (any, error) {
 		// history in scope; the 30-day retention rule is applied on listing.
 		removed, err = manager.ClearTaskHistoryFor(input.ProfileID, input.Bucket, time.Time{})
 	}
+	removed += s3ops.ForgetTerminalTransfers(input.TaskIDs, input.ProfileID, input.Bucket)
 	if err != nil {
 		return nil, err
 	}
