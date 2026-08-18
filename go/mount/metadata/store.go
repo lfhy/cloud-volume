@@ -92,6 +92,9 @@ func (s *Store) ensureSchema() error {
 		if err := schema.Put([]byte("nextInode"), encodeUint64(rootInode)); err != nil {
 			return err
 		}
+		if err := schema.Put([]byte("nextOpSeq"), encodeUint64(0)); err != nil {
+			return err
+		}
 		if err := schema.Put([]byte("chunkRoot"), []byte(chunkRoot)); err != nil {
 			return err
 		}
@@ -125,6 +128,9 @@ func (s *Store) rebuild() error {
 			return err
 		}
 		if err := schema.Put([]byte("nextInode"), encodeUint64(rootInode)); err != nil {
+			return err
+		}
+		if err := schema.Put([]byte("nextOpSeq"), encodeUint64(0)); err != nil {
 			return err
 		}
 		if err := schema.Put([]byte("chunkRoot"), []byte(s.chunkRoot)); err != nil {

@@ -295,14 +295,20 @@ type Status struct {
 func (s *Service) Status() Status {
 	status := Status{Namespace: s.store.namespace.ID, SchemaVersion: SchemaVersion}
 	_ = s.store.view(func(tx boltTxT) error {
-		status.InodeCount = tx.Bucket([]byte(bucketInodes)).Stats().KeyN
-		status.MaterializedCount = tx.Bucket([]byte(bucketListingState)).Stats().KeyN
-		status.PendingContent = tx.Bucket([]byte(bucketContentRefs)).Stats().KeyN
 		_ = tx.Bucket([]byte(bucketInodes)).ForEach(func(_, value []byte) error {
+			status.InodeCount++
 			var record Inode
 			if decodeJSON(value, &record) == nil && record.State == StateConflict {
 				status.ConflictInodes++
 			}
+			return nil
+		})
+		_ = tx.Bucket([]byte(bucketListingState)).ForEach(func(_, _ []byte) error {
+			status.MaterializedCount++
+			return nil
+		})
+		_ = tx.Bucket([]byte(bucketContentRefs)).ForEach(func(_, _ []byte) error {
+			status.PendingContent++
 			return nil
 		})
 		_ = tx.Bucket([]byte(bucketJournal)).ForEach(func(_, value []byte) error {
@@ -311,7 +317,7 @@ func (s *Service) Status() Status {
 				return nil
 			}
 			switch op.State {
-			case OpStatePending, OpStateRunning, OpStateReconciling:
+			case OpStatePending, OpStateRunning, OpStateReconciling, OpStateVerifying, OpStateCancelRequested:
 				// Running entries have left ready_ops while the provider call is
 				// in flight, but still make a non-forced reset unsafe.
 				status.PendingOps++

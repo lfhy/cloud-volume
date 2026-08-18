@@ -11,7 +11,7 @@ import (
 
 // SchemaVersion gates forward compatibility. Development builds deliberately
 // delete-and-rebuild instead of upgrading older layouts.
-const SchemaVersion = 4
+const SchemaVersion = 5
 
 const (
 	bucketSchema       = "schema"

@@ -16,6 +16,11 @@ import (
 func (w *Worker) execute(ctx context.Context, op Op) {
 	opCtx, done, _ := w.beginOperation(ctx, op.Seq)
 	defer done()
+	if opStateNeedsReconciliation(op.State) {
+		w.reconcile(opCtx, op)
+		w.releaseInode(op.InodeID)
+		return
+	}
 	if !w.operationMayExecute(op.Seq) {
 		_ = w.markReconciliationIfCanceled(op.Seq)
 		w.releaseInode(op.InodeID)
@@ -115,7 +120,7 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 		if err := s.verifyExpectedRemote(ctx, backend, op, target); err != nil {
 			return err
 		}
-		taskID := fmt.Sprintf("metadata-op-%d", op.Seq)
+		taskID := physicalTaskID(s.store.namespace.ID, op.Seq)
 		localPath, err := s.spliceChunks(ref.Chunks, fmt.Sprintf("%d", op.Seq))
 		if err != nil {
 			return err
@@ -162,7 +167,9 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 			if op.HardDelete {
 				deleteObject = backend.DeleteObjectHard
 			}
-			if err := deleteObject(ctx, s.store.namespace.Bucket, record.RemoteName, record.Kind == KindDirectory, fmt.Sprintf("metadata-op-%d", op.Seq)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			taskID := physicalTaskID(s.store.namespace.ID, op.Seq)
+			s3ops.SetTransferProfile(taskID, s.store.namespace.Config.ProfileID)
+			if err := deleteObject(ctx, s.store.namespace.Bucket, record.RemoteName, record.Kind == KindDirectory, taskID); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
 		}

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	s3ops "remote-storage/go/s3"
 	storageops "remote-storage/go/storage"
 )
 
@@ -30,7 +31,8 @@ func (w *Worker) executeMove(ctx context.Context, op Op, backend Backend) error 
 	if op.MoveSource == op.MoveTarget {
 		return w.finishMoveConfirmation(ctx, backend, op, record.Kind)
 	}
-	taskID := fmt.Sprintf("metadata-op-%d", op.Seq)
+	taskID := physicalTaskID(w.service.store.namespace.ID, op.Seq)
+	s3ops.SetTransferProfile(taskID, w.service.store.namespace.Config.ProfileID)
 	if err := backend.MoveObject(
 		ctx, w.service.store.namespace.Bucket, op.MoveSource, op.MoveTarget,
 		record.Kind == KindDirectory, taskID,
@@ -69,8 +71,10 @@ func (w *Worker) executeLocalOnlyMove(ctx context.Context, backend Backend, op O
 			return err
 		}
 		defer os.Remove(localPath)
+		taskID := physicalTaskID(w.service.store.namespace.ID, op.Seq)
+		s3ops.SetTransferProfile(taskID, w.service.store.namespace.Config.ProfileID)
 		if err := backend.UploadFile(
-			ctx, w.service.store.namespace.Bucket, op.MoveTarget, localPath, fmt.Sprintf("metadata-op-%d", op.Seq),
+			ctx, w.service.store.namespace.Bucket, op.MoveTarget, localPath, taskID,
 		); err != nil {
 			return err
 		}

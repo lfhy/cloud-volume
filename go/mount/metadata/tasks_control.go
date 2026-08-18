@@ -175,7 +175,7 @@ func (s *Service) ClearTaskHistory(before time.Time) (int, error) {
 				return err
 			}
 			at, terminal := taskTerminalAt(op)
-			if terminal && (before.IsZero() || at.Before(before)) {
+			if terminal && (before.IsZero() || at.Before(before)) && canCompactTaskOp(tx, op) {
 				remove = append(remove, op)
 			}
 			return nil
@@ -203,18 +203,45 @@ func (s *Service) ClearTaskHistory(before time.Time) (int, error) {
 	return cleared, err
 }
 
+// canCompactTaskOp preserves the dependency barrier promised by the task API:
+// a terminal event is retained while a later journal event can still refer to
+// its inode, parent edge, or staged generation.
+func canCompactTaskOp(tx boltTxT, candidate Op) bool {
+	if candidate.Type == OpWrite {
+		if tx.Bucket([]byte(bucketContentRefs)).Get(contentRefKey(candidate.InodeID, candidate.ContentGeneration)) != nil {
+			return false
+		}
+	}
+	return tx.Bucket([]byte(bucketJournal)).ForEach(func(_, raw []byte) error {
+		var later Op
+		if decodeJSON(raw, &later) != nil || later.Seq <= candidate.Seq || !opStateUnsettled(later.State) {
+			return nil
+		}
+		if later.InodeID == candidate.InodeID || later.OldParent == candidate.InodeID || later.NewParent == candidate.InodeID {
+			return errKeepTaskHistory
+		}
+		return nil
+	}) == nil
+}
+
+var errKeepTaskHistory = fmt.Errorf("metadata: retain task history")
+
 func (s *Service) taskOpsForControl(tx boltTxT, taskID string) ([]Op, error) {
-	seq, group, err := taskSequence(s.NamespaceID(), taskID)
+	seq, group, segmented, err := taskSequence(s.NamespaceID(), taskID)
 	if err != nil {
 		return nil, err
 	}
 	var first Op
 	if seq != 0 {
 		first, err = getOp(tx, seq)
-		if err != nil {
+		if err != nil && group == "" {
 			return nil, err
 		}
-	} else {
+		if err == nil && group != "" && first.TaskGroupID != group {
+			first = Op{}
+		}
+	}
+	if first.Seq == 0 {
 		var found bool
 		if err := tx.Bucket([]byte(bucketJournal)).ForEach(func(_, raw []byte) error {
 			var op Op
@@ -234,6 +261,9 @@ func (s *Service) taskOpsForControl(tx boltTxT, taskID string) ([]Op, error) {
 		seq = first.Seq
 	}
 	ops := []Op{first}
+	if segmented {
+		return taskSegmentOps(tx, first, group)
+	}
 	if group != "" && first.TaskGroupID == group {
 		var grouped []Op
 		if err := tx.Bucket([]byte(bucketJournal)).ForEach(func(_, raw []byte) error {
@@ -274,19 +304,45 @@ func (s *Service) taskOpsForControl(tx boltTxT, taskID string) ([]Op, error) {
 	return ops, nil
 }
 
-func taskSequence(namespace, taskID string) (uint64, string, error) {
+func taskSequence(namespace, taskID string) (uint64, string, bool, error) {
 	parsedNamespace, group, ok := taskIDGroup(taskID)
 	if !ok || parsedNamespace != namespace {
-		return 0, "", ErrNotFound
+		return 0, "", false, ErrNotFound
+	}
+	if segment := taskIDSegment(taskID); segment != 0 {
+		return segment, group, true, nil
 	}
 	// Resolve a group-qualified ID to its first journal sequence. Numeric
 	// suffixes from the previous format remain accepted for already-open UIs.
 	if strings.HasPrefix(group, "journal-") {
 		if seq, err := strconv.ParseUint(strings.TrimPrefix(group, "journal-"), 10, 64); err == nil && seq != 0 {
-			return seq, group, nil
+			return seq, group, false, nil
 		}
 	}
-	return 0, group, nil
+	return 0, group, false, nil
+}
+
+func taskSegmentOps(tx boltTxT, first Op, group string) ([]Op, error) {
+	if group == "" || first.TaskGroupID != group {
+		return []Op{first}, nil
+	}
+	matched := []Op{first}
+	err := tx.Bucket([]byte(bucketJournal)).ForEach(func(_, raw []byte) error {
+		var op Op
+		if err := decodeJSON(raw, &op); err != nil {
+			return err
+		}
+		if op.Seq == first.Seq || op.TaskGroupID != group || op.State != first.State || !canFoldTaskOps(first, op) {
+			return nil
+		}
+		matched = append(matched, op)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(matched, func(i, j int) bool { return matched[i].Seq < matched[j].Seq })
+	return matched, nil
 }
 
 func taskTerminalAt(op Op) (time.Time, bool) {
@@ -394,9 +450,7 @@ func ensureCancellationIsolated(tx boltTxT, inode uint64, kind Kind, selected []
 	})
 }
 
-func unsettledOp(state OpState) bool {
-	return state == OpStatePending || state == OpStateRunning || state == OpStateFailed || state == OpStateReconciling
-}
+func unsettledOp(state OpState) bool { return opStateUnsettled(state) }
 
 func inodeIsInSubtree(tx boltTxT, inode, root uint64) bool {
 	for depth := 0; inode != 0 && depth < 1024; depth++ {

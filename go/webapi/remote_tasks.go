@@ -10,6 +10,7 @@ import (
 	"time"
 
 	storageconfig "remote-storage/go/config"
+	bucketmount "remote-storage/go/mount"
 	bucketmetadata "remote-storage/go/mount/metadata"
 	s3ops "remote-storage/go/s3"
 )
@@ -39,7 +40,7 @@ func listWebRemoteTasks(input invokeEnvelope) (any, error) {
 		return nil, err
 	}
 	defer releaseWebTaskHandles(manager, handles)
-	if _, err := manager.CompactTaskHistory(); err != nil {
+	if _, err := manager.ClearTaskHistoryFor(config.ProfileID, input.Bucket, time.Now().Add(-30*24*time.Hour)); err != nil {
 		return nil, err
 	}
 	groups, err := manager.ListTaskGroups()
@@ -121,17 +122,19 @@ func releaseWebTaskHandles(manager *bucketmetadata.Manager, handles []*bucketmet
 }
 
 func getWebRemoteTask(input invokeEnvelope) (any, error) {
+	config, err := loadCurrentConfig()
+	if err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(input.TaskID) == "" {
 		return nil, fmt.Errorf("missing remote task id")
 	}
 	if strings.HasPrefix(input.TaskID, "transfer:") {
-		// Runtime snapshots do not yet carry an authenticated profile identity.
-		// Keep them out of the Web API until that adapter can scope them safely.
-		return nil, bucketmetadata.ErrNotFound
-	}
-	config, err := loadCurrentConfig()
-	if err != nil {
-		return nil, err
+		snapshot, ok := s3ops.GetTransferSnapshot(strings.TrimPrefix(input.TaskID, "transfer:"))
+		if !ok || snapshot.ProfileID != config.ProfileID || (input.Bucket != "" && snapshot.Bucket != input.Bucket) {
+			return nil, bucketmetadata.ErrNotFound
+		}
+		return webRuntimeTaskWire(snapshot), nil
 	}
 	manager, err := bucketmetadata.DefaultManager()
 	if err != nil {
@@ -162,12 +165,26 @@ func getWebRemoteTask(input invokeEnvelope) (any, error) {
 }
 
 func controlWebRemoteTask(input invokeEnvelope, action string) (any, error) {
-	if strings.HasPrefix(input.TaskID, "transfer:") {
-		return nil, bucketmetadata.ErrNotFound
-	}
 	config, err := loadCurrentConfig()
 	if err != nil {
 		return nil, err
+	}
+	if strings.HasPrefix(input.TaskID, "transfer:") {
+		id := strings.TrimPrefix(input.TaskID, "transfer:")
+		snapshot, ok := s3ops.GetTransferSnapshot(id)
+		if !ok || snapshot.ProfileID != config.ProfileID || (input.Bucket != "" && snapshot.Bucket != input.Bucket) {
+			return nil, bucketmetadata.ErrNotFound
+		}
+		ok = false
+		switch action {
+		case "cancel":
+			ok = bucketmount.CancelQueuedTransfer(id) || s3ops.CancelTransfer(id)
+		case "trigger":
+			ok = bucketmount.TriggerQueuedTransfer(id)
+		case "retry":
+			ok = false
+		}
+		return map[string]any{"ok": ok}, nil
 	}
 	manager, err := bucketmetadata.DefaultManager()
 	if err != nil {
@@ -270,28 +287,33 @@ func webMetadataTaskWire(task bucketmetadata.Task, physical map[string]s3ops.Tra
 	_ = json.Unmarshal(raw, &wire)
 	wire["source"] = "metadata"
 	wire["rawEventCount"] = len(task.SourceSeqs)
-	events := make([]map[string]any, 0, len(task.SourceSeqs))
-	for index, seq := range task.SourceSeqs {
-		kind := task.Kind
-		if index < len(task.SourceKinds) {
-			kind = task.SourceKinds[index]
-		}
-		events = append(events, map[string]any{
-			"sequence": seq, "kind": kind, "state": task.Status,
-			"targetPath": task.DisplayPath, "folded": index != len(task.SourceSeqs)-1,
-		})
-	}
-	wire["events"] = events
+	wire["rawEventCount"] = len(task.Events)
+	wire["events"] = task.Events
 	physicalIDs := task.PhysicalTaskIDs
 	if len(physicalIDs) == 0 && task.PhysicalSnapshot != "" {
 		physicalIDs = []string{task.PhysicalSnapshot}
 	}
 	wire["physicalTaskIds"] = physicalIDs
-	if progress, ok := webMergeTransferProgress(physical, physicalIDs); ok {
+	owned := webOwnedPhysicalSnapshots(task, physical)
+	if progress, ok := webMergeTransferProgress(owned, physicalIDs); ok {
 		wire["progress"] = progress
-		wire["phases"] = webTransferPhases(physical, physicalIDs)
+		wire["phases"] = webTransferPhases(owned, physicalIDs)
 	}
 	return wire
+}
+
+func webOwnedPhysicalSnapshots(task bucketmetadata.Task, physical map[string]s3ops.TransferSnapshot) map[string]s3ops.TransferSnapshot {
+	owned := make(map[string]s3ops.TransferSnapshot)
+	for id, snapshot := range physical {
+		if snapshot.ProfileID != "" && task.ProfileID != "" && snapshot.ProfileID != task.ProfileID {
+			continue
+		}
+		if task.Bucket != "" && snapshot.Bucket != "" && snapshot.Bucket != task.Bucket {
+			continue
+		}
+		owned[id] = snapshot
+	}
+	return owned
 }
 
 func webTransferPhases(physical map[string]s3ops.TransferSnapshot, ids []string) []map[string]any {
@@ -369,20 +391,22 @@ func webRuntimeTaskWire(snapshot s3ops.TransferSnapshot) map[string]any {
 		source = "app_update"
 	}
 	return map[string]any{
-		"id":              "transfer:" + snapshot.ID,
-		"source":          source,
-		"kind":            webRuntimeKind(snapshot.Type),
-		"profileId":       snapshot.ProfileID,
-		"status":          snapshot.Status,
-		"phase":           snapshot.StatusDetail,
-		"bucket":          snapshot.Bucket,
-		"sourcePath":      snapshot.Key,
-		"targetPath":      snapshot.TargetPath,
-		"displayPath":     snapshot.Key,
-		"createdAt":       snapshot.CreatedAt,
-		"cancelable":      snapshot.Status == "pending" || snapshot.Status == "running",
-		"retryable":       snapshot.Status == "failed" && snapshot.LocalPath != "",
+		"id":          "transfer:" + snapshot.ID,
+		"source":      source,
+		"kind":        webRuntimeKind(snapshot.Type),
+		"profileId":   snapshot.ProfileID,
+		"status":      snapshot.Status,
+		"phase":       snapshot.StatusDetail,
+		"bucket":      snapshot.Bucket,
+		"sourcePath":  snapshot.Key,
+		"targetPath":  snapshot.TargetPath,
+		"displayPath": snapshot.Key,
+		"createdAt":   snapshot.CreatedAt,
+		"cancelable":  snapshot.Status == "pending" || snapshot.Status == "running",
+		// Runtime producers do not yet expose a replayable request contract.
+		"retryable":       false,
 		"triggerable":     snapshot.Status == "pending" && webRuntimeKind(snapshot.Type) == "upload",
+		"error":           snapshot.Error,
 		"progress":        webTransferProgress(snapshot),
 		"physicalTaskIds": []string{snapshot.ID},
 	}

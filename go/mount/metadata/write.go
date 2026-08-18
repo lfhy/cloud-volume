@@ -320,11 +320,10 @@ func ensureNotDescendant(tx boltTxT, inode, candidate uint64) error {
 }
 
 func appendOp(tx boltTxT, op Op) error {
-	journal := tx.Bucket([]byte(bucketJournal))
-	cursor := journal.Cursor()
-	seq := uint64(1)
-	if key, _ := cursor.Last(); key != nil {
-		seq = decodeUint64(key) + 1
+	schema := tx.Bucket([]byte(bucketSchema))
+	seq := decodeUint64(schema.Get([]byte("nextOpSeq"))) + 1
+	if err := schema.Put([]byte("nextOpSeq"), encodeUint64(seq)); err != nil {
+		return err
 	}
 	op.Seq = seq
 	assignTaskGroup(tx, &op)

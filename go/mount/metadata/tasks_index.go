@@ -59,10 +59,11 @@ func removeTaskOpIndex(tx boltTx, op Op) error {
 	}
 	prefix := taskMemberPrefix(op.TaskGroupID)
 	cursor := members.Cursor()
-	if key, _ := cursor.Seek(prefix); key == nil || !bytes.HasPrefix(key, prefix) {
+	key, _ := cursor.Seek(prefix)
+	if key == nil || !bytes.HasPrefix(key, prefix) {
 		return tx.Bucket([]byte(bucketTaskGroups)).Delete([]byte(op.TaskGroupID))
 	}
-	return nil
+	return tx.Bucket([]byte(bucketTaskGroups)).Put([]byte(op.TaskGroupID), append([]byte(nil), key[len(prefix):]...))
 }
 
 func taskMemberPrefix(group string) []byte { return append([]byte(group), 0) }

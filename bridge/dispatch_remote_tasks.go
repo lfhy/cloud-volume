@@ -46,7 +46,7 @@ func listRemoteTasks(args json.RawMessage) (any, error) {
 		return nil, err
 	}
 	defer releaseTaskNamespaceHandles(manager, handles)
-	if _, err := manager.CompactTaskHistory(); err != nil {
+	if _, err := manager.ClearTaskHistoryFor(input.ProfileID, input.Bucket, time.Now().Add(-30*24*time.Hour)); err != nil {
 		return nil, err
 	}
 	groups, err := manager.ListTaskGroups()
@@ -319,32 +319,33 @@ func metadataTaskWire(task bucketmetadata.Task, physical map[string]s3ops.Transf
 	_ = json.Unmarshal(raw, &wire)
 	wire["source"] = "metadata"
 	wire["namespaceId"] = task.NamespaceID
-	wire["rawEventCount"] = len(task.SourceSeqs)
-	events := make([]map[string]any, 0, len(task.SourceSeqs))
-	for index, seq := range task.SourceSeqs {
-		kind := task.Kind
-		if index < len(task.SourceKinds) {
-			kind = task.SourceKinds[index]
-		}
-		events = append(events, map[string]any{
-			"sequence":   seq,
-			"kind":       kind,
-			"state":      task.Status,
-			"targetPath": task.DisplayPath,
-			"folded":     index != len(task.SourceSeqs)-1,
-		})
-	}
-	wire["events"] = events
+	wire["rawEventCount"] = len(task.Events)
+	wire["events"] = task.Events
 	physicalIDs := task.PhysicalTaskIDs
 	if len(physicalIDs) == 0 && task.PhysicalSnapshot != "" {
 		physicalIDs = []string{task.PhysicalSnapshot}
 	}
 	wire["physicalTaskIds"] = physicalIDs
-	if progress, ok := mergeTransferProgress(physical, physicalIDs); ok {
+	owned := ownedPhysicalSnapshots(task, physical)
+	if progress, ok := mergeTransferProgress(owned, physicalIDs); ok {
 		wire["progress"] = progress
-		wire["phases"] = transferPhases(physical, physicalIDs)
+		wire["phases"] = transferPhases(owned, physicalIDs)
 	}
 	return wire
+}
+
+func ownedPhysicalSnapshots(task bucketmetadata.Task, physical map[string]s3ops.TransferSnapshot) map[string]s3ops.TransferSnapshot {
+	owned := make(map[string]s3ops.TransferSnapshot)
+	for id, snapshot := range physical {
+		if snapshot.ProfileID != "" && task.ProfileID != "" && snapshot.ProfileID != task.ProfileID {
+			continue
+		}
+		if task.Bucket != "" && snapshot.Bucket != "" && snapshot.Bucket != task.Bucket {
+			continue
+		}
+		owned[id] = snapshot
+	}
+	return owned
 }
 
 func transferPhases(physical map[string]s3ops.TransferSnapshot, ids []string) []map[string]any {
@@ -425,20 +426,22 @@ func runtimeTaskWire(snapshot s3ops.TransferSnapshot) map[string]any {
 		source = "app_update"
 	}
 	return map[string]any{
-		"id":              "transfer:" + snapshot.ID,
-		"source":          source,
-		"kind":            kind,
-		"profileId":       snapshot.ProfileID,
-		"status":          status,
-		"phase":           phase,
-		"bucket":          snapshot.Bucket,
-		"sourcePath":      snapshot.Key,
-		"targetPath":      snapshot.TargetPath,
-		"displayPath":     snapshot.Key,
-		"createdAt":       snapshot.CreatedAt,
-		"cancelable":      status == "pending" || status == "running",
-		"retryable":       status == "failed" && snapshot.LocalPath != "",
+		"id":          "transfer:" + snapshot.ID,
+		"source":      source,
+		"kind":        kind,
+		"profileId":   snapshot.ProfileID,
+		"status":      status,
+		"phase":       phase,
+		"bucket":      snapshot.Bucket,
+		"sourcePath":  snapshot.Key,
+		"targetPath":  snapshot.TargetPath,
+		"displayPath": snapshot.Key,
+		"createdAt":   snapshot.CreatedAt,
+		"cancelable":  status == "pending" || status == "running",
+		// Runtime producers do not yet expose a replayable request contract.
+		"retryable":       false,
 		"triggerable":     status == "pending" && kind == "upload",
+		"error":           snapshot.Error,
 		"progress":        transferProgressWire(snapshot),
 		"physicalTaskIds": []string{snapshot.ID},
 	}

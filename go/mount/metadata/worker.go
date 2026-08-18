@@ -4,6 +4,7 @@ package metadata
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 )
@@ -34,6 +35,9 @@ func NewWorker(service *Service) *Worker {
 		done:    make(chan struct{}),
 		running: map[uint64]struct{}{},
 		cancels: map[uint64]context.CancelFunc{},
+	}
+	if err := w.recoverDurableStates(); err != nil {
+		log.Printf("[metadata/worker] recover journal states: %v", err)
 	}
 	service.setWorker(w)
 	go w.run()
@@ -139,11 +143,7 @@ func (w *Worker) snapshotWork() (pending int, failed int, running int, next time
 			case OpStateRunning:
 				pending++
 				running++
-			case OpStateVerifying, OpStateCancelRequested:
-				pending++
-			case OpStateReconciling:
-				pending++
-			case OpStatePending:
+			case OpStatePending, OpStateReconciling, OpStateVerifying, OpStateCancelRequested:
 				pending++
 				if op.NextAttemptUnixNano > now {
 					nextTime := time.Unix(0, op.NextAttemptUnixNano)
@@ -201,6 +201,17 @@ func (w *Worker) claimDue() []Op {
 				}
 				continue
 			}
+			if opStateNeedsReconciliation(op.State) {
+				if blocked, _ := w.blocked(tx, op); blocked {
+					continue
+				}
+				w.running[op.InodeID] = struct{}{}
+				claimed = append(claimed, op)
+				continue
+			}
+			if op.State != OpStatePending {
+				continue
+			}
 			if blocked, _ := w.blocked(tx, op); blocked {
 				continue
 			}
@@ -215,6 +226,45 @@ func (w *Worker) claimDue() []Op {
 		return nil
 	})
 	return claimed
+}
+
+// recoverDurableStates repairs transient scheduling state after a process
+// restart. Provider side effects are never replayed from verifying/cancel
+// states; those entries are queued for probe-based reconciliation instead.
+func (w *Worker) recoverDurableStates() error {
+	return w.service.store.update(func(tx boltTxT) error {
+		journal := tx.Bucket([]byte(bucketJournal))
+		var ops []Op
+		if err := journal.ForEach(func(_, value []byte) error {
+			var op Op
+			if err := decodeJSON(value, &op); err != nil {
+				return err
+			}
+			ops = append(ops, op)
+			return nil
+		}); err != nil {
+			return err
+		}
+		now := time.Now().UnixNano()
+		for _, op := range ops {
+			previous := op
+			switch op.State {
+			case OpStateRunning:
+				op.State = OpStatePending
+				op.NextAttemptUnixNano = now
+			case OpStateVerifying, OpStateCancelRequested, OpStateReconciling:
+				if op.NextAttemptUnixNano == 0 {
+					op.NextAttemptUnixNano = now
+				}
+			default:
+				continue
+			}
+			if err := putOp(tx, op, previous); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // blocked reports whether one op must wait on an earlier unfinished journal
@@ -262,7 +312,7 @@ func pendingOpForInode(tx boltTxT, inode, beforeSeq uint64) bool {
 		if decodeJSON(raw, &prior) != nil || prior.InodeID != inode {
 			return nil
 		}
-		if prior.State == OpStatePending || prior.State == OpStateRunning || prior.State == OpStateReconciling {
+		if opStateUnsettled(prior.State) {
 			found = true
 		}
 		return nil

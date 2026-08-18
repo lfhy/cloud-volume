@@ -4,6 +4,7 @@ package metadata
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestListTasksFoldsMkdirAndRenames(t *testing.T) {
@@ -58,7 +59,7 @@ func TestListTasksWriteDependencyAndPhysicalSnapshot(t *testing.T) {
 		t.Fatalf("tasks = %+v, want mkdir + write", tasks)
 	}
 	write := tasks[1]
-	if write.Type != OpWrite || write.ContentGeneration != 7 || write.PhysicalSeq != 2 || write.PhysicalSnapshot != "metadata-op-2" {
+	if write.Type != OpWrite || write.ContentGeneration != 7 || write.PhysicalSeq != 2 || write.PhysicalSnapshot != physicalTaskID(service.NamespaceID(), 2) {
 		t.Fatalf("write mapping = %+v", write)
 	}
 	if write.State != TaskStateBlocked || len(write.Dependencies) != 1 || write.DependencySeqs[0] != 1 {
@@ -106,6 +107,72 @@ func TestListTasksDoesNotFoldStartedMkdir(t *testing.T) {
 	}
 	if len(tasks) != 2 || tasks[0].State != TaskStateRunning || tasks[1].Type != OpRename {
 		t.Fatalf("started mkdir was folded: %+v", tasks)
+	}
+}
+
+func TestListTasksUsesDistinctIDsForMixedGroupStates(t *testing.T) {
+	service := newTestService(t, newFakeBackend())
+	_, first, err := service.StageWriteForName(rootInode, "rapid.txt", 1, strings.NewReader("first"), 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Write(rootInode, "rapid.txt", first, WriteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.store.update(func(tx boltTxT) error {
+		return replaceOp(tx, 1, func(op *Op) { op.State = OpStateRunning })
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, second, err := service.StageWriteForName(rootInode, "rapid.txt", 2, strings.NewReader("second"), 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Write(rootInode, "rapid.txt", second, WriteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	tasks, err := service.ListTasks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 2 || tasks[0].ID == tasks[1].ID {
+		t.Fatalf("mixed lifecycle tasks reused an ID: %+v", tasks)
+	}
+	if tasks[0].SourceSeqs[0] != 1 || tasks[1].SourceSeqs[0] != 2 {
+		t.Fatalf("mixed lifecycle source sequences = %+v", tasks)
+	}
+}
+
+func TestJournalSequenceDoesNotReuseAfterHistoryClear(t *testing.T) {
+	service := newTestService(t, newFakeBackend())
+	if _, err := service.CreateDirectory(rootInode, "old", WriteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.store.update(func(tx boltTxT) error {
+		return replaceOp(tx, 1, func(op *Op) {
+			op.State = OpStateApplied
+			op.AppliedAtUnixNano = time.Now().Add(-time.Hour).UnixNano()
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ClearTaskHistory(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CreateDirectory(rootInode, "new", WriteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	var seq uint64
+	if err := service.store.view(func(tx boltTxT) error {
+		return tx.Bucket([]byte(bucketJournal)).ForEach(func(key, _ []byte) error {
+			seq = decodeUint64(key)
+			return nil
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if seq != 2 {
+		t.Fatalf("journal sequence reused after clear: %d", seq)
 	}
 }
 

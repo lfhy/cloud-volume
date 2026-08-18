@@ -9,93 +9,6 @@ import (
 	"time"
 )
 
-// TaskState is the stable wire state for one effective task.
-type TaskState string
-
-const (
-	TaskStatePending         TaskState = "pending"
-	TaskStateRunning         TaskState = "running"
-	TaskStateBlocked         TaskState = "blocked"
-	TaskStateVerifying       TaskState = "verifying"
-	TaskStateRetryWait       TaskState = "retry_wait"
-	TaskStateFailed          TaskState = "failed"
-	TaskStateConflict        TaskState = "conflict"
-	TaskStateDone            TaskState = "done"
-	TaskStateCancelRequested TaskState = "cancel_requested"
-	TaskStateCanceled        TaskState = "canceled"
-	TaskStateReconciling     TaskState = "reconciling"
-)
-
-// Task is an effective journal operation. SourceSeqs records journal entries
-// folded into this task; PhysicalSnapshot maps work to the worker transfer ID.
-type Task struct {
-	ID                string    `json:"id"`
-	Namespace         string    `json:"namespace"`
-	NamespaceID       string    `json:"namespaceId"`
-	ProfileID         string    `json:"profileId,omitempty"`
-	Bucket            string    `json:"bucket,omitempty"`
-	Seq               uint64    `json:"seq"`
-	TaskGroupID       string    `json:"taskGroupId,omitempty"`
-	LastSeq           uint64    `json:"lastSeq"`
-	SourceSeqs        []uint64  `json:"sourceSeqs,omitempty"`
-	SourceKinds       []string  `json:"sourceKinds,omitempty"`
-	Type              OpType    `json:"type"`
-	State             TaskState `json:"state"`
-	Kind              string    `json:"kind"`
-	Status            string    `json:"status"`
-	Source            string    `json:"source"`
-	InodeID           uint64    `json:"inodeId"`
-	ParentID          uint64    `json:"parentId,omitempty"`
-	Name              string    `json:"name,omitempty"`
-	OldParent         uint64    `json:"oldParent,omitempty"`
-	OldName           string    `json:"oldName,omitempty"`
-	NewParent         uint64    `json:"newParent,omitempty"`
-	NewName           string    `json:"newName,omitempty"`
-	Path              string    `json:"path,omitempty"`
-	SourcePath        string    `json:"sourcePath,omitempty"`
-	TargetPath        string    `json:"targetPath,omitempty"`
-	DisplayPath       string    `json:"displayPath,omitempty"`
-	Phase             string    `json:"phase,omitempty"`
-	PhaseDetail       string    `json:"phaseDetail,omitempty"`
-	BlockedReason     string    `json:"blockedReason,omitempty"`
-	Dependencies      []string  `json:"dependencies,omitempty"`
-	DependencySeqs    []uint64  `json:"dependencySeqs,omitempty"`
-	ContentGeneration uint64    `json:"contentGeneration,omitempty"`
-	PhysicalSeq       uint64    `json:"physicalSeq,omitempty"`
-	PhysicalSnapshot  string    `json:"physicalSnapshot,omitempty"`
-	PhysicalTaskIDs   []string  `json:"physicalTaskIds,omitempty"`
-	Retry             int       `json:"retry,omitempty"`
-	LastError         string    `json:"lastError,omitempty"`
-	NextAttemptUnixNs int64     `json:"nextAttemptUnixNs,omitempty"`
-	Origin            string    `json:"origin,omitempty"`
-	CreatedAtUnixNs   int64     `json:"createdAtUnixNs,omitempty"`
-	AppliedAtUnixNs   int64     `json:"appliedAtUnixNs,omitempty"`
-	CanceledAtUnixNs  int64     `json:"canceledAtUnixNs,omitempty"`
-	CreatedAt         string    `json:"createdAt,omitempty"`
-	UpdatedAt         string    `json:"updatedAt,omitempty"`
-	FinishedAt        string    `json:"finishedAt,omitempty"`
-	NextRetryAt       string    `json:"nextRetryAt,omitempty"`
-	Cancelable        bool      `json:"cancelable"`
-	Retryable         bool      `json:"retryable"`
-	Triggerable       bool      `json:"triggerable"`
-}
-
-// TaskSummary gives callers aggregate counts without reinterpreting states.
-type TaskSummary struct {
-	Total   int `json:"total"`
-	Pending int `json:"pending"`
-	Running int `json:"running"`
-	Blocked int `json:"blocked"`
-	Failed  int `json:"failed"`
-}
-
-// TaskGroup is the namespace-level wire payload for a task-list refresh.
-type TaskGroup struct {
-	Namespace string      `json:"namespace"`
-	Tasks     []Task      `json:"tasks"`
-	Summary   TaskSummary `json:"summary"`
-}
-
 // TaskID returns the namespace-qualified stable ID for the default journal
 // group created by a sequence. Group IDs are encoded so provider/user labels
 // cannot make the namespace portion ambiguous.
@@ -108,6 +21,17 @@ func taskIDForGroup(namespace, group string) string {
 	return fmt.Sprintf("sync:%s:g%s", namespace, encoded)
 }
 
+// taskIDForEntry keeps a coalesced group's stable ID when it has one visible
+// state. Mixed lifecycle segments get a source-sequence suffix so controls
+// cannot accidentally mutate a concurrently running sibling segment.
+func taskIDForEntry(namespace, group string, seq uint64, segmented bool) string {
+	id := taskIDForGroup(namespace, group)
+	if !segmented {
+		return id
+	}
+	return fmt.Sprintf("%s:s%d", id, seq)
+}
+
 func taskIDGroup(taskID string) (namespace, group string, ok bool) {
 	trimmed := strings.TrimSpace(taskID)
 	if strings.HasPrefix(trimmed, "sync:") {
@@ -118,6 +42,9 @@ func taskIDGroup(taskID string) (namespace, group string, ok bool) {
 		}
 		namespace = rest[:separator]
 		encoded := strings.TrimPrefix(rest[separator+1:], "g")
+		if segment := strings.LastIndex(encoded, ":s"); segment > 0 {
+			encoded = encoded[:segment]
+		}
 		decoded, err := base64.RawURLEncoding.DecodeString(encoded)
 		if err != nil || len(decoded) == 0 {
 			return "", "", false
@@ -132,6 +59,20 @@ func taskIDGroup(taskID string) (namespace, group string, ok bool) {
 	return trimmed[:separator], "journal-" + strings.TrimSpace(trimmed[separator+1:]), true
 }
 
+func taskIDSegment(taskID string) uint64 {
+	trimmed := strings.TrimSpace(taskID)
+	if !strings.HasPrefix(trimmed, "sync:") {
+		return 0
+	}
+	index := strings.LastIndex(trimmed, ":s")
+	if index < 0 || index+2 == len(trimmed) {
+		return 0
+	}
+	var seq uint64
+	_, _ = fmt.Sscanf(trimmed[index+2:], "%d", &seq)
+	return seq
+}
+
 func taskIDNamespace(taskID string) string {
 	if namespace, _, ok := taskIDGroup(taskID); ok {
 		return namespace
@@ -140,13 +81,16 @@ func taskIDNamespace(taskID string) string {
 }
 
 type taskEntry struct {
-	op      Op
-	created int64
-	typeOp  OpType
-	seqs    []uint64
-	kinds   []string
-	lastSeq uint64
-	deps    []*taskEntry
+	op        Op
+	ops       []Op
+	created   int64
+	typeOp    OpType
+	seqs      []uint64
+	kinds     []string
+	lastSeq   uint64
+	deps      []*taskEntry
+	id        string
+	segmented bool
 }
 
 // ListTasks derives effective work directly from the journal snapshot.
@@ -188,13 +132,14 @@ func (s *Service) ListTasks() ([]Task, error) {
 			continue
 		}
 		op := ops[i]
-		entry := &taskEntry{op: op, created: op.CreatedAtUnixNano, typeOp: op.Type, seqs: []uint64{op.Seq}, kinds: []string{taskKind(op.Type)}, lastSeq: op.Seq}
+		entry := &taskEntry{op: op, ops: []Op{op}, created: op.CreatedAtUnixNano, typeOp: op.Type, seqs: []uint64{op.Seq}, kinds: []string{taskKind(op.Type)}, lastSeq: op.Seq}
 		if op.TaskGroupID != "" && taskStateFoldable(op.State) {
 			for j := i + 1; j < len(ops); j++ {
 				if consumed[j] || ops[j].TaskGroupID != op.TaskGroupID || ops[j].State != op.State || !canFoldTaskOps(entry.op, ops[j]) {
 					continue
 				}
 				entry.op = ops[j]
+				entry.ops = append(entry.ops, ops[j])
 				entry.seqs = append(entry.seqs, ops[j].Seq)
 				entry.kinds = append(entry.kinds, taskKind(ops[j].Type))
 				entry.lastSeq = ops[j].Seq
@@ -203,6 +148,22 @@ func (s *Service) ListTasks() ([]Task, error) {
 		}
 		entries = append(entries, entry)
 		i++
+	}
+	groupEntries := make(map[string]int, len(entries))
+	for _, entry := range entries {
+		group := entry.op.TaskGroupID
+		if group == "" {
+			group = fmt.Sprintf("journal-%d", entry.seqs[0])
+		}
+		groupEntries[group]++
+	}
+	for _, entry := range entries {
+		group := entry.op.TaskGroupID
+		if group == "" {
+			group = fmt.Sprintf("journal-%d", entry.seqs[0])
+		}
+		entry.segmented = groupEntries[group] > 1
+		entry.id = taskIDForEntry(s.NamespaceID(), group, entry.seqs[0], entry.segmented)
 	}
 	// Earlier same-inode work and parent mkdir/rename work are explicit deps.
 	for _, entry := range entries {
@@ -235,7 +196,25 @@ func (s *Service) taskFromEntry(entry *taskEntry, inodes map[uint64]Inode) Task 
 	if groupID == "" {
 		groupID = fmt.Sprintf("journal-%d", entry.seqs[0])
 	}
-	task := Task{ID: taskIDForGroup(namespace, groupID), Namespace: namespace, NamespaceID: namespace, ProfileID: s.store.namespace.Config.ProfileID, Bucket: s.store.namespace.Bucket, Seq: entry.seqs[0], TaskGroupID: groupID, LastSeq: entry.lastSeq, SourceSeqs: append([]uint64(nil), entry.seqs...), SourceKinds: append([]string(nil), entry.kinds...), Type: entry.typeOp, Kind: taskKind(entry.typeOp), Source: "metadata", InodeID: op.InodeID, OldParent: op.OldParent, OldName: op.OldName, NewParent: op.NewParent, NewName: op.NewName, ContentGeneration: op.ContentGeneration, Retry: op.Retry, LastError: op.LastError, NextAttemptUnixNs: op.NextAttemptUnixNano, Origin: op.Origin, CreatedAtUnixNs: entry.created, AppliedAtUnixNs: op.AppliedAtUnixNano, CanceledAtUnixNs: op.CanceledAtUnixNano}
+	taskID := entry.id
+	if taskID == "" {
+		taskID = taskIDForEntry(namespace, groupID, entry.seqs[0], entry.segmented)
+	}
+	task := Task{ID: taskID, Namespace: namespace, NamespaceID: namespace, ProfileID: s.store.namespace.Config.ProfileID, Bucket: s.store.namespace.Bucket, Seq: entry.seqs[0], TaskGroupID: groupID, LastSeq: entry.lastSeq, SourceSeqs: append([]uint64(nil), entry.seqs...), SourceKinds: append([]string(nil), entry.kinds...), Type: entry.typeOp, Kind: taskKind(entry.typeOp), Source: "metadata", InodeID: op.InodeID, OldParent: op.OldParent, OldName: op.OldName, NewParent: op.NewParent, NewName: op.NewName, ContentGeneration: op.ContentGeneration, Retry: op.Retry, LastError: op.LastError, NextAttemptUnixNs: op.NextAttemptUnixNano, Origin: op.Origin, CreatedAtUnixNs: entry.created, AppliedAtUnixNs: op.AppliedAtUnixNano, CanceledAtUnixNs: op.CanceledAtUnixNano}
+	for index, raw := range entry.ops {
+		kind := taskKind(raw.Type)
+		sourcePath := taskPath(inodes, raw.OldParent, raw.OldName)
+		targetPath := taskPath(inodes, raw.NewParent, raw.NewName)
+		if raw.Type == OpWrite || raw.Type == OpMkdir {
+			sourcePath = targetPath
+		}
+		task.Events = append(task.Events, TaskEvent{
+			Sequence: raw.Seq, Kind: kind, State: opStateWire(raw.State),
+			SourcePath: sourcePath, TargetPath: targetPath, Detail: raw.LastError,
+			Folded:    index != len(entry.ops)-1,
+			CreatedAt: time.Unix(0, raw.CreatedAtUnixNano).UTC().Format(time.RFC3339Nano),
+		})
+	}
 	if task.Type == OpMkdir || task.Type == OpWrite {
 		task.ParentID, task.Name = op.NewParent, op.NewName
 	}
@@ -263,7 +242,7 @@ func (s *Service) taskFromEntry(entry *taskEntry, inodes map[uint64]Inode) Task 
 	if task.Type != OpMkdir {
 		task.PhysicalSeq = entry.seqs[0]
 		for _, seq := range entry.seqs {
-			task.PhysicalTaskIDs = append(task.PhysicalTaskIDs, fmt.Sprintf("metadata-op-%d", seq))
+			task.PhysicalTaskIDs = append(task.PhysicalTaskIDs, physicalTaskID(namespace, seq))
 		}
 		task.PhysicalSnapshot = task.PhysicalTaskIDs[0]
 	}
@@ -290,11 +269,14 @@ func (s *Service) taskFromEntry(entry *taskEntry, inodes map[uint64]Inode) Task 
 		task.State = TaskStatePending
 	}
 	for _, dep := range entry.deps {
-		depGroup := dep.op.TaskGroupID
-		if depGroup == "" {
-			depGroup = fmt.Sprintf("journal-%d", dep.seqs[0])
+		depID := dep.id
+		if depID == "" {
+			depGroup := dep.op.TaskGroupID
+			if depGroup == "" {
+				depGroup = fmt.Sprintf("journal-%d", dep.seqs[0])
+			}
+			depID = taskIDForEntry(s.NamespaceID(), depGroup, dep.seqs[0], dep.segmented)
 		}
-		depID := taskIDForGroup(s.NamespaceID(), depGroup)
 		task.Dependencies = append(task.Dependencies, depID)
 		task.DependencySeqs = append(task.DependencySeqs, dep.seqs[0])
 	}
@@ -312,7 +294,7 @@ func taskStateFoldable(state OpState) bool {
 }
 
 func taskStateUnsettled(state OpState) bool {
-	return state == OpStatePending || state == OpStateRunning || state == OpStateFailed || state == OpStateReconciling || state == OpStateVerifying || state == OpStateCancelRequested
+	return opStateUnsettled(state)
 }
 
 func canFoldTaskOps(first, next Op) bool {
@@ -387,6 +369,29 @@ func taskKind(value OpType) string {
 		return "rename"
 	case OpDelete:
 		return "delete"
+	default:
+		return "unknown"
+	}
+}
+
+func opStateWire(state OpState) string {
+	switch state {
+	case OpStatePending:
+		return "pending"
+	case OpStateRunning:
+		return "running"
+	case OpStateApplied:
+		return "done"
+	case OpStateFailed:
+		return "failed"
+	case OpStateCanceled:
+		return "canceled"
+	case OpStateReconciling:
+		return "reconciling"
+	case OpStateVerifying:
+		return "verifying"
+	case OpStateCancelRequested:
+		return "cancel_requested"
 	default:
 		return "unknown"
 	}

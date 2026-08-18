@@ -144,7 +144,7 @@ func putOp(tx boltTx, op Op, previous Op) error {
 			return err
 		}
 	}
-	if op.State == OpStatePending || op.State == OpStateFailed {
+	if opStateReady(op.State) {
 		return tx.Bucket([]byte(bucketReadyOps)).Put(readyKey(op), []byte{})
 	}
 	return nil
