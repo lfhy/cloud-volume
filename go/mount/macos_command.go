@@ -27,6 +27,7 @@ func runLoggedCommand(
 ) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	defer cancel()
 
 	startedAt := time.Now()
 	if shouldLogMacOSCommandSuccess(phase) {
