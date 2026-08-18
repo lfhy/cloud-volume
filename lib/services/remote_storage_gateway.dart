@@ -342,9 +342,9 @@ abstract class RemoteStorageGateway {
   });
 
   /// Triggers a background download + install + relaunch of a release asset.
-  /// Returns the transfer task id so the caller can poll progress via
-  /// [TransferQueue]. The download/install runs entirely in Go so the Dart
-  /// side only renders UI state.
+  /// Returns the transfer task id so the caller can observe the matching
+  /// [RemoteTaskStore] projection. The download/install runs entirely in Go,
+  /// while the Dart side only renders the unified task state.
   Future<String> installApp({
     required String assetUrl,
     required String assetName,
