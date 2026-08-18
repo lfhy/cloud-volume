@@ -151,7 +151,7 @@ extension _TransfersPageRemoteActions on _TransfersPageState {
       if (mounted) {
         _selectedTaskIds.removeAll(taskIds);
         showAppToast(context, title: '已清理历史', message: '$removed 条记录');
-        setState(() {});
+        _remoteSetState(() {});
       }
     } catch (error) {
       if (mounted) {
