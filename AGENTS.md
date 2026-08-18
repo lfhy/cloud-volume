@@ -493,8 +493,8 @@ If a path is absent on both sides but still in index → `skip` (`stale_index`).
 1. User creates/edits a profile from **文件同步** page only (`_addProfile` / `_editProfile`): default → `showAppModal` + `FileSyncProfileEditor(asDialog: true)`; debug sub-window only when `SyncEditorWindowService.openEditor` is supported (`preferModalSubWindows`).
 2. `_FileSyncTasksActions._saveProfile` → `SyncProfileNotifier.saveProfile` → Go `saveSyncProfile` → `go/sync/store.go`.
 3. `SyncProfileNotifier` polls `listSyncProfiles` every 3s → Go runtime state from `scheduler.go`/`runner.go`.
-4. On interval or manual "立即同步" trigger → Go `runner.go` runs `diff.go` → `reconcile.go` → `executor.go`, enqueueing `sync_*` tasks into the shared `TransferQueue`.
-5. `FileSyncTasksPage` displays both profile statuses (from `SyncProfileNotifier`) and live `sync_*` tasks (from `TransferQueue`).
+4. On interval or manual "立即同步" trigger → Go `runner.go` runs `diff.go` → `reconcile.go` → `executor.go`, enqueueing `sync_*` work through the runtime adapter.
+5. `FileSyncTasksPage` displays profile statuses (from `SyncProfileNotifier`) and live sync work from `RemoteTaskStore.tasksForProfile()`; `TransferQueue` remains only the producer/execution compatibility facade.
 
 ### Feature: First-run Config Setup (首次启动配置)
 
@@ -704,9 +704,9 @@ Accounts are multi-profile configs, not a separate "account" table. There is **n
 
 
 
-### Feature: Transfer Queue (通用传输队列)
+### Feature: Transfer Queue (通用传输队列兼容层)
 
-Shared upload/download queue backing both manual file operations and sync-generated tasks. Sync tasks are identified by `rawType` starting with `sync_`.
+`TransferQueue` is the execution and local-producer compatibility facade for manual uploads/downloads and Dart-only work. It mirrors lifecycle changes into `RemoteTaskStore`; no visible task page, sidebar, sync card, preview, batch dialog, or update status reads this queue as its display source. Go journal/runtime work is projected directly into the same `RemoteTask` model.
 
 #### Key files
 
@@ -716,7 +716,7 @@ Shared upload/download queue backing both manual file operations and sync-genera
 - `lib/models/transfer_job.dart` — `TransferSnapshot.fromJson` mirror of Go JSON.
 - `go/s3/transfer_monitor.go` — `TransferSnapshot` struct (:15) JSON: `id,type,bucket,key,localPath,targetPath,status,statusDetail,createdAt,bytesCompleted,totalBytes,itemsCompleted,totalItems,currentFileKey,currentFileBytesCompleted,currentFileTotalBytes,speedBytes,error`. `startTransfer` (:54) sets status running + TotalBytes (default StatusDetail "uploading"); `advanceTransfer` (:246) adds bytes + computes `speedBytes = completed/elapsed`; also `AddTransferTotal`/`AddTransferItems`/`AdvanceTransferItems`, `finishTransfer` (:263; when TotalBytes>0 sets completed=total). Exposed via bridge `list_transfer_jobs` (`bridge/dispatch.go:98`, handler :394 -> `s3ops.ListTransferSnapshots()` recent-first :330) and `go/webapi/invoke.go:316`.
 - `lib/state/transfer_queue_*.dart` — Split concerns: metrics, sync, local progress, foreground, storage, directory children.
-- `lib/pages/transfers_page.dart` — Transfers page showing the full queue. Rows (`TransferTaskRow`, `lib/widgets/transfer_task_widgets.dart:69`) show name + `_subtitleFor(task)` (:497; byte progress text only when `totalBytes>0` :529-537) + `TransferStatusBadge` (`transfer_task_widgets.dart:12`; running shows speed or `<type>中`). No per-row progress bar.
+- `lib/pages/transfers_page.dart` / `lib/pages/transfers_page_remote.dart` — Transfers page showing effective `RemoteTask` operations grouped by active/waiting/attention/history; raw journal events and physical phases expand from `RemoteTaskRow`. The legacy `TransferTaskRow` implementation remains unreferenced compatibility code and is not a display path.
 - `lib/widgets/batch_task_progress_dialog.dart` — Modal progress for foreground batches (upload/download/delete). Summary `LinearProgressIndicator(value: progress)` (:232-242) with `progress = completedBytes/totalBytes` when any task has `totalBytes>0`, else `1.0` when all finished, else `null` = indeterminate (:44-68). Per-row determinate bar only when `currentFileTotalBytes>0` (:366-382). `_modeForTasks` returns `BatchTaskProgressMode.delete` when all tasks are deletes (:152); copy/icon in `lib/widgets/batch_task_progress_mode.dart`.
 
 #### Gotchas
@@ -1042,7 +1042,7 @@ Participating files: `bridge/dispatch_platform_asset.go` / `dispatch_platform_as
 - `lib/services/app_update_service.dart` — `AppUpdateService.checkLatestRelease`: fetches GitHub Releases API **directly** (never wrapped by mirror), parses `tag_name` + `assets` array into `AppUpdateCheckResult` with `List<ReleaseAsset>`. Each `ReleaseAsset` carries `name`, `downloadUrl`, `size`, `contentType`, and `digest` (GitHub asset `sha256:<hex>` for post-download integrity verification); `digest` is empty when the release has none. Also has `compareVersionLabels` for semver comparison.
 - `lib/services/platform_asset_matcher.dart` — `matchPlatformAsset(assets, {runtimeArchitecture})`: picks the correct asset. macOS order: arch-specific DMG/zip → universal DMG/zip → other-arch DMG/zip; Windows prefers `.zip` → `installer.exe`; Linux prefers `.AppImage` → `.tar.gz`.
 - `lib/services/app_installer.dart` — Conditional export: IO → `app_installer_io.dart`, Web → `app_installer_stub.dart`. Exports `kSupportsInAppInstall` and `downloadAndInstallAsset`.
-- `lib/services/app_installer_io.dart` — Desktop: delegates to `api.installApp()` → bridge `install_app`; progress via `TransferQueue` only (no Dart `Process.run` / download).
+- `lib/services/app_installer_io.dart` — Desktop: delegates to `api.installApp()` → bridge `install_app`; progress is projected into `RemoteTaskStore` through the local/runtime adapter (no Dart `Process.run` / download).
 - `bridge/dispatch_app_install.go` — Go `install_app`: download (mirror/proxy), platform install (DMG/ZIP/exe/AppImage/tar), relaunch, `os.Exit(0)`; progress via `s3ops` transfer monitor. Windows installer EXE starts Inno Setup silently; Windows ZIP starts `cloud-volume-updater.exe` because the running app/launcher cannot overwrite their own EXE/DLLs. `probeDownloadURL` HEAD-probes wrapped mirror URL (with `expectedSize` Content-Length check) before download. Uses `storageconfig.ProxyHTTPClient` for installer downloads; do not force HTTP/1.1 because some mirrors return HTTP/2 frames and trigger malformed-response errors.
 - `bridge/windows_process_attrs_windows.go` / `_other.go` — Small platform shim for starting the Windows ZIP updater hidden while keeping non-Windows bridge builds portable.
 - `cmd/cloud-volume-updater/main.go` — Standalone Go updater entry point. Parses -zip, -install-dir, -pid, -exe-name; opens %TEMP%\cloud-volume-updater-<pid>.log at startup; runs performUpdate (wait old PID, poll writability, extract zip, copy payload skipping own exe, relaunch, then waitForNewApp to confirm the new process started).
@@ -1064,9 +1064,9 @@ Participating files: `bridge/dispatch_platform_asset.go` / `dispatch_platform_as
 1. User clicks “检测更新” → `AppUpdateService.checkLatestRelease` → GitHub API **direct** (no mirror).
 2. If `updateAvailable` and `matchPlatformAsset(assets, runtimeArchitecture: _buildArch)` finds a matching asset → “一键更新” button appears.
 3. User clicks “一键更新” → `lib/services/app_installer_io.dart` `downloadAndInstallAsset` → `api.installApp(...)` → bridge `install_app` → `bridge/dispatch_app_install.go` spawns background goroutine, returns `taskId`.
-4. Go goroutine streams download (URL wrapped by mirror if configured) to `os.TempDir()/app_updates/`, reporting progress through `s3ops` transfer monitor; Flutter `_SettingsUpdateSectionState._onTransferQueueChanged` renders the progress bar.
+4. Go goroutine streams download (URL wrapped by mirror if configured) to `os.TempDir()/app_updates/`, reporting progress through `s3ops` transfer monitor; Flutter `_SettingsUpdateSectionState` renders the matching `RemoteTaskStore` task.
 5. On download complete, goroutine performs platform install: macOS mounts DMG (`hdiutil attach -plist`) and replaces `/Applications/云卷.app`, Windows runs `.exe` `/SILENT`, Linux replaces AppImage / extracts tarball.
-6. If the user clicks “取消更新” before completion, `SettingsUpdateSection._cancelInstall` calls `TransferQueue.cancelTask(taskId)` (or `api.cancelTransfer(taskId)` before the task has been polled), which reaches bridge `cancel_transfer`; Go `CancelTransfer` invokes the stored context cancel and aborts the HTTP download.
+6. If the user clicks “取消更新” before completion, `SettingsUpdateSection._cancelInstall` calls `RemoteTaskStore.cancel(taskId)`; the local/runtime adapter reaches bridge `cancel_transfer` (or the provider context directly), and Go `CancelTransfer` aborts the HTTP download.
 7. `relaunchApp()` starts the new binary, then `os.Exit(0)`.
 
 ### Feature: Global Proxy & Network Configuration (全局代理设置)
