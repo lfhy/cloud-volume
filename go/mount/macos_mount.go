@@ -31,6 +31,7 @@ const macosOpenLaunchTimeout = 3 * time.Second
 var (
 	probeWebDAVMountActive = isWebDAVMountActive
 	executeUnmountWebDAV   = unmountWebDAV
+	launchFinder           = runMacOSFinderOpen
 )
 
 func (s *mountSession) start() error {
@@ -346,7 +347,7 @@ func openMountPath(mountPath string) error {
 		log.Printf("[mount/macos] open-mount-path coalesced path=%q", clean)
 		return nil
 	}
-	go runMacOSFinderOpen(clean)
+	go launchFinder(clean)
 	return nil
 }
 

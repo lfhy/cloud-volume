@@ -18,11 +18,15 @@ type Service struct {
 	operationMu sync.RWMutex
 	pathWriteMu sync.Mutex
 	chunkMu     sync.Mutex
+	chunkTouch  map[string]int64
 }
 
 // NewService wires a durable store to one provider backend.
 func NewService(store *Store, backend Backend) *Service {
-	service := &Service{store: store, backend: backend, quiet: 10 * time.Second}
+	service := &Service{
+		store: store, backend: backend, quiet: 10 * time.Second,
+		chunkTouch: map[string]int64{},
+	}
 	if err := service.SweepChunkStore(); err != nil {
 		log.Printf("[metadata/chunks] startup sweep namespace=%q err=%v", store.namespace.ID, err)
 	}

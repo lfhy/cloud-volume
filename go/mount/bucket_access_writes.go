@@ -52,10 +52,14 @@ func (a *bucketAccess) stageLocalWrite(virtualPath, localPath string, size int64
 }
 
 func (a *bucketAccess) registerLocalWriteLocked(virtualPath, localPath string, size int64) {
+	lastModified := time.Now()
+	if info, err := os.Stat(localPath); err == nil {
+		lastModified = info.ModTime()
+	}
 	info := s3ops.ObjectInfo{
 		Key:          cleanVirtualPath(virtualPath),
 		Size:         size,
-		LastModified: time.Now().Format("2006-01-02 15:04:05"),
+		LastModified: lastModified.Format("2006-01-02 15:04:05"),
 		IsDir:        false,
 	}
 	a.cache.storeLocalFile(cleanVirtualPath(virtualPath), localPath, info)

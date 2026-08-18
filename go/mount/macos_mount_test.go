@@ -270,8 +270,11 @@ func TestStopKeepsMountWhenWritebackDrainTimesOut(t *testing.T) {
 }
 
 func TestOpenMountPathReturnsBeforeFinderStatfs(t *testing.T) {
-	t.Parallel()
-
+	oldLaunchFinder := launchFinder
+	launchFinder = func(path string) {
+		macOSMountOpenGate.finish(filepath.Clean(path))
+	}
+	t.Cleanup(func() { launchFinder = oldLaunchFinder })
 	dir := t.TempDir()
 	startedAt := time.Now()
 	if err := openMountPath(dir); err != nil {

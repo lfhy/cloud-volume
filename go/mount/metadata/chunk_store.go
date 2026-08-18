@@ -405,6 +405,7 @@ func (s *Service) touchChunksLocked(hashes []string) error {
 func (s *Service) removeChunkFiles(hashes []string) {
 	for _, hash := range hashes {
 		_ = os.Remove(s.chunkPath(hash))
+		delete(s.chunkTouch, hash)
 	}
 }
 

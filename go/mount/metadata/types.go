@@ -162,14 +162,15 @@ type PathProjection struct {
 // Object extends the shared provider object shape with local identity fields.
 // Inode and Revision are strings on the wire to keep JavaScript below 53 bits.
 type Object struct {
-	Key          string
-	IsDir        bool
-	Size         int64
-	LastModified string
-	ETag         string
-	Inode        string
-	Revision     string
-	State        State
+	Key               string
+	IsDir             bool
+	Size              int64
+	LastModified      string
+	ETag              string
+	Inode             string
+	Revision          string
+	State             State
+	ContentGeneration uint64
 }
 
 // Page is one deterministic slice of a materialized directory.

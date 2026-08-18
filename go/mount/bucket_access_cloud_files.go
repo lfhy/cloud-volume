@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"remote-storage/go/mount/metadata"
 	s3ops "remote-storage/go/s3"
 )
 
@@ -71,13 +72,29 @@ func (a *bucketAccess) readCachedRange(
 		// itself, or the reader will recurse into the same CFAPI callback chain.
 		a.cache.clearLocalFileMarker(clean)
 	}
-	// If cached metadata already describes the object and the downloaded cache
-	// file is present, hydrate from that copy instead of forcing a remote stat
-	// round-trip for bytes that are already local.
-	if info, ok := a.cache.cachedObject(clean); ok && !info.IsDir {
+	cachePath := a.cachePathFor(clean)
+	// A metadata pending inode must validate its generation before reusing a
+	// path-keyed cache file; equal size/mtime/ETag values can still be old bytes.
+	if a.metadataService() == nil {
+		if info, ok := a.cache.cachedObject(clean); ok && !info.IsDir {
+			cachePath := a.cachePathFor(clean)
+			if isUsableLocalFile(cachePath, info.Size) {
+				return readLocalRange(cachePath, info, offset, length)
+			}
+		}
+	} else if item, err := a.metadataStat(ctx, clean); err != nil {
+		return nil, err
+	} else if !metadataPendingState(item.state) || item.contentGeneration == 0 {
+		if item.state == metadata.StateSynced {
+			promoteConfirmedPendingStamp(cachePath, item.info, item.inode, item.contentGeneration)
+		}
+		if isUsableLocalFile(cachePath, item.info.Size) {
+			return readLocalRange(cachePath, item.info, offset, length)
+		}
+	} else {
 		cachePath := a.cachePathFor(clean)
-		if isUsableLocalFile(cachePath, info.Size) {
-			return readLocalRange(cachePath, info, offset, length)
+		if matchesPendingDownloadStamp(cachePath, item.info, item.inode, item.contentGeneration) {
+			return readLocalRange(cachePath, item.info, offset, length)
 		}
 	}
 

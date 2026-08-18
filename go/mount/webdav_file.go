@@ -78,7 +78,7 @@ func newReadableWebDAVFile(
 		info:       fileInfoFromObject(info),
 		objectInfo: info,
 	}
-	if localPath, ok := access.localReadablePath(virtualPath, info); ok {
+	if localPath, ok := access.localReadablePath(ctx, virtualPath, info); ok {
 		file, fileErr := os.Open(localPath)
 		if fileErr == nil {
 			readable.file = file

@@ -155,21 +155,62 @@ func (a *bucketAccess) ensureLocalFile(
 		}
 		return a.overlay.localPath(clean), info, nil
 	}
-	if item, ok := a.cache.localFile(clean); ok {
-		if isUsableLocalFile(item.localPath, item.info.Size) {
-			return item.localPath, item.info, nil
-		}
+	var (
+		info       s3ops.ObjectInfo
+		metaItem   metadataMountObject
+		hasMeta    bool
+		localEntry localFile
+		hasLocal   bool
+	)
+	if item, ok := a.cache.localFile(clean); ok && isUsableLocalFile(item.localPath, item.info.Size) {
+		localEntry, hasLocal = item, true
 	}
-
-	info, err := a.statPath(ctx, clean)
-	if err != nil {
-		return "", s3ops.ObjectInfo{}, err
+	if a.metadataService() != nil {
+		item, metaErr := a.metadataStat(ctx, clean)
+		if metaErr != nil {
+			if hasLocal && errors.Is(metaErr, os.ErrNotExist) && !a.cache.isMarkedDeleted(clean) {
+				return localEntry.localPath, localEntry.info, nil
+			}
+			return "", s3ops.ObjectInfo{}, metaErr
+		}
+		metaItem, hasMeta, info = item, true, item.info
+		if metaItem.state == metadata.StateSynced {
+			// The worker confirmed the exact generation this cache file was
+			// materialized from, so its bytes already match the remote object.
+			promoteConfirmedPendingStamp(
+				a.cachePathFor(clean), info, metaItem.inode, metaItem.contentGeneration,
+			)
+		}
+		if hasLocal {
+			// A path-indexed marker belongs to an active mount/local write. Keep
+			// that handle's bytes authoritative while a page generation changes.
+			return localEntry.localPath, localEntry.info, nil
+		}
+	} else {
+		var err error
+		info, err = a.statPath(ctx, clean)
+		if err != nil {
+			return "", s3ops.ObjectInfo{}, err
+		}
 	}
 	if info.IsDir {
 		return "", s3ops.ObjectInfo{}, fmt.Errorf("%s is a directory", clean)
 	}
 
 	localPath := a.cachePathFor(clean)
+	if hasMeta && metadataPendingState(metaItem.state) && metaItem.contentGeneration != 0 {
+		if matchesPendingDownloadStamp(localPath, info, metaItem.inode, metaItem.contentGeneration) {
+			return localPath, info, nil
+		}
+		if pendingPath, pendingItem, handled, pendingErr := a.materializeMetadataPendingFile(
+			ctx, clean, localPath, metaItem,
+		); handled || pendingErr != nil {
+			if pendingErr != nil {
+				return "", s3ops.ObjectInfo{}, pendingErr
+			}
+			return pendingPath, pendingItem.info, nil
+		}
+	}
 	reconcileDownloadArtifacts(localPath, info)
 	if isCompleteDownloadUsable(localPath, info) {
 		return localPath, info, nil
@@ -212,6 +253,7 @@ func (a *bucketAccess) mergeOverlayItems(
 }
 
 func (a *bucketAccess) localReadablePath(
+	ctx context.Context,
 	virtualPath string,
 	info s3ops.ObjectInfo,
 ) (string, bool) {
@@ -219,6 +261,23 @@ func (a *bucketAccess) localReadablePath(
 		return item.localPath, true
 	}
 	localPath := a.cachePathFor(cleanVirtualPath(virtualPath))
+	// A normal cache stamp identifies a confirmed remote object. Pending data
+	// has the same path but a distinct immutable chunk generation, so a prior
+	// equal-size/mtime cache file must not bypass chunk-backed reads.
+	if a.metadataService() != nil {
+		item, err := a.metadataStat(ctx, virtualPath)
+		if err != nil {
+			return "", false
+		}
+		if item.state == metadata.StateSynced {
+			promoteConfirmedPendingStamp(localPath, item.info, item.inode, item.contentGeneration)
+		}
+		if metadataPendingState(item.state) && item.contentGeneration != 0 {
+			return localPath, matchesPendingDownloadStamp(
+				localPath, info, item.inode, item.contentGeneration,
+			)
+		}
+	}
 	reconcileDownloadArtifacts(localPath, info)
 	if isCompleteDownloadUsable(localPath, info) {
 		return localPath, true
@@ -237,8 +296,12 @@ func (a *bucketAccess) readRemoteRange(
 		return nil, os.ErrNotExist
 	}
 	if a.metadataService() != nil {
-		if _, err := a.metadataStat(ctx, clean); err != nil {
+		item, err := a.metadataStat(ctx, clean)
+		if err != nil {
 			return nil, err
+		}
+		if data, handled, pendingErr := a.readMetadataPendingRange(ctx, item, offset, length); handled || pendingErr != nil {
+			return data, pendingErr
 		}
 	}
 	timeoutCtx, cancel := a.withTransferTimeout(ctx)

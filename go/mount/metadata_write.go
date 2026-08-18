@@ -4,9 +4,12 @@ package mount
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
+	"path/filepath"
 
 	"remote-storage/go/mount/metadata"
+	s3ops "remote-storage/go/s3"
 )
 
 func (a *bucketAccess) usesMetadataWritePath() bool {
@@ -35,7 +38,7 @@ func (a *bucketAccess) stageMetadataWrite(virtualPath, localPath string, _ int64
 	// The metadata facade has its own durable path order across all adapters.
 	a.writebackMu.Lock()
 	defer a.writebackMu.Unlock()
-	_, _, err = service.WritePath(context.Background(), cleanVirtualPath(virtualPath), file, info.Size(), metadata.WriteOptions{
+	inode, ref, err := service.WritePath(context.Background(), cleanVirtualPath(virtualPath), file, info.Size(), metadata.WriteOptions{
 		Origin: "mount",
 		MTime:  info.ModTime().Format("2006-01-02 15:04:05"),
 	})
@@ -43,6 +46,15 @@ func (a *bucketAccess) stageMetadataWrite(virtualPath, localPath string, _ int64
 		return err
 	}
 	a.registerLocalWriteLocked(virtualPath, localPath, info.Size())
+	if filepath.Clean(localPath) == filepath.Clean(a.cachePathFor(cleanVirtualPath(virtualPath))) {
+		stampInfo := s3ops.ObjectInfo{
+			Size: info.Size(), LastModified: info.ModTime().Format("2006-01-02 15:04:05"),
+		}
+		if stampErr := writePendingDownloadStamp(localPath, stampInfo, inode, ref.Generation); stampErr != nil {
+			// Journal admission already succeeded; a stamp is only a cache hint.
+			log.Printf("[mount/metadata] pending-cache-stamp path=%q error=%v", localPath, stampErr)
+		}
+	}
 	return nil
 }
 

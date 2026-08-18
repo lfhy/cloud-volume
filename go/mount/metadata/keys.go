@@ -276,7 +276,7 @@ func objectFromInode(record Inode, path string) Object {
 		Key: key, IsDir: record.Kind == KindDirectory, Size: record.Size,
 		LastModified: record.MTime, ETag: record.ETag,
 		Inode: fmt.Sprintf("%d", record.ID), Revision: fmt.Sprintf("%d", record.LocalRevision),
-		State: record.State,
+		State: record.State, ContentGeneration: record.ContentGeneration,
 	}
 }
 

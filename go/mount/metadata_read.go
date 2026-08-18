@@ -16,10 +16,11 @@ import (
 // metadataMountObject retains the metadata-only identity fields alongside the
 // legacy ObjectInfo shape until platform adapters project stable OIDs in M5.
 type metadataMountObject struct {
-	info     s3ops.ObjectInfo
-	inode    uint64
-	revision uint64
-	state    metadata.State
+	info              s3ops.ObjectInfo
+	inode             uint64
+	revision          uint64
+	state             metadata.State
+	contentGeneration uint64
 }
 
 func (a *bucketAccess) metadataService() *metadata.Service {
@@ -152,6 +153,7 @@ func metadataMountObjectFrom(object metadata.Object) (metadataMountObject, error
 			ETag:         object.ETag,
 		},
 		inode: inode, revision: revision, state: object.State,
+		contentGeneration: object.ContentGeneration,
 	}, nil
 }
 

@@ -256,17 +256,44 @@ func TestLinuxFuseAutoSyncReturnsWithoutUploadWhenReleased(t *testing.T) {
 	})
 
 	handle := &linuxFuseFileHandle{
-		access:           access,
-		virtualPath:      "released.bin",
-		localPath:        localPath,
-		file:             file,
-		writable:         true,
-		sequentialDirty:  true,
-		sequentialEnd:    partSize,
-		autoSyncedSize:   0,
-		released:         true,
+		access:          access,
+		virtualPath:     "released.bin",
+		localPath:       localPath,
+		file:            file,
+		writable:        true,
+		sequentialDirty: true,
+		sequentialEnd:   partSize,
+		autoSyncedSize:  0,
+		released:        true,
 	}
 	if err := handle.autoSyncReadyRange(context.Background(), partSize); err != nil {
 		t.Fatalf("expected released autosync to no-op, got %v", err)
 	}
+}
+
+func TestLinuxFuseFsyncIsLocalOnly(t *testing.T) {
+	access, err := newBucketAccess(storageconfig.RemoteStorageConfig{}, "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer access.close()
+	localPath := access.cachePathFor("sync.txt")
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(localPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle := &linuxFuseFileHandle{access: access, virtualPath: "sync.txt", localPath: localPath, file: file}
+	if errno := handle.Fsync(context.Background(), 0); errno != 0 {
+		t.Fatalf("Fsync errno = %v", errno)
+	}
+	if errno := handle.Flush(context.Background()); errno != 0 {
+		t.Fatalf("Flush errno = %v", errno)
+	}
+	if access.writeback.hasPendingAtOrBelow("sync.txt", false) {
+		t.Fatal("local fsync unexpectedly queued remote write")
+	}
+	_ = file.Close()
 }
