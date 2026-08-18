@@ -39,8 +39,9 @@ extension _TransfersPageRemoteActions on _TransfersPageState {
     try {
       await store.cancel(task.id);
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         showAppErrorToast(context, title: '取消失败', message: error.toString());
+      }
     }
   }
 
@@ -50,8 +51,9 @@ extension _TransfersPageRemoteActions on _TransfersPageState {
         showAppToast(context, title: '已重试', message: task.name);
       }
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         showAppErrorToast(context, title: '重试失败', message: error.toString());
+      }
     }
   }
 
@@ -64,8 +66,9 @@ extension _TransfersPageRemoteActions on _TransfersPageState {
         showAppToast(context, title: '已开始', message: task.name);
       }
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         showAppErrorToast(context, title: '启动失败', message: error.toString());
+      }
     }
   }
 
@@ -84,8 +87,9 @@ extension _TransfersPageRemoteActions on _TransfersPageState {
       final count = results.where((result) => result).length;
       if (mounted) showAppToast(context, title: '已请求取消', message: '$count 个任务');
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         showAppErrorToast(context, title: '批量取消失败', message: error.toString());
+      }
     } finally {
       _remoteSetState(() => _runningBatchAction = false);
     }
@@ -106,8 +110,9 @@ extension _TransfersPageRemoteActions on _TransfersPageState {
       final count = results.where((result) => result).length;
       if (mounted) showAppToast(context, title: '已开始', message: '$count 个任务');
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         showAppErrorToast(context, title: '批量启动失败', message: error.toString());
+      }
     } finally {
       _remoteSetState(() => _runningBatchAction = false);
     }
@@ -118,11 +123,13 @@ extension _TransfersPageRemoteActions on _TransfersPageState {
     _remoteSetState(() => _runningBatchAction = true);
     try {
       final removed = await store.clearHistory();
-      if (mounted)
+      if (mounted) {
         showAppToast(context, title: '已清理历史', message: '$removed 条记录');
+      }
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         showAppErrorToast(context, title: '清理失败', message: error.toString());
+      }
     } finally {
       _remoteSetState(() => _runningBatchAction = false);
     }

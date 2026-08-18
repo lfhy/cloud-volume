@@ -31,13 +31,15 @@ void main() {
       bucket: 'bucket-a',
       key: 'docs/a.txt',
       localPath: '',
-    )..status = TransferStatus.running;
+    );
     final second = TransferQueue.instance.startTask(
       kind: TransferKind.delete,
       bucket: 'bucket-a',
       key: 'docs/b.txt',
       localPath: '',
-    )..status = TransferStatus.running;
+    );
+    TransferQueue.instance.markTaskRunning(first.id);
+    TransferQueue.instance.markTaskRunning(second.id);
     var backgroundRequested = false;
 
     await tester.pumpWidget(
@@ -81,13 +83,15 @@ void main() {
       bucket: 'bucket-a',
       key: 'docs/a.txt',
       localPath: '',
-    )..status = TransferStatus.done;
+    );
     final second = TransferQueue.instance.startTask(
       kind: TransferKind.delete,
       bucket: 'bucket-a',
       key: 'docs/b.txt',
       localPath: '',
-    )..status = TransferStatus.done;
+    );
+    TransferQueue.instance.markTaskDone(first.id);
+    TransferQueue.instance.markTaskDone(second.id);
 
     await tester.pumpWidget(
       ShadApp(

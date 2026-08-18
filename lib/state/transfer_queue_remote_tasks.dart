@@ -18,7 +18,7 @@ extension TransferQueueRemoteTasks on TransferQueue {
         bucket: task.bucket,
         sourcePath: task.key,
         targetPath: task.targetPath,
-        displayPath: task.displayName,
+        displayPath: task.key,
         phase: _remotePhase(task.statusDetail),
         phaseDetail: task.statusDetail,
         error: task.error ?? '',
