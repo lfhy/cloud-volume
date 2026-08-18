@@ -49,6 +49,14 @@ func (w *Worker) execute(ctx context.Context, op Op) {
 				current.State = OpStateFailed
 				current.LastError = err.Error()
 				_ = markInodeConflict(tx, op.InodeID)
+			case current.State == OpStateVerifying:
+				// The provider side effect has already happened. Keep the op in
+				// probe-based reconciliation instead of replaying a write whose
+				// old expected fingerprint would now reject our own new bytes.
+				current.Retry++
+				current.State = OpStateVerifying
+				current.LastError = err.Error()
+				current.NextAttemptUnixNano = time.Now().Add(retryDelay(current.Retry)).UnixNano()
 			default:
 				current.Retry++
 				current.State = OpStatePending

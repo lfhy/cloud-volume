@@ -285,6 +285,93 @@ func TestWorkerUploadsStagedWriteAndRetiresContent(t *testing.T) {
 	}
 }
 
+// postUploadVerificationBackend simulates a provider that accepted the PUT
+// but stopped answering the first confirmation HEAD.
+type postUploadVerificationBackend struct {
+	*uploadCaptureBackend
+	mu    sync.Mutex
+	heads int
+}
+
+func (b *postUploadVerificationBackend) HeadObject(ctx context.Context, bucket, key string) (storageops.ObjectInfo, error) {
+	b.mu.Lock()
+	b.heads++
+	head := b.heads
+	b.mu.Unlock()
+	if head == 2 {
+		<-ctx.Done()
+		return storageops.ObjectInfo{}, ctx.Err()
+	}
+	return b.fakeBackend.HeadObject(ctx, bucket, key)
+}
+
+func TestWorkerReconcilesWriteAfterPostUploadVerificationTimeout(t *testing.T) {
+	oldTimeout := workerVerificationTimeout
+	workerVerificationTimeout = 10 * time.Millisecond
+	defer func() { workerVerificationTimeout = oldTimeout }()
+
+	backend := &postUploadVerificationBackend{
+		uploadCaptureBackend: &uploadCaptureBackend{fakeBackend: newFakeBackend()},
+	}
+	backend.objects["/overwrite.txt"] = storageops.ObjectInfo{
+		Key: "overwrite.txt", Size: 3, ETag: "etag-old",
+	}
+	service := newTestService(t, backend)
+	service.SetQuietPeriod(time.Nanosecond)
+	ctx := context.Background()
+	if _, err := service.ListPage(ctx, rootInode, "", 10); err != nil {
+		t.Fatal(err)
+	}
+	inode, err := service.Resolve(rootInode, "overwrite.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := service.StageWrite(inode, 1, strings.NewReader("new"), 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Write(rootInode, "overwrite.txt", ref, WriteOptions{Origin: "test"}); err != nil {
+		t.Fatal(err)
+	}
+
+	worker := &Worker{
+		service: service, wake: make(chan struct{}, 1), running: map[uint64]struct{}{},
+	}
+	claimed := worker.claimDue()
+	if len(claimed) != 1 {
+		t.Fatalf("claimed operations = %+v, want one write", claimed)
+	}
+	worker.execute(ctx, claimed[0])
+	var afterTimeout Op
+	if err := service.store.view(func(tx boltTxT) error {
+		var err error
+		afterTimeout, err = getOp(tx, claimed[0].Seq)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if afterTimeout.State != OpStateVerifying {
+		t.Fatalf("state after confirmation timeout = %d, want verifying", afterTimeout.State)
+	}
+
+	if err := service.store.update(func(tx boltTxT) error {
+		return replaceOp(tx, afterTimeout.Seq, func(op *Op) {
+			op.NextAttemptUnixNano = time.Now().Add(-time.Second).UnixNano()
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	worker.runDueOnce(ctx)
+	if status := service.Status(); status.PendingOps != 0 || status.FailedOps != 0 {
+		t.Fatalf("reconciliation left work behind: %+v", status)
+	}
+	for _, hash := range ref.Chunks {
+		if _, statErr := os.Stat(service.chunkPath(hash)); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("chunk %s was not retired after reconciliation: %v", hash, statErr)
+		}
+	}
+}
+
 func TestWorkerRetiresQueuedWriteGenerationsIndependently(t *testing.T) {
 	backend := &uploadCaptureBackend{fakeBackend: newFakeBackend()}
 	service := newTestService(t, backend)
