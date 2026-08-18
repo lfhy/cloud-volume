@@ -1,4 +1,5 @@
 part of 'transfers_page.dart';
+
 // Unified task page renders backend-effective operations instead of raw snapshots.
 extension _TransfersPageRemote on _TransfersPageState {
   Widget _buildRemoteQueueBody(ShadThemeData theme, RemoteTaskStore store) {
@@ -68,6 +69,7 @@ extension _TransfersPageRemote on _TransfersPageState {
       ],
     );
   }
+
   Widget _buildRemoteFilters() {
     return Row(
       children: [
@@ -102,6 +104,7 @@ extension _TransfersPageRemote on _TransfersPageState {
       ],
     );
   }
+
   Widget _buildRemoteList(
     ShadThemeData theme,
     RemoteTaskStore store,
@@ -141,30 +144,37 @@ extension _TransfersPageRemote on _TransfersPageState {
                     label: section.label,
                     count: section.tasks.length,
                   ),
-                  for (var index = 0; index < section.tasks.length; index++)
+                  for (final task in section.tasks)
                     RemoteTaskRow(
-                      task: section.tasks[index],
-                      selected: _selectedTaskIds.contains(
-                        section.tasks[index].id,
-                      ),
-                      onToggleSelected: () =>
-                          _toggleTaskSelection(section.tasks[index].id),
-                      onCancel: section.tasks[index].cancelable
-                          ? () => _cancelRemoteTask(store, section.tasks[index])
+                      key: ValueKey<String>(task.id),
+                      task: task,
+                      selected: _selectedTaskIds.contains(task.id),
+                      onToggleSelected: () => _toggleTaskSelection(task.id),
+                      onCancel: task.cancelable
+                          ? () => _cancelRemoteTask(store, task)
                           : null,
-                      onRetry: section.tasks[index].retryable
-                          ? () => _retryRemoteTask(store, section.tasks[index])
+                      onRetry: task.retryable
+                          ? () => _retryRemoteTask(store, task)
                           : null,
-                      onTrigger: section.tasks[index].triggerable
-                          ? () =>
-                                _triggerRemoteTask(store, section.tasks[index])
+                      onTrigger: task.triggerable
+                          ? () => _triggerRemoteTask(store, task)
                           : null,
                       onExpanded: (expanded) {
                         if (expanded) {
-                          unawaited(store.loadDetails(section.tasks[index].id));
+                          unawaited(store.loadDetails(task.id));
                         }
                       },
                       showDivider: true,
+                    ),
+                  if (store.nextCursor.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: ShadButton.outline(
+                        onPressed: store.isRefreshing
+                            ? null
+                            : () => unawaited(store.loadMore()),
+                        child: Text(store.isRefreshing ? '正在加载...' : '加载更多历史'),
+                      ),
                     ),
                 ],
               ],
@@ -174,156 +184,14 @@ extension _TransfersPageRemote on _TransfersPageState {
       ),
     );
   }
-  List<RemoteTask> _filteredRemoteTasks(RemoteTaskStore store) {
-    return store.tasks
-        .where((task) {
-          if (!_remoteStatusFilter.matches(task) ||
-              !_remoteKindFilter.matches(task)) {
-            return false;
-          }
-          if (_searchText.isEmpty) return true;
-          final text = <String>[
-            task.name,
-            task.sourcePath,
-            task.targetPath,
-            task.bucket,
-            task.profileName,
-            task.profileId,
-          ].join('\n').toLowerCase();
-          return text.contains(_searchText);
-        })
-        .toList(growable: false);
-  }
-  void _toggleRemoteVisibleSelection(List<RemoteTask> tasks) {
-    final shouldSelect = tasks.any(
-      (task) => !_selectedTaskIds.contains(task.id),
-    );
-    _remoteSetState(() {
-      if (shouldSelect) {
-        _selectedTaskIds.addAll(tasks.map((task) => task.id));
-      } else {
-        _selectedTaskIds.removeAll(tasks.map((task) => task.id));
-      }
-    });
-  }
-  Future<void> _cancelRemoteTask(RemoteTaskStore store, RemoteTask task) async {
-    try {
-      await store.cancel(task.id);
-    } catch (error) {
-      if (mounted) {
-        showAppErrorToast(context, title: '取消失败', message: error.toString());
-      }
-    }
-  }
-  Future<void> _retryRemoteTask(RemoteTaskStore store, RemoteTask task) async {
-    try {
-      if (await store.retry(task.id) && mounted) {
-        showAppToast(context, title: '已重试', message: task.name);
-      }
-    } catch (error) {
-      if (mounted) {
-        showAppErrorToast(context, title: '重试失败', message: error.toString());
-      }
-    }
-  }
-  Future<void> _triggerRemoteTask(
-    RemoteTaskStore store,
-    RemoteTask task,
-  ) async {
-    try {
-      if (await store.trigger(task.id) && mounted) {
-        showAppToast(context, title: '已开始', message: task.name);
-      }
-    } catch (error) {
-      if (mounted) {
-        showAppErrorToast(context, title: '启动失败', message: error.toString());
-      }
-    }
-  }
-  Future<void> _cancelSelectedRemote(
-    RemoteTaskStore store,
-    List<RemoteTask> selected,
-  ) async {
-    if (_runningBatchAction) return;
-    _remoteSetState(() => _runningBatchAction = true);
-    try {
-      final results = await Future.wait(
-        selected
-            .where((task) => task.cancelable)
-            .map((task) => store.cancel(task.id)),
-      );
-      final count = results.where((result) => result).length;
-      if (mounted) showAppToast(context, title: '已请求取消', message: '$count 个任务');
-    } finally {
-      _remoteSetState(() => _runningBatchAction = false);
-    }
-  }
-  Future<void> _triggerSelectedRemote(
-    RemoteTaskStore store,
-    List<RemoteTask> selected,
-  ) async {
-    if (_runningBatchAction) return;
-    _remoteSetState(() => _runningBatchAction = true);
-    try {
-      final results = await Future.wait(
-        selected
-            .where((task) => task.triggerable)
-            .map((task) => store.trigger(task.id)),
-      );
-      final count = results.where((result) => result).length;
-      if (mounted) showAppToast(context, title: '已开始', message: '$count 个任务');
-    } finally {
-      _remoteSetState(() => _runningBatchAction = false);
-    }
-  }
-  Future<void> _clearRemoteHistory(RemoteTaskStore store) async {
-    if (_runningBatchAction) return;
-    _remoteSetState(() => _runningBatchAction = true);
-    try {
-      final removed = await store.clearHistory();
-      if (mounted) {
-        showAppToast(context, title: '已清理历史', message: '$removed 条记录');
-      }
-    } catch (error) {
-      if (mounted) {
-        showAppErrorToast(context, title: '清理失败', message: error.toString());
-      }
-    } finally {
-      _remoteSetState(() => _runningBatchAction = false);
-    }
-  }
-  Widget _remoteDropdown<T>({
-    required T value,
-    required List<T> items,
-    required String Function(T value) labelBuilder,
-    required ValueChanged<T?> onChanged,
-  }) {
-    const width = 140.0;
-    return SizedBox(
-      width: width,
-      child: ShadSelect<T>(
-        key: ValueKey<Object>(value as Object),
-        minWidth: width,
-        initialValue: value,
-        placeholder: Text(labelBuilder(value)),
-        selectedOptionBuilder: (context, selected) =>
-            Text(labelBuilder(selected)),
-        options: items
-            .map(
-              (item) =>
-                  ShadOption<T>(value: item, child: Text(labelBuilder(item))),
-            )
-            .toList(growable: false),
-        onChanged: onChanged,
-      ),
-    );
-  }
 }
+
 class _RemoteTaskSection {
   const _RemoteTaskSection(this.label, this.tasks);
   final String label;
   final List<RemoteTask> tasks;
 }
+
 List<_RemoteTaskSection> _groupRemoteTasks(List<RemoteTask> tasks) {
   final active = <RemoteTask>[];
   final waiting = <RemoteTask>[];
@@ -355,6 +223,7 @@ List<_RemoteTaskSection> _groupRemoteTasks(List<RemoteTask> tasks) {
     if (history.isNotEmpty) _RemoteTaskSection('历史', history),
   ];
 }
+
 class _RemoteListHeader extends StatelessWidget {
   const _RemoteListHeader({
     required this.totalCount,
@@ -417,6 +286,7 @@ class _RemoteListHeader extends StatelessWidget {
     );
   }
 }
+
 class _RemoteSectionHeader extends StatelessWidget {
   const _RemoteSectionHeader({required this.label, required this.count});
   final String label;
@@ -437,12 +307,14 @@ class _RemoteSectionHeader extends StatelessWidget {
     );
   }
 }
+
 enum _RemoteTaskStatusFilter {
   all('全部状态'),
   active('进行中'),
   waiting('等待中'),
   failed('失败/冲突'),
   history('历史');
+
   const _RemoteTaskStatusFilter(this.label);
   final String label;
   bool matches(RemoteTask task) => switch (this) {
@@ -464,6 +336,7 @@ enum _RemoteTaskStatusFilter {
           task.status == RemoteTaskStatus.canceled,
   };
 }
+
 enum _RemoteTaskKindFilter {
   all('全部类型'),
   upload('上传/写入'),
@@ -471,6 +344,7 @@ enum _RemoteTaskKindFilter {
   directory('创建目录'),
   move('重命名/移动'),
   delete('删除');
+
   const _RemoteTaskKindFilter(this.label);
   final String label;
   bool matches(RemoteTask task) => switch (this) {

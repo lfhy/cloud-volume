@@ -25,6 +25,7 @@ import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:remote_storage/widgets/app_toast.dart';
 import 'package:remote_storage/widgets/bucket_settings_dialog.dart';
 import 'package:remote_storage/state/object_listing_notifier.dart';
+import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/state/share_records_notifier.dart';
 import 'package:remote_storage/state/transfer_queue.dart';
 import 'package:remote_storage/utils/default_download_directory.dart';
@@ -175,7 +176,7 @@ class _FileManagerPageState extends State<FileManagerPage> {
     });
     _contentScrollController.addListener(_maybeLoadMoreContent);
     ObjectListingNotifier.instance.addListener(_handleObjectListingMutation);
-    TransferQueue.instance.addListener(_handleUploadTaskRefresh);
+    RemoteTaskStore.instance.addListener(_handleUploadTaskRefresh);
     _startMountStatusRefreshTimer();
     _loadBuckets();
     if (ClipboardShortcutChannel.instance.isSupported) {
@@ -195,7 +196,7 @@ class _FileManagerPageState extends State<FileManagerPage> {
     _loadingDetailTimer?.cancel();
     _mountStatusRefreshTimer?.cancel();
     ObjectListingNotifier.instance.removeListener(_handleObjectListingMutation);
-    TransferQueue.instance.removeListener(_handleUploadTaskRefresh);
+    RemoteTaskStore.instance.removeListener(_handleUploadTaskRefresh);
     _contentScrollController.dispose();
     _searchController.dispose();
     super.dispose();

@@ -139,8 +139,14 @@ class _FileSyncTasksPageState extends State<FileSyncTasksPage> {
     final syncing = profiles
         .where((p) => p.status == SyncProfileStatus.syncing)
         .length;
-    final running = remoteTasks.where((t) => t.status.isActive).length;
-    final failed = remoteTasks
+    final profileIds = profiles.map((runtime) => runtime.profile.id).toSet();
+    final syncTasks = remoteTasks.where(
+      (task) =>
+          task.source == RemoteTaskSource.sync &&
+          profileIds.contains(task.profileId),
+    );
+    final running = syncTasks.where((task) => task.status.isActive).length;
+    final failed = syncTasks
         .where(
           (task) =>
               task.status == RemoteTaskStatus.failed ||

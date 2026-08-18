@@ -354,7 +354,11 @@ class RemoteTask {
     return parts.isEmpty ? value : parts.last;
   }
 
-  RemoteTask copyWith({RemoteTaskStatus? status, bool? optimisticCancel}) {
+  RemoteTask copyWith({
+    RemoteTaskStatus? status,
+    bool? optimisticCancel,
+    String? updatedAt,
+  }) {
     return RemoteTask(
       id: id,
       kind: kind,
@@ -372,7 +376,7 @@ class RemoteTask {
       blockedReason: blockedReason,
       error: error,
       createdAt: createdAt,
-      updatedAt: updatedAt,
+      updatedAt: updatedAt ?? this.updatedAt,
       finishedAt: finishedAt,
       retryCount: retryCount,
       nextRetryAt: nextRetryAt,

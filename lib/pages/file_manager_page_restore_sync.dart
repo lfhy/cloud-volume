@@ -88,13 +88,14 @@ extension _FileManagerPageRestoreSync on _FileManagerPageState {
     if (_pendingUploadRefreshes.isEmpty || _showTrash || _loading) {
       return;
     }
-    final queue = TransferQueue.instance;
+    final tasks = RemoteTaskStore.instance.tasks;
     final finishedIds = <String>[];
     for (final entry in _pendingUploadRefreshes.entries) {
-      final task = queue.tasks
-          .where((candidate) => candidate.id == entry.key)
-          .firstOrNull;
-      if (task == null || !task.isFinished) {
+      final id = entry.key.startsWith('transfer:')
+          ? entry.key
+          : 'transfer:${entry.key}';
+      final task = tasks.where((candidate) => candidate.id == id).firstOrNull;
+      if (task == null || task.status.isActive) {
         continue;
       }
       finishedIds.add(entry.key);

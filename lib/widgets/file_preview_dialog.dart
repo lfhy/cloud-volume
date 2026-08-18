@@ -2,8 +2,9 @@
 
 import 'package:flutter/material.dart';
 import 'package:remote_storage/models/file_preview_source.dart';
+import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/models/s3_objects.dart';
-import 'package:remote_storage/state/transfer_queue.dart';
+import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/utils/transfer_format.dart';
 import 'package:remote_storage/utils/file_preview_type.dart';
 import 'package:remote_storage/widgets/app_loading_indicator.dart';
@@ -105,10 +106,11 @@ class _ActionBar extends StatelessWidget {
   Widget build(BuildContext context) {
     if (transfer != null) {
       return AnimatedBuilder(
-        animation: TransferQueue.instance,
+        animation: RemoteTaskStore.instance,
         builder: (context, _) {
           final task = transfer!.currentTask;
-          final running = !transfer!.done && (task == null || !task.isFinished);
+          final running =
+              !transfer!.done && (task == null || task.status.isActive);
           // 远端对象已不存在时不再保留取消/后台运行，进度面板已经显示错误，
           // 用户除了关闭弹框（随后会触发目录刷新）没有其它合理动作。
           if (unavailable) {
@@ -125,9 +127,9 @@ class _ActionBar extends StatelessWidget {
           return Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              if (task?.isCancelable ?? false) ...[
+              if (task?.cancelable ?? false) ...[
                 ShadButton.destructive(
-                  onPressed: () => TransferQueue.instance.cancelTask(task!.id),
+                  onPressed: () => RemoteTaskStore.instance.cancel(task!.id),
                   child: const Text('取消下载'),
                 ),
                 const SizedBox(width: 10),
@@ -179,7 +181,7 @@ class FilePreviewTransferState {
     required this.waitingText,
     required this.doneTitle,
     required this.doneText,
-    this.task,
+    this.taskId,
     this.errorText,
     this.done = false,
   });
@@ -188,17 +190,15 @@ class FilePreviewTransferState {
   final String waitingText;
   final String doneTitle;
   final String doneText;
-  final TransferTask? task;
+  final String? taskId;
   final String? errorText;
   final bool done;
 
-  TransferTask? get currentTask {
-    final queuedTask = task;
-    if (queuedTask == null) {
-      return null;
-    }
-    return TransferQueue.instance.tasks
-        .where((candidate) => candidate.id == queuedTask.id)
+  RemoteTask? get currentTask {
+    final id = taskId;
+    if (id == null) return null;
+    return RemoteTaskStore.instance.tasks
+        .where((candidate) => candidate.id == id)
         .firstOrNull;
   }
 }
@@ -211,11 +211,11 @@ class _TransferPreviewPane extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: TransferQueue.instance,
+      animation: RemoteTaskStore.instance,
       builder: (context, _) {
         final task = state.currentTask;
         final errorText = state.errorText ?? _taskError(task);
-        final done = state.done || task?.status == TransferStatus.done;
+        final done = state.done || task?.status == RemoteTaskStatus.done;
         if (errorText != null) {
           return FilePreviewPane.message(
             context,
@@ -235,47 +235,49 @@ class _TransferPreviewPane extends StatelessWidget {
     );
   }
 
-  double? _progressFor(TransferTask? task, bool done) {
+  double? _progressFor(RemoteTask? task, bool done) {
     if (done) {
       return 1;
     }
-    if (task == null || task.totalBytes <= 0) {
+    if (task == null || task.progress.totalBytes <= 0) {
       return null;
     }
-    return task.progress;
+    return task.progress.fraction;
   }
 
-  String? _metaText(TransferTask? task, bool done) {
+  String? _metaText(RemoteTask? task, bool done) {
     if (task == null) {
       return null;
     }
     if (done) {
-      final total = task.totalBytes > 0 ? task.totalBytes : task.bytesCompleted;
+      final total = task.progress.totalBytes > 0
+          ? task.progress.totalBytes
+          : task.progress.bytesCompleted;
       return total > 0 ? formatBytes(total) : null;
     }
     final parts = <String>[];
-    if (task.totalBytes > 0) {
+    if (task.progress.totalBytes > 0) {
       parts.add(
-        '${formatBytes(task.bytesCompleted)} / '
-        '${formatBytes(task.totalBytes)}',
+        '${formatBytes(task.progress.bytesCompleted)} / '
+        '${formatBytes(task.progress.totalBytes)}',
       );
-    } else if (task.bytesCompleted > 0) {
-      parts.add(formatBytes(task.bytesCompleted));
+    } else if (task.progress.bytesCompleted > 0) {
+      parts.add(formatBytes(task.progress.bytesCompleted));
     }
-    if (task.speedBytes > 0) {
-      parts.add(formatBytesPerSecond(task.speedBytes));
+    if (task.progress.speedBytes > 0) {
+      parts.add(formatBytesPerSecond(task.progress.speedBytes));
     }
     return parts.isEmpty ? null : parts.join('  ·  ');
   }
 
-  String? _taskError(TransferTask? task) {
+  String? _taskError(RemoteTask? task) {
     if (task == null) {
       return null;
     }
-    if (task.status == TransferStatus.failed) {
-      return task.error ?? '下载失败';
+    if (task.status == RemoteTaskStatus.failed) {
+      return task.error.isEmpty ? '下载失败' : task.error;
     }
-    if (task.status == TransferStatus.canceled) {
+    if (task.status == RemoteTaskStatus.canceled) {
       return '下载已取消';
     }
     return null;

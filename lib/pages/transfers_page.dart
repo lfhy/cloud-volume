@@ -13,6 +13,7 @@ import 'package:remote_storage/widgets/remote_task_widgets.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 part 'transfers_page_remote.dart';
+part 'transfers_page_remote_actions.dart';
 
 class TransfersPage extends StatefulWidget {
   const TransfersPage({

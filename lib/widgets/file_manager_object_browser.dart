@@ -6,8 +6,9 @@
 // 设 click，hover 离开行后整个浏览器区域都会停在手指状态。
 
 import 'package:flutter/material.dart';
+import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/models/s3_objects.dart';
-import 'package:remote_storage/state/transfer_queue.dart';
+import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/widgets/desktop_context_menu_region.dart';
 import 'package:remote_storage/widgets/file_manager_drag_selection.dart';
 import 'package:remote_storage/widgets/file_grid_item.dart';
@@ -21,6 +22,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:remote_storage/widgets/app_loading_indicator.dart';
 
 part 'file_manager_object_browser_menus.dart';
+part 'file_manager_object_browser_sync.dart';
 
 const String _objectContextMenuGroup = 'file_manager_object_browser';
 final DesktopContextMenuHandle _backgroundContextMenuHandle =
@@ -104,14 +106,15 @@ class FileManagerObjectBrowser extends StatelessWidget {
   Widget build(BuildContext context) {
     if (showSyncStatus) {
       return AnimatedBuilder(
-        animation: TransferQueue.instance,
-        builder: (context, _) => _buildBody(context, TransferQueue.instance),
+        animation: RemoteTaskStore.instance,
+        builder: (context, _) =>
+            _buildBody(context, RemoteTaskStore.instance.tasks),
       );
     }
     return _buildBody(context, null);
   }
 
-  Widget _buildBody(BuildContext context, TransferQueue? queue) {
+  Widget _buildBody(BuildContext context, List<RemoteTask>? tasks) {
     final theme = ShadTheme.of(context);
     final visibleObjects = prefix.isEmpty
         ? objects
@@ -119,8 +122,8 @@ class FileManagerObjectBrowser extends StatelessWidget {
     final body = visibleObjects.isEmpty
         ? _buildEmptyState(theme)
         : isGrid
-        ? _buildGrid(visibleObjects, theme, queue)
-        : _buildList(visibleObjects, theme, queue);
+        ? _buildGrid(visibleObjects, theme, tasks)
+        : _buildList(visibleObjects, theme, tasks);
     return DesktopContextMenuRegion(
       groupId: _objectContextMenuGroup,
       items: _buildBackgroundMenuItems(),
@@ -163,7 +166,7 @@ class FileManagerObjectBrowser extends StatelessWidget {
   Widget _buildGrid(
     List<ObjectInfo> objects,
     ShadThemeData theme,
-    TransferQueue? queue,
+    List<RemoteTask>? tasks,
   ) {
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -188,7 +191,7 @@ class FileManagerObjectBrowser extends StatelessWidget {
                     title: _title(object),
                     subtitle: _subtitle(object, forGrid: true),
                     bottomOverlay: mountedToDesktop
-                        ? _syncBadge(object, queue)
+                        ? _syncBadge(object, tasks)
                         : null,
                     onTap: _tapHandler(object),
                     onDoubleTap: null,
@@ -229,7 +232,7 @@ class FileManagerObjectBrowser extends StatelessWidget {
   Widget _buildList(
     List<ObjectInfo> objects,
     ShadThemeData theme,
-    TransferQueue? queue,
+    List<RemoteTask>? tasks,
   ) {
     final selectableObjects = objects.where(
       (object) => !_isParentDirectory(object),
@@ -268,7 +271,7 @@ class FileManagerObjectBrowser extends StatelessWidget {
                       leading: _leading(object, theme, listIconSize),
                       title: _title(object),
                       sizeLabel: _sizeLabel(object),
-                      statusWidget: _syncBadge(object, queue),
+                      statusWidget: _syncBadge(object, tasks),
                       modifiedLabel: _modifiedLabel(object),
                       onTap: _tapHandler(object),
                       onDoubleTap: null,
@@ -349,28 +352,6 @@ class FileManagerObjectBrowser extends StatelessWidget {
     if (_isDeleting(object)) return '删除中';
     if (_isParentDirectory(object) || object.lastModified.isEmpty) return '';
     return object.lastModified;
-  }
-
-  Widget? _syncBadge(ObjectInfo object, TransferQueue? queue) {
-    if (!showSyncStatus || _isParentDirectory(object) || _isDeleting(object)) {
-      return null;
-    }
-    final state = _syncStateFor(object, queue);
-    return FileSyncStatusBadge(state: state);
-  }
-
-  FileSyncState _syncStateFor(ObjectInfo object, TransferQueue? queue) {
-    if (!mountedToDesktop) {
-      return const FileSyncState.synced();
-    }
-    if (mountBucketName == null || mountBucketName!.trim().isEmpty) {
-      return const FileSyncState.synced();
-    }
-    return (queue ?? TransferQueue.instance).syncStateForObject(
-      bucket: mountBucketName!,
-      objectKey: object.key,
-      isDirectory: object.isDir,
-    );
   }
 
   VoidCallback _tapHandler(ObjectInfo object) {

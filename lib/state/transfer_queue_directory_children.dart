@@ -16,6 +16,7 @@ extension TransferQueueDirectoryChildren on TransferQueue {
       child.status = TransferStatus.canceled;
       child.speedBytes = 0;
       child.error = null;
+      _publishRemoteTask(child);
       _cancelRequestedIds.add(childId);
       if (_api != null) {
         await _api!.cancelTransfer(childId);

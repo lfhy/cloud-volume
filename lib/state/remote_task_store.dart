@@ -7,6 +7,9 @@ import 'package:flutter/foundation.dart';
 import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/services/remote_storage_gateway.dart';
 
+typedef LocalRemoteTaskAction = Future<bool> Function(String taskId);
+typedef ClearLocalRemoteTaskHistory = int Function();
+
 class RemoteTaskStore extends ChangeNotifier {
   RemoteTaskStore._();
 
@@ -15,6 +18,12 @@ class RemoteTaskStore extends ChangeNotifier {
   static const _idlePollInterval = Duration(seconds: 2);
 
   final Map<String, RemoteTask> _tasks = <String, RemoteTask>{};
+  // Local producers publish here until a durable/runtime snapshot supersedes them.
+  final Map<String, RemoteTask> _localTasks = <String, RemoteTask>{};
+  LocalRemoteTaskAction? _cancelLocalTask;
+  LocalRemoteTaskAction? _retryLocalTask;
+  LocalRemoteTaskAction? _triggerLocalTask;
+  ClearLocalRemoteTaskHistory? _clearLocalTaskHistory;
   RemoteStorageGateway? _api;
   Timer? _pollTimer;
   bool _polling = false;
@@ -24,15 +33,33 @@ class RemoteTaskStore extends ChangeNotifier {
   String _freshness = '';
   Map<String, bool> _capabilities = const <String, bool>{};
   String _nextCursor = '';
+  bool _hasLoadedMore = false;
   int _bindingGeneration = 0;
 
   List<RemoteTask> get tasks {
-    final result = _tasks.values.toList(growable: false)
+    // A live Go snapshot wins; an active local producer wins over an older
+    // terminal snapshot that was retained by the runtime monitor.
+    final merged = <String, RemoteTask>{..._localTasks};
+    for (final entry in _tasks.entries) {
+      final local = merged[entry.key];
+      if (local == null || !_preferLocal(local, entry.value)) {
+        merged[entry.key] = entry.value;
+      }
+    }
+    final result = merged.values.toList(growable: false)
       ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
     return result;
   }
 
-  bool get hasActive => _tasks.values.any((task) => task.status.isActive);
+  bool get hasActive => tasks.any((task) => task.status.isActive);
+  bool get hasActiveFileTransfers => tasks.any(
+    (task) =>
+        task.status.isActive &&
+        task.source != RemoteTaskSource.appUpdate &&
+        (task.kind == RemoteTaskKind.upload ||
+            task.kind == RemoteTaskKind.write ||
+            task.kind == RemoteTaskKind.download),
+  );
   Object? get lastError => _lastError;
   DateTime? get lastFreshAt => _lastFreshAt;
   String get freshness => _freshness;
@@ -44,9 +71,73 @@ class RemoteTaskStore extends ChangeNotifier {
       .where((task) => task.profileId == profileId)
       .toList(growable: false);
 
+  /// Publishes a Dart-owned task without making it part of the remote cache.
+  void publishLocalTask(RemoteTask task) {
+    if (task.id.trim().isEmpty) return;
+    _localTasks[task.id] = task;
+    notifyListeners();
+  }
+
+  /// Replaces one local task snapshot as a producer advances its lifecycle.
+  void updateLocalTask(RemoteTask task) => publishLocalTask(task);
+
+  /// Removes a local task after its producer no longer needs history locally.
+  bool removeLocalTask(String id) {
+    final removed = _localTasks.remove(id) != null;
+    if (removed) notifyListeners();
+    return removed;
+  }
+
+  RemoteTask? localTask(String id) => _localTasks[id];
+
+  void bindLocalTaskActions({
+    LocalRemoteTaskAction? cancel,
+    LocalRemoteTaskAction? retry,
+    LocalRemoteTaskAction? trigger,
+    ClearLocalRemoteTaskHistory? clearHistory,
+  }) {
+    _cancelLocalTask = cancel;
+    _retryLocalTask = retry;
+    _triggerLocalTask = trigger;
+    _clearLocalTaskHistory = clearHistory;
+  }
+
+  /// Marks a producer-owned task terminal while preserving its latest details.
+  bool completeLocalTask(String id) =>
+      _setLocalTaskStatus(id, RemoteTaskStatus.done);
+
+  bool failLocalTask(String id) =>
+      _setLocalTaskStatus(id, RemoteTaskStatus.failed);
+
+  bool cancelLocalTask(String id) =>
+      _setLocalTaskStatus(id, RemoteTaskStatus.canceled);
+
+  bool _setLocalTaskStatus(String id, RemoteTaskStatus status) {
+    final task = _localTasks[id];
+    if (task == null) return false;
+    _localTasks[id] = task.copyWith(
+      status: status,
+      updatedAt: DateTime.now().toUtc().toIso8601String(),
+    );
+    notifyListeners();
+    return true;
+  }
+
   void bindApi(RemoteStorageGateway api) {
+    if (identical(_api, api)) {
+      _ensurePolling();
+      if (!_polling) unawaited(refresh());
+      return;
+    }
     _bindingGeneration++;
     _api = api;
+    // A stale request may still complete, but its generation check prevents it
+    // from mutating this binding. Clear the gate so the new endpoint starts
+    // its own request immediately instead of inheriting the old in-flight one.
+    _polling = false;
+    _tasks.clear();
+    _nextCursor = '';
+    _hasLoadedMore = false;
     unawaited(refresh());
     _ensurePolling();
   }
@@ -56,15 +147,20 @@ class RemoteTaskStore extends ChangeNotifier {
   ]) async {
     if (_api == null || _polling) return;
     final generation = _bindingGeneration;
+    final api = _api!;
     _polling = true;
     try {
-      final page = await _api!.listRemoteTasks(filter);
+      final page = await api.listRemoteTasks(filter);
+      if (generation != _bindingGeneration || !identical(api, _api)) return;
       if (filter.cursor.isEmpty) {
-        _replaceRemoteTasks(page.items);
+        _mergeRemoteTasks(page.items);
       } else {
-        _replaceRemoteTasks(<RemoteTask>[...tasks, ...page.items]);
+        _mergeRemoteTasks(page.items);
       }
-      _nextCursor = page.nextCursor;
+      if (filter.cursor.isNotEmpty || !_hasLoadedMore) {
+        _nextCursor = page.nextCursor;
+      }
+      if (filter.cursor.isNotEmpty) _hasLoadedMore = true;
       _freshness = page.freshness;
       _capabilities = Map<String, bool>.unmodifiable(page.capabilities);
       _lastError = null;
@@ -85,7 +181,14 @@ class RemoteTaskStore extends ChangeNotifier {
   }
 
   Future<bool> cancel(String id) async {
-    final task = _tasks[id];
+    final local = _localTasks[id];
+    final remote = _tasks[id];
+    if (local != null &&
+        (remote == null || _preferLocal(local, remote)) &&
+        local.cancelable) {
+      return _cancelLocalTask?.call(id) ?? false;
+    }
+    final task = remote;
     if (task == null || !task.cancelable || _api == null) return false;
     _tasks[id] = task.copyWith(
       status: RemoteTaskStatus.cancelRequested,
@@ -107,7 +210,12 @@ class RemoteTaskStore extends ChangeNotifier {
   }
 
   Future<RemoteTask?> loadDetails(String id) async {
-    if (_api == null) return _tasks[id];
+    final local = _localTasks[id];
+    final remote = _tasks[id];
+    if (_api == null ||
+        (local != null && (remote == null || _preferLocal(local, remote)))) {
+      return local ?? remote;
+    }
     try {
       final task = await _api!.getRemoteTask(id);
       _tasks[id] = task;
@@ -124,6 +232,11 @@ class RemoteTaskStore extends ChangeNotifier {
   }
 
   Future<bool> retry(String id) async {
+    final local = _localTasks[id];
+    final remote = _tasks[id];
+    if (local != null && (remote == null || _preferLocal(local, remote))) {
+      return _retryLocalTask?.call(id) ?? false;
+    }
     if (_api == null) return false;
     final result = await _api!.retryRemoteTask(id);
     await refresh();
@@ -131,6 +244,11 @@ class RemoteTaskStore extends ChangeNotifier {
   }
 
   Future<bool> trigger(String id) async {
+    final local = _localTasks[id];
+    final remote = _tasks[id];
+    if (local != null && (remote == null || _preferLocal(local, remote))) {
+      return _triggerLocalTask?.call(id) ?? false;
+    }
     if (_api == null) return false;
     final result = await _api!.triggerRemoteTask(id);
     await refresh();
@@ -138,24 +256,54 @@ class RemoteTaskStore extends ChangeNotifier {
   }
 
   Future<int> clearHistory({String profileId = '', String bucket = ''}) async {
-    if (_api == null) return 0;
-    final removed = await _api!.clearRemoteTaskHistory(
-      profileId: profileId,
-      bucket: bucket,
-    );
-    await refresh();
+    var removed = 0;
+    if (_api != null) {
+      removed = await _api!.clearRemoteTaskHistory(
+        profileId: profileId,
+        bucket: bucket,
+      );
+      _tasks.removeWhere(
+        (id, task) =>
+            !task.status.isActive &&
+            (profileId.isEmpty || task.profileId == profileId) &&
+            (bucket.isEmpty || task.bucket == bucket),
+      );
+      await refresh();
+    }
+    removed += _clearLocalTaskHistory?.call() ?? _removeLocalTerminalTasks();
     return removed;
   }
 
-  void _replaceRemoteTasks(Iterable<RemoteTask> incoming) {
-    final next = <String, RemoteTask>{
-      for (final task in incoming) task.id: task,
-    };
-    if (mapEquals(_tasks, next)) return;
-    _tasks
-      ..clear()
-      ..addAll(next);
-    notifyListeners();
+  void _mergeRemoteTasks(Iterable<RemoteTask> incoming) {
+    var changed = false;
+    for (final task in incoming) {
+      if (_tasks[task.id] != task) changed = true;
+      _tasks[task.id] = task;
+    }
+    if (changed) notifyListeners();
+  }
+
+  int _removeLocalTerminalTasks() {
+    final ids = _localTasks.entries
+        .where((entry) => !entry.value.status.isActive)
+        .map((entry) => entry.key)
+        .toList();
+    for (final id in ids) {
+      _localTasks.remove(id);
+    }
+    if (ids.isNotEmpty) notifyListeners();
+    return ids.length;
+  }
+
+  bool _preferLocal(RemoteTask local, RemoteTask remote) {
+    if (!local.status.isActive || remote.status.isActive) return false;
+    final localAt = DateTime.tryParse(
+      local.updatedAt.isNotEmpty ? local.updatedAt : local.createdAt,
+    );
+    final remoteAt = DateTime.tryParse(
+      remote.updatedAt.isNotEmpty ? remote.updatedAt : remote.createdAt,
+    );
+    return localAt != null && (remoteAt == null || localAt.isAfter(remoteAt));
   }
 
   void _ensurePolling() {
@@ -180,7 +328,13 @@ class RemoteTaskStore extends ChangeNotifier {
     _freshness = '';
     _capabilities = const <String, bool>{};
     _nextCursor = '';
+    _hasLoadedMore = false;
     _tasks.clear();
+    _localTasks.clear();
+    _cancelLocalTask = null;
+    _retryLocalTask = null;
+    _triggerLocalTask = null;
+    _clearLocalTaskHistory = null;
     notifyListeners();
   }
 }
