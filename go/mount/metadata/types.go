@@ -11,7 +11,7 @@ import (
 
 // SchemaVersion gates forward compatibility. Development builds deliberately
 // delete-and-rebuild instead of upgrading older layouts.
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 const (
 	bucketSchema       = "schema"
@@ -23,6 +23,8 @@ const (
 	bucketChunks       = "chunks"
 	bucketReadyOps     = "ready_ops"
 	bucketInodeOps     = "inode_ops"
+	bucketTaskGroups   = "task_groups"
+	bucketTaskMembers  = "task_members"
 
 	rootInode uint64 = 1
 )
@@ -77,6 +79,12 @@ const (
 	OpStateRunning
 	OpStateApplied
 	OpStateFailed
+	// Canceled is a terminal local rollback; Reconciling means provider outcome
+	// is unknown after a cancellation request reached an in-flight operation.
+	OpStateCanceled
+	OpStateReconciling
+	OpStateVerifying
+	OpStateCancelRequested
 )
 
 // Inode is the durable identity record. Desired edges describe the local view;
@@ -107,6 +115,7 @@ type Dirent struct {
 // Op is one durable local operation before remote confirmation.
 type Op struct {
 	Seq                       uint64 `json:"seq"`
+	TaskGroupID               string `json:"taskGroupId,omitempty"`
 	Type                      OpType `json:"type"`
 	InodeID                   uint64 `json:"inodeId"`
 	ContentGeneration         uint64 `json:"contentGeneration,omitempty"`
@@ -123,13 +132,17 @@ type Op struct {
 	MoveApplied               bool   `json:"moveApplied,omitempty"`
 	// MoveSource/Target and MoveParent/Name are frozen immediately before a
 	// provider move. Desired edges may change again while confirmation retries.
-	MoveSource        string `json:"moveSource,omitempty"`
-	MoveTarget        string `json:"moveTarget,omitempty"`
-	MoveParent        uint64 `json:"moveParent,omitempty"`
-	MoveName          string `json:"moveName,omitempty"`
-	Origin            string `json:"origin"`
-	CreatedAtUnixNano int64  `json:"createdAtUnixNs"`
-	AppliedAtUnixNano int64  `json:"appliedAtUnixNs,omitempty"`
+	MoveSource                string `json:"moveSource,omitempty"`
+	MoveTarget                string `json:"moveTarget,omitempty"`
+	MoveParent                uint64 `json:"moveParent,omitempty"`
+	MoveName                  string `json:"moveName,omitempty"`
+	Origin                    string `json:"origin"`
+	CreatedAtUnixNano         int64  `json:"createdAtUnixNs"`
+	AppliedAtUnixNano         int64  `json:"appliedAtUnixNs,omitempty"`
+	CancelRequested           bool   `json:"cancelRequested,omitempty"`
+	CancelRequestedAtUnixNano int64  `json:"cancelRequestedAtUnixNs,omitempty"`
+	CanceledAtUnixNano        int64  `json:"canceledAtUnixNs,omitempty"`
+	ReconcileAtUnixNano       int64  `json:"reconcileAtUnixNs,omitempty"`
 }
 
 // ListingState records whether and when one directory was materialized.

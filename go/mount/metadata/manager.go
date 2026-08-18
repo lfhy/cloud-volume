@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -22,6 +23,15 @@ type Manager struct {
 	mu       sync.Mutex
 	baseDir  string
 	services map[string]*managedService
+}
+
+// NamespaceManifest is the non-secret discovery record kept beside a metadata DB.
+// It lets the task page reopen durable pending journals after an app restart.
+type NamespaceManifest struct {
+	Version   int    `json:"version"`
+	ID        string `json:"id"`
+	ProfileID string `json:"profileId"`
+	Bucket    string `json:"bucket"`
 }
 
 type managerRegistry struct {
@@ -225,9 +235,53 @@ func (m *Manager) namespace(
 	if err != nil {
 		return Namespace{}, err
 	}
+	if err := writeNamespaceManifest(root, NamespaceManifest{
+		Version: 1, ID: id, ProfileID: normalized.ProfileID, Bucket: bucket,
+	}); err != nil {
+		return Namespace{}, err
+	}
 	return Namespace{
 		ID: id, Root: root, CacheRoot: cacheRoot, Config: normalized, Bucket: bucket,
 	}, nil
+}
+
+func writeNamespaceManifest(root string, manifest NamespaceManifest) error {
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		return err
+	}
+	temporary := filepath.Join(root, "namespace.json.tmp")
+	if err := os.WriteFile(temporary, raw, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(temporary, filepath.Join(root, "namespace.json"))
+}
+
+// KnownNamespaces scans only local manifest files; it never contacts providers.
+func (m *Manager) KnownNamespaces() ([]NamespaceManifest, error) {
+	entries, err := os.ReadDir(m.baseDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	result := make([]NamespaceManifest, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		raw, readErr := os.ReadFile(filepath.Join(m.baseDir, entry.Name(), "namespace.json"))
+		if readErr != nil {
+			continue
+		}
+		var manifest NamespaceManifest
+		if json.Unmarshal(raw, &manifest) != nil || manifest.Version != 1 || manifest.ID != entry.Name() || manifest.ProfileID == "" || manifest.Bucket == "" {
+			continue
+		}
+		result = append(result, manifest)
+	}
+	return result, nil
 }
 
 // Release drops one Acquire handle. Unbalanced calls are ignored so a stray

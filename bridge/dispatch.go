@@ -126,6 +126,18 @@ func invokeBridgeMethod(method string, args json.RawMessage) (any, error) {
 		return downloadFile(args)
 	case "list_transfer_jobs":
 		return listTransferJobs()
+	case "list_remote_tasks":
+		return listRemoteTasks(args)
+	case "get_remote_task":
+		return getRemoteTask(args)
+	case "cancel_remote_task":
+		return cancelRemoteTask(args)
+	case "retry_remote_task":
+		return retryRemoteTask(args)
+	case "trigger_remote_task":
+		return triggerRemoteTask(args)
+	case "clear_remote_task_history":
+		return clearRemoteTaskHistory(args)
 	case "cancel_transfer":
 		return cancelTransfer(args)
 	case "trigger_transfer":

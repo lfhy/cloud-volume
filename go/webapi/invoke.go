@@ -17,25 +17,30 @@ import (
 )
 
 type invokeEnvelope struct {
-	Config      storageconfig.RemoteStorageConfig `json:"config"`
-	Name        string                            `json:"name"`
-	Bucket      string                            `json:"bucket"`
-	Prefix      string                            `json:"prefix"`
-	NextToken   string                            `json:"nextToken"`
-	PageSize    int32                             `json:"pageSize"`
-	Key         string                            `json:"key"`
-	IsDirectory bool                              `json:"isDirectory"`
-	NewName     string                            `json:"newName"`
-	SourceKey   string                            `json:"sourceKey"`
-	TargetKey   string                            `json:"targetKey"`
-	TaskID      string                            `json:"taskId"`
-	Permanent   bool                              `json:"permanent"`
-	TrashID     string                            `json:"trashId"`
-	DurationSec int                               `json:"durationSec"`
-	ID          string                            `json:"id"`
-	ClearAll    bool                              `json:"clearAll"`
-	Names       []string                          `json:"names"`
-	Ids         []string                          `json:"ids"`
+	Config         storageconfig.RemoteStorageConfig `json:"config"`
+	Name           string                            `json:"name"`
+	Bucket         string                            `json:"bucket"`
+	Prefix         string                            `json:"prefix"`
+	NextToken      string                            `json:"nextToken"`
+	PageSize       int32                             `json:"pageSize"`
+	Key            string                            `json:"key"`
+	IsDirectory    bool                              `json:"isDirectory"`
+	NewName        string                            `json:"newName"`
+	SourceKey      string                            `json:"sourceKey"`
+	TargetKey      string                            `json:"targetKey"`
+	TaskID         string                            `json:"taskId"`
+	ProfileID      string                            `json:"profileId"`
+	Statuses       []string                          `json:"statuses"`
+	IncludeHistory bool                              `json:"includeHistory"`
+	Cursor         string                            `json:"cursor"`
+	Limit          int                               `json:"limit"`
+	Permanent      bool                              `json:"permanent"`
+	TrashID        string                            `json:"trashId"`
+	DurationSec    int                               `json:"durationSec"`
+	ID             string                            `json:"id"`
+	ClearAll       bool                              `json:"clearAll"`
+	Names          []string                          `json:"names"`
+	Ids            []string                          `json:"ids"`
 }
 
 func (s *Server) handleInvoke(w http.ResponseWriter, r *http.Request) {
@@ -325,6 +330,24 @@ func (s *Server) invokeMethod(
 		return map[string]any{"ok": true}, http.StatusOK, err
 	case "list_transfer_jobs":
 		return s3ops.ListTransferSnapshots(), http.StatusOK, nil
+	case "list_remote_tasks":
+		result, err := listWebRemoteTasks(input)
+		return result, http.StatusOK, err
+	case "get_remote_task":
+		result, err := getWebRemoteTask(input)
+		return result, http.StatusOK, err
+	case "cancel_remote_task":
+		result, err := controlWebRemoteTask(input, "cancel")
+		return result, http.StatusOK, err
+	case "retry_remote_task":
+		result, err := controlWebRemoteTask(input, "retry")
+		return result, http.StatusOK, err
+	case "trigger_remote_task":
+		result, err := controlWebRemoteTask(input, "trigger")
+		return result, http.StatusOK, err
+	case "clear_remote_task_history":
+		result, err := clearWebRemoteTaskHistory(input)
+		return result, http.StatusOK, err
 	case "cancel_transfer":
 		if bucketmount.CancelQueuedTransfer(input.TaskID) {
 			return map[string]any{"ok": true}, http.StatusOK, nil

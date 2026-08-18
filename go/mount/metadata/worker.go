@@ -22,6 +22,7 @@ type Worker struct {
 	stop    chan struct{}
 	done    chan struct{}
 	running map[uint64]struct{}
+	cancels map[uint64]context.CancelFunc
 }
 
 // NewWorker starts one drain goroutine for a metadata service.
@@ -32,7 +33,9 @@ func NewWorker(service *Service) *Worker {
 		stop:    make(chan struct{}),
 		done:    make(chan struct{}),
 		running: map[uint64]struct{}{},
+		cancels: map[uint64]context.CancelFunc{},
 	}
+	service.setWorker(w)
 	go w.run()
 	return w
 }
@@ -136,6 +139,10 @@ func (w *Worker) snapshotWork() (pending int, failed int, running int, next time
 			case OpStateRunning:
 				pending++
 				running++
+			case OpStateVerifying, OpStateCancelRequested:
+				pending++
+			case OpStateReconciling:
+				pending++
 			case OpStatePending:
 				pending++
 				if op.NextAttemptUnixNano > now {
@@ -255,7 +262,7 @@ func pendingOpForInode(tx boltTxT, inode, beforeSeq uint64) bool {
 		if decodeJSON(raw, &prior) != nil || prior.InodeID != inode {
 			return nil
 		}
-		if prior.State == OpStatePending || prior.State == OpStateRunning {
+		if prior.State == OpStatePending || prior.State == OpStateRunning || prior.State == OpStateReconciling {
 			found = true
 		}
 		return nil
@@ -268,6 +275,37 @@ func (w *Worker) releaseInode(inode uint64) {
 	delete(w.running, inode)
 	w.mu.Unlock()
 	w.Wake()
+}
+
+// beginOperation binds one provider request to a cancellable operation context.
+func (w *Worker) beginOperation(parent context.Context, seq uint64) (context.Context, func(), bool) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	w.mu.Lock()
+	if w.cancels == nil {
+		w.cancels = map[uint64]context.CancelFunc{}
+	}
+	ctx, cancel := context.WithCancel(parent)
+	w.cancels[seq] = cancel
+	w.mu.Unlock()
+	return ctx, func() {
+		w.mu.Lock()
+		delete(w.cancels, seq)
+		w.mu.Unlock()
+		cancel()
+	}, true
+}
+
+// cancelOperation interrupts an in-flight provider operation when it has
+// reached the worker. A missing context means it has not begun provider I/O.
+func (w *Worker) cancelOperation(seq uint64) {
+	w.mu.Lock()
+	cancel := w.cancels[seq]
+	w.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 func minTime(left, right time.Time) time.Time {

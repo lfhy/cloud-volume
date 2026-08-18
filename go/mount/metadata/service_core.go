@@ -19,6 +19,8 @@ type Service struct {
 	pathWriteMu sync.Mutex
 	chunkMu     sync.Mutex
 	chunkTouch  map[string]int64
+	workerMu    sync.RWMutex
+	worker      *Worker
 }
 
 // NewService wires a durable store to one provider backend.
@@ -107,3 +109,16 @@ func (s *Service) NamespaceID() string {
 
 // Backend exposes the current provider backend for remote worker execution.
 func (s *Service) Backend() Backend { return s.backendSnapshot() }
+
+// setWorker attaches the namespace worker so task control can cancel a live op.
+func (s *Service) setWorker(worker *Worker) {
+	s.workerMu.Lock()
+	s.worker = worker
+	s.workerMu.Unlock()
+}
+
+func (s *Service) taskWorker() *Worker {
+	s.workerMu.RLock()
+	defer s.workerMu.RUnlock()
+	return s.worker
+}

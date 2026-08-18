@@ -29,6 +29,8 @@ var metadataBucketNames = []string{
 	bucketChunks,
 	bucketReadyOps,
 	bucketInodeOps,
+	bucketTaskGroups,
+	bucketTaskMembers,
 }
 
 // OpenStore opens (creating when necessary) one namespace database.

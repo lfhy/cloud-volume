@@ -13,19 +13,20 @@ import (
 
 // TransferSnapshot is polled by Flutter to render sidebar and transfers UI.
 type TransferSnapshot struct {
-	ID                        string  `json:"id"`
-	Type                      string  `json:"type"`
-	Bucket                    string  `json:"bucket"`
-	Key                       string  `json:"key"`
-	LocalPath                 string  `json:"localPath"`
-	TargetPath                string  `json:"targetPath,omitempty"`
-	Status                    string  `json:"status"`
-	StatusDetail              string  `json:"statusDetail,omitempty"`
-	CreatedAt                 string  `json:"createdAt,omitempty"`
-	BytesCompleted            int64   `json:"bytesCompleted"`
-	TotalBytes                int64   `json:"totalBytes"`
-	ItemsCompleted            int64   `json:"itemsCompleted,omitempty"`
-	TotalItems                int64   `json:"totalItems,omitempty"`
+	ID             string `json:"id"`
+	Type           string `json:"type"`
+	ProfileID      string `json:"profileId,omitempty"`
+	Bucket         string `json:"bucket"`
+	Key            string `json:"key"`
+	LocalPath      string `json:"localPath"`
+	TargetPath     string `json:"targetPath,omitempty"`
+	Status         string `json:"status"`
+	StatusDetail   string `json:"statusDetail,omitempty"`
+	CreatedAt      string `json:"createdAt,omitempty"`
+	BytesCompleted int64  `json:"bytesCompleted"`
+	TotalBytes     int64  `json:"totalBytes"`
+	ItemsCompleted int64  `json:"itemsCompleted,omitempty"`
+	TotalItems     int64  `json:"totalItems,omitempty"`
 	// PlannedItems remembers the work units discovered so far for two-phase
 	// sweeps (copy + source cleanup) so a second enumeration can reset the
 	// running total instead of double-counting.
@@ -70,11 +71,16 @@ func startTransfer(
 	now := time.Now()
 	globalTransferMonitor.mu.Lock()
 	defer globalTransferMonitor.mu.Unlock()
+	profileID := ""
+	if existing, ok := globalTransferMonitor.tasks[id]; ok {
+		profileID = existing.snapshot.ProfileID
+	}
 
 	globalTransferMonitor.tasks[id] = &transferState{
 		snapshot: TransferSnapshot{
 			ID:           id,
 			Type:         kind,
+			ProfileID:    profileID,
 			Bucket:       bucket,
 			Key:          key,
 			LocalPath:    localPath,
@@ -139,6 +145,17 @@ func QueueTransfer(
 	task.snapshot.Error = ""
 	task.snapshot.SpeedBytes = 0
 	task.updatedAt = now
+}
+
+// SetTransferProfile associates a physical snapshot with the durable account
+// or sync-profile identity that owns it. It is metadata for projection only.
+func SetTransferProfile(id, profileID string) {
+	globalTransferMonitor.mu.Lock()
+	defer globalTransferMonitor.mu.Unlock()
+	if task, ok := globalTransferMonitor.tasks[id]; ok {
+		task.snapshot.ProfileID = profileID
+		task.updatedAt = time.Now()
+	}
 }
 
 // SetTransferStatusDetail refines a task's current phase without changing its main status.

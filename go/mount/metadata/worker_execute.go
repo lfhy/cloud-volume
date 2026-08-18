@@ -14,10 +14,25 @@ import (
 )
 
 func (w *Worker) execute(ctx context.Context, op Op) {
-	err := w.executeOp(ctx, op)
+	opCtx, done, _ := w.beginOperation(ctx, op.Seq)
+	defer done()
+	if !w.operationMayExecute(op.Seq) {
+		_ = w.markReconciliationIfCanceled(op.Seq)
+		w.releaseInode(op.InodeID)
+		return
+	}
+	err := w.executeOp(opCtx, op)
 	updateErr := w.service.store.update(func(tx boltTxT) error {
 		return replaceOp(tx, op.Seq, func(current *Op) {
-			if current.State != OpStateRunning {
+			if current.State == OpStateCancelRequested || current.State == OpStateReconciling {
+				current.State = OpStateReconciling
+				current.LastError = "cancel requested; remote outcome requires reconciliation"
+				if current.ReconcileAtUnixNano == 0 {
+					current.ReconcileAtUnixNano = time.Now().UnixNano()
+				}
+				return
+			}
+			if current.State != OpStateRunning && current.State != OpStateVerifying {
 				return
 			}
 			switch {
@@ -46,6 +61,32 @@ func (w *Worker) execute(ctx context.Context, op Op) {
 	}
 }
 
+func (w *Worker) markReconciliationIfCanceled(seq uint64) error {
+	return w.service.store.update(func(tx boltTxT) error {
+		return replaceOp(tx, seq, func(current *Op) {
+			if current.State == OpStateCancelRequested {
+				current.State = OpStateReconciling
+				if current.ReconcileAtUnixNano == 0 {
+					current.ReconcileAtUnixNano = time.Now().UnixNano()
+				}
+			}
+		})
+	})
+}
+
+// operationMayExecute closes the claim-to-context race: a cancel request that
+// arrives before provider I/O leaves the durable record reconciling and stops
+// this worker from starting a side effect without a cancellable context.
+func (w *Worker) operationMayExecute(seq uint64) bool {
+	mayExecute := false
+	_ = w.service.store.view(func(tx boltTxT) error {
+		op, err := getOp(tx, seq)
+		mayExecute = err == nil && op.State == OpStateRunning
+		return nil
+	})
+	return mayExecute
+}
+
 func (w *Worker) executeOp(ctx context.Context, op Op) error {
 	s := w.service
 	backend := s.backendSnapshot()
@@ -56,6 +97,9 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 			return err
 		}
 		if err := backend.CreateDirectory(ctx, s.store.namespace.Bucket, parentPrefix(path), name); err != nil && !strings.Contains(strings.ToLower(err.Error()), "exists") {
+			return err
+		}
+		if err := w.markVerifying(op.Seq); err != nil {
 			return err
 		}
 		return s.confirmRemote(ctx, backend, op, parentID, name, false)
@@ -78,8 +122,13 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 		}
 		defer os.Remove(localPath)
 		s3ops.QueueTransfer(taskID, "upload", s.store.namespace.Bucket, target, localPath, ref.Size)
+		s3ops.SetTransferProfile(taskID, s.store.namespace.Config.ProfileID)
 		s3ops.SetTransferStatusDetail(taskID, "sync_wait")
 		if err := backend.UploadFile(ctx, s.store.namespace.Bucket, target, localPath, taskID); err != nil {
+			s3ops.FinishQueuedTransfer(taskID, err)
+			return err
+		}
+		if err := w.markVerifying(op.Seq); err != nil {
 			s3ops.FinishQueuedTransfer(taskID, err)
 			return err
 		}
@@ -128,6 +177,16 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 	default:
 		return fmt.Errorf("metadata worker: unknown op type %d", op.Type)
 	}
+}
+
+func (w *Worker) markVerifying(seq uint64) error {
+	return w.service.store.update(func(tx boltTxT) error {
+		return replaceOp(tx, seq, func(current *Op) {
+			if current.State == OpStateRunning {
+				current.State = OpStateVerifying
+			}
+		})
+	})
 }
 
 var errConflict = errors.New("metadata: remote fingerprint conflict")

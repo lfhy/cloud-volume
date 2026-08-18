@@ -73,7 +73,8 @@ func (s *Service) CreateDirectory(parent uint64, name string, opts WriteOptions)
 		}
 		return appendOp(tx, Op{
 			Type: OpMkdir, InodeID: inode, NewParent: parent, NewName: name,
-			State: OpStatePending, Origin: origin(opts), CreatedAtUnixNano: nowUnix(),
+			TaskGroupID: strings.TrimSpace(opts.TaskID),
+			State:       OpStatePending, Origin: origin(opts), CreatedAtUnixNano: nowUnix(),
 			NextAttemptUnixNano: time.Now().Add(s.quietPeriod()).UnixNano(),
 		})
 	})
@@ -142,6 +143,7 @@ func (s *Service) Write(parent uint64, name string, ref ContentRef, opts WriteOp
 		}
 		return appendOp(tx, Op{
 			Type: OpWrite, InodeID: inode, ContentGeneration: ref.Generation, NewParent: parent, NewName: name,
+			TaskGroupID:               strings.TrimSpace(opts.TaskID),
 			ExpectedRemoteFingerprint: expectedFingerprint(record), State: OpStatePending,
 			Origin: origin(opts), CreatedAtUnixNano: nowUnix(),
 			NextAttemptUnixNano: time.Now().Add(s.quietPeriod()).UnixNano(),
@@ -237,7 +239,8 @@ func (s *Service) Rename(inode, newParent uint64, newName string, opts WriteOpti
 		}
 		return appendOp(tx, Op{
 			Type: OpRename, InodeID: inode, ContentGeneration: record.ContentGeneration,
-			OldParent: oldParent(record), NewParent: newParent,
+			TaskGroupID: strings.TrimSpace(opts.TaskID),
+			OldParent:   oldParent(record), NewParent: newParent,
 			OldName: record.RemoteName, NewName: newName, State: OpStatePending,
 			Origin: origin(opts), CreatedAtUnixNano: nowUnix(),
 			NextAttemptUnixNano: time.Now().Add(s.quietPeriod()).UnixNano(),
@@ -279,7 +282,8 @@ func (s *Service) Delete(inode uint64, opts WriteOptions) error {
 		}
 		return appendOp(tx, Op{
 			Type: OpDelete, InodeID: inode, OldParent: record.RemoteParentID,
-			OldName: record.RemoteName, HardDelete: opts.HardDelete, State: OpStatePending, Origin: origin(opts),
+			TaskGroupID: strings.TrimSpace(opts.TaskID),
+			OldName:     record.RemoteName, HardDelete: opts.HardDelete, State: OpStatePending, Origin: origin(opts),
 			CreatedAtUnixNano: nowUnix(), NextAttemptUnixNano: time.Now().Add(s.quietPeriod()).UnixNano(),
 		})
 	})
@@ -323,6 +327,7 @@ func appendOp(tx boltTxT, op Op) error {
 		seq = decodeUint64(key) + 1
 	}
 	op.Seq = seq
+	assignTaskGroup(tx, &op)
 	return putOp(tx, op, Op{})
 }
 
@@ -334,7 +339,8 @@ func appendReplacedDelete(tx boltTxT, victim Inode, opts WriteOptions) error {
 	}
 	return appendOp(tx, Op{
 		Type: OpDelete, InodeID: victim.ID, OldParent: victim.RemoteParentID,
-		OldName: victim.RemoteName, HardDelete: opts.HardDelete, State: OpStatePending, Origin: origin(opts),
+		TaskGroupID: strings.TrimSpace(opts.TaskID),
+		OldName:     victim.RemoteName, HardDelete: opts.HardDelete, State: OpStatePending, Origin: origin(opts),
 		CreatedAtUnixNano: nowUnix(), NextAttemptUnixNano: nowUnix(),
 	})
 }

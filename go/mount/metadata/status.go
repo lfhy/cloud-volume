@@ -237,7 +237,7 @@ func hasLaterPendingOp(tx boltTxT, inode, confirmedSeq uint64) bool {
 		if decodeJSON(journal.Get(encodeUint64(seq)), &op) != nil {
 			continue
 		}
-		if op.State == OpStatePending || op.State == OpStateRunning {
+		if op.State == OpStatePending || op.State == OpStateRunning || op.State == OpStateReconciling || op.State == OpStateVerifying || op.State == OpStateCancelRequested {
 			return true
 		}
 	}
@@ -311,7 +311,7 @@ func (s *Service) Status() Status {
 				return nil
 			}
 			switch op.State {
-			case OpStatePending, OpStateRunning:
+			case OpStatePending, OpStateRunning, OpStateReconciling:
 				// Running entries have left ready_ops while the provider call is
 				// in flight, but still make a non-forced reset unsafe.
 				status.PendingOps++

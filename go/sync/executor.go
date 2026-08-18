@@ -16,8 +16,8 @@ import (
 
 // opExecutor binds a profile + backend and can execute one Op at a time.
 type opExecutor struct {
-	profile    SyncProfile
-	backend    storageops.Backend
+	profile     SyncProfile
+	backend     storageops.Backend
 	runtimeRoot string
 }
 
@@ -36,6 +36,7 @@ func (e *opExecutor) run(ctx context.Context, taskID string, op Op) {
 	}
 
 	s3ops.QueueTransfer(taskID, kind, bucket, key, localPath, op.Size)
+	s3ops.SetTransferProfile(taskID, e.profile.ID)
 	ctx, cancel := context.WithCancel(ctx)
 	s3ops.StartQueuedTransfer(taskID, kind, bucket, key, localPath, op.Size, cancel)
 

@@ -247,6 +247,13 @@ metadata.db
 - Profile-scoped `list_object_page`, legacy `list_objects`, and `head_object` now read the persistent namespace first. A metadata manager/acquire failure is returned to the caller rather than silently falling into a mounted-session or provider-direct alternate view. `ListMountedObjectPage` remains only for configs without `ProfileID`, where no durable namespace exists by contract.
 - Cross-view acceptance holds one manager handle for a mount and another for a page, then verifies pending mkdir/write/rename/delete are visible immediately through mount list/stat. Reopen-before-worker preserves a pending rename, and forced reset rebuilds an idle namespace from the remote base. Existing rename complexity and crash/replay tests remain the regression anchors.
 
+### M8 unified remote task projection (completed 2026-08-18)
+
+- Schema v4 adds `task_groups`/`task_members`; `Task` IDs are namespace-qualified (`sync:<namespace>:<group>`). The projection folds only deterministic, compatible sequences: unconfirmed mkdir plus renames, consecutive pending renames, and older same-inode writes superseded by a newer generation. Raw journal events remain expandable and folded entries retain every physical `metadata-op-*` reference.
+- `list_remote_tasks` and the Web `/api/invoke/list_remote_tasks` route share one JSON contract with profile/bucket/status filters, cursor pagination, `freshness`, and capability flags. Metadata tasks are joined with provider transfer monitor snapshots; sync snapshots carry their profile identity so UI cards use `tasksForProfile()` rather than parsing task IDs.
+- Cancellation is transactional for fully pending groups (Desired edges, inode records, and chunk nlinks roll back together). A provider-running cancel is immediately `cancel_requested`, then `reconciling`; it is never shown as completed until a later provider reconciliation proves the outcome. Failed/conflict tasks support retry and pending tasks support trigger without bypassing dependencies. Terminal history is scoped and compacted after 30 days.
+- Flutter `RemoteTaskStore` is the only remote-task display source for transfers, sidebar, and file-sync cards. `TransferQueue` remains an execution/local compatibility producer only; endpoint failures surface as freshness errors rather than silently restoring the old list.
+
 ## 推荐实施顺序（锁定）
 
 **先完成本地 inode metadata + 页面/mount 统一视图，再做远端同步和跨设备 feed。** 远端 change feed 的 receiver 必须把事件应用到唯一的本地树，才能正确判断“本地 pending”与“远端已变”；在两套缓存并存时先做 feed，只会重新制造 `NotifyExternal*` 式旁路修补。
@@ -270,7 +277,7 @@ Phase 0 的止血修复可以并行落地，但不改变上述主线顺序。
 1. **存储与身份**
    - 不可变 `ProfileID` 存入 profile；namespace = `ProfileID + canonical backend identity + bucket + rootPrefix`。
    - `RuntimeDir()/metadata/v1/<namespace>/metadata.db`（bbolt），schema version、root inode=1、单调 inode allocator；schema 不匹配/损坏时由 reset guard 清空重建。
-   - buckets：`inodes`、`dirents[父inode]`、`journal`、`listing_state`、`content_refs`、`ready_ops`、`inode_ops`。后两者驱动最小 worker 的调度与 inode dependency；后续 compact 仍是单独阶段。
+   - buckets：`inodes`、`dirents[父inode]`、`journal`、`listing_state`、`content_refs`、`chunks`、`ready_ops`、`inode_ops`、`task_groups`、`task_members`。后者驱动 worker 调度、依赖和统一任务投影。
 
 2. **统一读取 API（单入口）**
    - `metadata.Service` 提供 `ListPage(dir inode, cursor)`、`Stat(path)`、`StatInode(inode)`、`Path(inode)`、`ResolveParent(parent, nameKey)`。
@@ -325,6 +332,7 @@ Phase 0 的止血修复可以并行落地，但不改变上述主线顺序。
 5. **M5 rename 事务与内部身份关联（已完成）**：inode rename；各平台 adapter 保证 metadata-backed 项的展示文件号能稳定解析回 OID（Linux FUSE 直接用 `Ino=OID`，WinFsp/Cloud Files 直用 OID，macOS WebDAV 保持内部映射）。
 6. **M6 写入口最小同步（已完成）**：M6a facade、M6b mount 写入口和 M6c 页面 create/upload/rename/move/delete 已接入 Desired+journal；worker 的确认事务更新 Remote 边。复杂 copy/递归目录上传在有持久身份时 fail-closed，等待专门的 durable batch op。
 7. **M7 一致性与验收（已完成）**：双端视图一致性、rename crash/replay、重开和 reset rebuild 覆盖已补齐；提交前执行全量 `go test ./...` + `flutter analyze`。
+8. **M8 统一远端任务投影（已完成 2026-08-18）**：journal task groups/controls、desktop/Web JSON API、物理传输 adapter、RemoteTaskStore 与任务页/侧栏/同步卡片切换完成；旧 TransferQueue 不再作为展示 fallback。
 
 ### Phase 0 — 先止血（不依赖新架构）
 
@@ -352,7 +360,7 @@ Phase 0 的止血修复可以并行落地，但不改变上述主线顺序。
 - [x] 数据结构（MVP 不含 symlink/rmdir）：
   - `Inode{ID, Kind(file/dir/symlink), DesiredParentID, DesiredName, RemoteParentID, RemoteName, Size, MTime, LocalRevision, RemoteFingerprint, State(local-only/pending/synced/conflict/tombstone), ContentGeneration}`
   - `Dirent{ChildID, DisplayName, NameKey}`，同一目录的 dirent 存在该目录自己的 bbolt B+Tree 中。
- - `Op{Seq, Type(create/write/rename/mkdir/rmdir/delete), InodeID, ParentInodeIDs, ExpectedLocalRevision, ExpectedRemoteFingerprint, Origin(ui/mount/p2p/reconcile), State(pending/applying/applied/failed), Retry, LastError}`；路径只能作为审计快照，不作为执行真源。
+   - `Op{Seq, TaskGroupID, Type(create/write/rename/mkdir/rmdir/delete), InodeID, ParentInodeIDs, ExpectedLocalRevision, ExpectedRemoteFingerprint, Origin(ui/mount/p2p/reconcile), State(pending/running/verifying/failed/applied/cancel_requested/reconciling/canceled), Retry, LastError}`；路径只能作为审计快照，不作为执行真源。
   - `Op.Write` 额外固定 `ContentGeneration`，执行时只能读取该 generation 的块列表；连续写同一 inode 时每个操作独立上传/retire，不能回读 inode 当前 generation。
   - `ListingCursor{DirectoryInodeID, DirectoryRevision, LastNameKey, RemoteCursor, VerifiedAt, RemoteRevHint}`。
 - [x] 单事务保证：本地视图变更 + journal append 原子提交。
@@ -418,7 +426,8 @@ Phase 0 的止血修复可以并行落地，但不改变上述主线顺序。
 ### Phase 5 — 平台与 UI
 
 - [ ] 挂载状态页显示 metadata store 健康度、pending ops 数、最后 verified seq/time、视图物化进度。
-- [ ] 传输页把 dir marker、rename、delete 也纳入可取消/重试任务（不只是 mount-writeback 文件任务）。
+- [x] 传输页把 dir marker、rename、delete、sync 和应用更新投影为统一 `RemoteTask`；主列表按有效操作展示，raw journal/physical phases 可展开，支持取消/重试/立即执行与历史清理。
+- [x] 任务 API 提供 namespace-qualified IDs、依赖原因、cursor 分页、freshness/capability 字段；Web 按认证 active profile 限制范围。
 - [ ] Windows Cloud Files sync state 投影到新 journal 状态；WinFsp placeholder 状态同步投影。
 - [ ] P2P mutation 广播改为携带 canonical remote path + remote fingerprint + origin device sequence；OID 只在本机 metadata store 内使用。
 - [ ] 页面显示远端 freshness：最后 feed cursor、最后远端验证时间、polling-only/fresh/conflict 状态；在 backend 无可靠外部变化检测时明确提示，而不是显示“已同步”造成误解。

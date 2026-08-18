@@ -136,6 +136,9 @@ func putOp(tx boltTx, op Op, previous Op) error {
 	if err := tx.Bucket([]byte(bucketInodeOps)).Put(inodeOpKey(op.InodeID, op.Seq), []byte{}); err != nil {
 		return err
 	}
+	if err := indexTaskOp(tx, op); err != nil {
+		return err
+	}
 	if previous.Seq == op.Seq {
 		if err := tx.Bucket([]byte(bucketReadyOps)).Delete(readyKey(previous)); err != nil {
 			return err
