@@ -158,6 +158,26 @@ func (w *Worker) reconcileCanceled(ctx context.Context, op Op) error {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
+	} else {
+		switch op.Type {
+		case OpDelete:
+			return fmt.Errorf("%w: canceled delete target is already absent", errConflict)
+		case OpRename:
+			if strings.TrimSpace(source) == "" {
+				return fmt.Errorf("%w: canceled move has no source target", errConflict)
+			}
+			sourcePresent, sourceErr := remoteObjectPresent(ctx, backend, s.store.namespace.Bucket, source, isDirectory)
+			if sourceErr != nil {
+				return sourceErr
+			}
+			if !sourcePresent {
+				return fmt.Errorf("%w: canceled move has neither frozen edge", errConflict)
+			}
+		case OpWrite:
+			if record.RemoteParentID != 0 {
+				return fmt.Errorf("%w: canceled write target is absent", errConflict)
+			}
+		}
 	}
 	return w.finalizeCanceled(op.Seq)
 }
