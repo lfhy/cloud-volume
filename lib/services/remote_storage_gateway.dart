@@ -264,6 +264,7 @@ abstract class RemoteStorageGateway {
   Future<void> cancelTransfer(String taskId);
   Future<bool> triggerTransfer(String taskId);
   Future<List<TransferSnapshot>> listTransferJobs();
+
   /// Unified logical remote-operation queue. Implementations may temporarily
   /// adapt legacy transfer snapshots while metadata projection is rolling out.
   Future<RemoteTaskPage> listRemoteTasks([
@@ -271,12 +272,15 @@ abstract class RemoteStorageGateway {
   ]) async {
     throw UnsupportedError('统一远端任务队列不可用');
   }
+
   Future<RemoteTask> getRemoteTask(String taskId) async {
     throw UnsupportedError('统一远端任务队列不可用');
   }
+
   Future<bool> cancelRemoteTask(String taskId) async {
     throw UnsupportedError('统一远端任务队列不可用');
   }
+
   Future<bool> retryRemoteTask(String taskId) async {
     throw UnsupportedError('统一远端任务队列不可用');
   }
@@ -288,6 +292,7 @@ abstract class RemoteStorageGateway {
   Future<int> clearRemoteTaskHistory({
     String profileId = '',
     String bucket = '',
+    List<String> taskIds = const <String>[],
   }) async {
     throw UnsupportedError('统一远端任务队列不可用');
   }

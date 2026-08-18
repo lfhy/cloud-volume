@@ -255,22 +255,38 @@ class RemoteTaskStore extends ChangeNotifier {
     return result;
   }
 
-  Future<int> clearHistory({String profileId = '', String bucket = ''}) async {
+  Future<int> clearHistory({
+    String profileId = '',
+    String bucket = '',
+    List<String> taskIds = const <String>[],
+  }) async {
     var removed = 0;
     if (_api != null) {
       removed = await _api!.clearRemoteTaskHistory(
         profileId: profileId,
         bucket: bucket,
+        taskIds: taskIds,
       );
-      _tasks.removeWhere(
-        (id, task) =>
-            !task.status.isActive &&
-            (profileId.isEmpty || task.profileId == profileId) &&
-            (bucket.isEmpty || task.bucket == bucket),
-      );
+      if (taskIds.isEmpty) {
+        _tasks.removeWhere(
+          (id, task) =>
+              !task.status.isActive &&
+              (profileId.isEmpty || task.profileId == profileId) &&
+              (bucket.isEmpty || task.bucket == bucket),
+        );
+      } else {
+        final selected = taskIds.toSet();
+        _tasks.removeWhere(
+          (id, task) => selected.contains(id) && !task.status.isActive,
+        );
+      }
       await refresh();
     }
-    removed += _clearLocalTaskHistory?.call() ?? _removeLocalTerminalTasks();
+    if (taskIds.isEmpty) {
+      removed += _clearLocalTaskHistory?.call() ?? _removeLocalTerminalTasks();
+    } else {
+      removed += _removeLocalTerminalTasksById(taskIds);
+    }
     return removed;
   }
 
@@ -288,6 +304,22 @@ class RemoteTaskStore extends ChangeNotifier {
         .where((entry) => !entry.value.status.isActive)
         .map((entry) => entry.key)
         .toList();
+    for (final id in ids) {
+      _localTasks.remove(id);
+    }
+    if (ids.isNotEmpty) notifyListeners();
+    return ids.length;
+  }
+
+  int _removeLocalTerminalTasksById(Iterable<String> taskIds) {
+    final selected = taskIds.toSet();
+    final ids = _localTasks.entries
+        .where(
+          (entry) =>
+              selected.contains(entry.key) && !entry.value.status.isActive,
+        )
+        .map((entry) => entry.key)
+        .toList(growable: false);
     for (final id in ids) {
       _localTasks.remove(id);
     }

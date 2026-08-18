@@ -6,6 +6,10 @@ extension TransferQueueSnapshots on TransferQueue {
     var changed = false;
     var shouldPersist = false;
     for (final snapshot in snapshots) {
+      // Metadata-worker physical phases are already embedded in the durable
+      // RemoteTask projection; publishing them as local rows creates a second
+      // cancelable task for the same journal operation.
+      if (snapshot.id.startsWith('metadata-op-')) continue;
       final task =
           _taskById(snapshot.id) ??
           (() {

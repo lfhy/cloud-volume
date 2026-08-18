@@ -235,7 +235,14 @@ func clearWebRemoteTaskHistory(input invokeEnvelope) (any, error) {
 		return nil, err
 	}
 	defer releaseWebTaskHandles(manager, handles)
-	removed, err := manager.ClearTaskHistoryFor(config.ProfileID, input.Bucket, time.Now().Add(-30*24*time.Hour))
+	var removed int
+	if len(input.TaskIDs) > 0 {
+		removed, err = manager.ClearTaskHistoryIDsFor(config.ProfileID, input.Bucket, input.TaskIDs)
+	} else {
+		// Explicit UI cleanup is allowed to remove all compactable terminal
+		// history in scope; listing still enforces the 30-day retention policy.
+		removed, err = manager.ClearTaskHistoryFor(config.ProfileID, input.Bucket, time.Time{})
+	}
 	if err != nil {
 		return nil, err
 	}

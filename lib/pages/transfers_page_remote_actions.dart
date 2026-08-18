@@ -135,6 +135,33 @@ extension _TransfersPageRemoteActions on _TransfersPageState {
     }
   }
 
+  Future<void> _clearSelectedRemoteHistory(
+    RemoteTaskStore store,
+    List<RemoteTask> selected,
+  ) async {
+    if (_runningBatchAction) return;
+    final taskIds = selected
+        .where((task) => !task.status.isActive)
+        .map((task) => task.id)
+        .toList(growable: false);
+    if (taskIds.isEmpty) return;
+    _remoteSetState(() => _runningBatchAction = true);
+    try {
+      final removed = await store.clearHistory(taskIds: taskIds);
+      if (mounted) {
+        _selectedTaskIds.removeAll(taskIds);
+        showAppToast(context, title: '已清理历史', message: '$removed 条记录');
+        setState(() {});
+      }
+    } catch (error) {
+      if (mounted) {
+        showAppErrorToast(context, title: '清理失败', message: error.toString());
+      }
+    } finally {
+      _remoteSetState(() => _runningBatchAction = false);
+    }
+  }
+
   Widget _remoteDropdown<T>({
     required T value,
     required List<T> items,

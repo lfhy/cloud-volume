@@ -118,4 +118,35 @@ void main() {
     expect(task?.source, RemoteTaskSource.sync);
     expect(task?.progress.bytesCompleted, 4);
   });
+
+  test(
+    'does not project metadata physical phases as duplicate local tasks',
+    () {
+      TransferQueue.instance.refreshFromSnapshots(const <TransferSnapshot>[
+        TransferSnapshot(
+          id: 'metadata-op-namespace-7',
+          type: 'upload',
+          bucket: 'bucket-a',
+          key: 'folder/file.txt',
+          localPath: '/tmp/file.txt',
+          targetPath: '',
+          status: 'running',
+          statusDetail: '',
+          createdAt: '',
+          bytesCompleted: 0,
+          totalBytes: 0,
+          itemsCompleted: 0,
+          totalItems: 0,
+          currentFileKey: '',
+          currentFileBytesCompleted: 0,
+          currentFileTotalBytes: 0,
+          speedBytes: 0,
+        ),
+      ]);
+      expect(
+        RemoteTaskStore.instance.localTask('transfer:metadata-op-namespace-7'),
+        isNull,
+      );
+    },
+  );
 }

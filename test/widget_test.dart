@@ -285,6 +285,7 @@ class _FakeApi implements RemoteStorageGateway {
   Future<int> clearRemoteTaskHistory({
     String profileId = '',
     String bucket = '',
+    List<String> taskIds = const <String>[],
   }) async => 0;
 
   @override

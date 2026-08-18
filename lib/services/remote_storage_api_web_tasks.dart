@@ -52,10 +52,12 @@ mixin _RemoteStorageWebTasksApiMixin implements RemoteStorageGateway {
   Future<int> clearRemoteTaskHistory({
     String profileId = '',
     String bucket = '',
+    List<String> taskIds = const <String>[],
   }) async {
     final result = await _invoke('clear_remote_task_history', <String, dynamic>{
       if (profileId.trim().isNotEmpty) 'profileId': profileId.trim(),
       if (bucket.trim().isNotEmpty) 'bucket': bucket.trim(),
+      if (taskIds.isNotEmpty) 'taskIds': taskIds,
     });
     if (result is Map && result['removed'] is num) {
       return (result['removed'] as num).toInt();

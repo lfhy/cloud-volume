@@ -2,7 +2,10 @@
 // namespace acquisition/lifecycle code.
 package metadata
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 // ListTasks returns the effective journal tasks for one active namespace.
 func (m *Manager) ListTasks(namespace string) ([]Task, error) {
@@ -129,6 +132,40 @@ func (m *Manager) ClearTaskHistoryFor(profileID, bucket string, before time.Time
 	removed := 0
 	for _, service := range services {
 		count, err := service.ClearTaskHistory(before)
+		if err != nil {
+			return removed, err
+		}
+		removed += count
+	}
+	return removed, nil
+}
+
+// ClearTaskHistoryIDsFor removes explicitly selected terminal tasks within a
+// profile/bucket scope. Runtime transfer IDs are intentionally ignored here;
+// their in-memory adapter owns removal separately.
+func (m *Manager) ClearTaskHistoryIDsFor(profileID, bucket string, taskIDs []string) (int, error) {
+	removed := 0
+	seen := make(map[string]struct{}, len(taskIDs))
+	for _, taskID := range taskIDs {
+		if _, ok := seen[taskID]; ok {
+			continue
+		}
+		seen[taskID] = struct{}{}
+		service, err := m.resolveTaskService(taskID)
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return removed, err
+		}
+		namespace := service.store.namespace
+		if profileID != "" && namespace.Config.ProfileID != profileID {
+			continue
+		}
+		if bucket != "" && namespace.Bucket != bucket {
+			continue
+		}
+		count, err := service.ClearTaskHistoryIDs([]string{taskID})
 		if err != nil {
 			return removed, err
 		}

@@ -29,6 +29,7 @@ type invokeEnvelope struct {
 	SourceKey      string                            `json:"sourceKey"`
 	TargetKey      string                            `json:"targetKey"`
 	TaskID         string                            `json:"taskId"`
+	TaskIDs        []string                          `json:"taskIds"`
 	ProfileID      string                            `json:"profileId"`
 	Statuses       []string                          `json:"statuses"`
 	IncludeHistory bool                              `json:"includeHistory"`

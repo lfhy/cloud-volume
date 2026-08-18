@@ -93,10 +93,50 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     RemoteTaskStore.instance.resetForTest();
   });
+
+  testWidgets('selected history uses explicit cleanup instead of cancel', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _TransfersPageFakeApi();
+    const done = RemoteTask(
+      id: 'sync:test:old-upload',
+      kind: RemoteTaskKind.upload,
+      status: RemoteTaskStatus.done,
+      bucket: 'bucket-a',
+      targetPath: 'old-upload.txt',
+    );
+    api.tasks.add(done);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Material(
+          child: TransfersPage(api: api, config: RemoteStorageConfig.empty()),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byType(ListSelectionControl).first);
+    await tester.pump();
+    expect(find.text('清理历史 1'), findsOneWidget);
+    await tester.tap(find.text('清理历史 1'));
+    await tester.pump();
+
+    expect(api.clearedTaskIds, [done.id]);
+    expect(api.canceledTaskIds, isEmpty);
+    await tester.pumpWidget(const SizedBox.shrink());
+    RemoteTaskStore.instance.resetForTest();
+  });
 }
 
 class _TransfersPageFakeApi implements RemoteStorageGateway {
   final List<String> canceledTaskIds = <String>[];
+  final List<String> clearedTaskIds = <String>[];
   final List<RemoteTask> tasks = <RemoteTask>[];
 
   @override
@@ -124,7 +164,12 @@ class _TransfersPageFakeApi implements RemoteStorageGateway {
   Future<int> clearRemoteTaskHistory({
     String profileId = '',
     String bucket = '',
-  }) async => 0;
+    List<String> taskIds = const <String>[],
+  }) async {
+    clearedTaskIds.addAll(taskIds);
+    tasks.removeWhere((task) => taskIds.contains(task.id));
+    return taskIds.length;
+  }
 
   @override
   RemoteStorageCapabilities get capabilities =>

@@ -249,8 +249,9 @@ func controlRemoteTask(args json.RawMessage, action string) (any, error) {
 
 func clearRemoteTaskHistory(args json.RawMessage) (any, error) {
 	var input struct {
-		ProfileID string `json:"profileId"`
-		Bucket    string `json:"bucket"`
+		ProfileID string   `json:"profileId"`
+		Bucket    string   `json:"bucket"`
+		TaskIDs   []string `json:"taskIds"`
 	}
 	if err := decodeArgs(args, &input); err != nil {
 		return nil, err
@@ -264,7 +265,14 @@ func clearRemoteTaskHistory(args json.RawMessage) (any, error) {
 		return nil, err
 	}
 	defer releaseTaskNamespaceHandles(manager, handles)
-	removed, err := manager.ClearTaskHistoryFor(input.ProfileID, input.Bucket, time.Now().Add(-30*24*time.Hour))
+	var removed int
+	if len(input.TaskIDs) > 0 {
+		removed, err = manager.ClearTaskHistoryIDsFor(input.ProfileID, input.Bucket, input.TaskIDs)
+	} else {
+		// Explicit UI cleanup is allowed to remove all compactable terminal
+		// history in scope; the 30-day retention rule is applied on listing.
+		removed, err = manager.ClearTaskHistoryFor(input.ProfileID, input.Bucket, time.Time{})
+	}
 	if err != nil {
 		return nil, err
 	}

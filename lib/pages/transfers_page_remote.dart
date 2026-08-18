@@ -12,6 +12,7 @@ extension _TransfersPageRemote on _TransfersPageState {
         .toList(growable: false);
     final cancelable = selected.where((task) => task.cancelable).length;
     final triggerable = selected.where((task) => task.triggerable).length;
+    final clearable = selected.where((task) => !task.status.isActive).length;
     final historyCount = store.tasks
         .where((task) => !task.status.isActive)
         .length;
@@ -47,6 +48,18 @@ extension _TransfersPageRemote on _TransfersPageState {
                     : () => unawaited(_cancelSelectedRemote(store, selected)),
                 child: Text(cancelable == 0 ? '取消' : '取消 $cancelable'),
               ),
+              if (clearable > 0) ...[
+                const SizedBox(width: 6),
+                ShadButton.outline(
+                  size: ShadButtonSize.sm,
+                  onPressed: _runningBatchAction
+                      ? null
+                      : () => unawaited(
+                          _clearSelectedRemoteHistory(store, selected),
+                        ),
+                  child: Text('清理历史 $clearable'),
+                ),
+              ],
             ],
             if (_selectedTaskIds.isEmpty && historyCount > 0) ...[
               const SizedBox(width: 10),
