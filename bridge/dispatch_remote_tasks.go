@@ -322,9 +322,13 @@ func metadataTaskWire(task bucketmetadata.Task, physical map[string]s3ops.Transf
 	wire["rawEventCount"] = len(task.SourceSeqs)
 	events := make([]map[string]any, 0, len(task.SourceSeqs))
 	for index, seq := range task.SourceSeqs {
+		kind := task.Kind
+		if index < len(task.SourceKinds) {
+			kind = task.SourceKinds[index]
+		}
 		events = append(events, map[string]any{
 			"sequence":   seq,
-			"kind":       task.Kind,
+			"kind":       kind,
 			"state":      task.Status,
 			"targetPath": task.DisplayPath,
 			"folded":     index != len(task.SourceSeqs)-1,
@@ -338,8 +342,24 @@ func metadataTaskWire(task bucketmetadata.Task, physical map[string]s3ops.Transf
 	wire["physicalTaskIds"] = physicalIDs
 	if progress, ok := mergeTransferProgress(physical, physicalIDs); ok {
 		wire["progress"] = progress
+		wire["phases"] = transferPhases(physical, physicalIDs)
 	}
 	return wire
+}
+
+func transferPhases(physical map[string]s3ops.TransferSnapshot, ids []string) []map[string]any {
+	phases := make([]map[string]any, 0, len(ids))
+	for _, id := range ids {
+		snapshot, ok := physical[id]
+		if !ok {
+			continue
+		}
+		phases = append(phases, map[string]any{
+			"name": id, "status": snapshot.Status, "detail": snapshot.StatusDetail,
+			"progress": transferProgressWire(snapshot),
+		})
+	}
+	return phases
 }
 
 func mergeTransferProgress(physical map[string]s3ops.TransferSnapshot, ids []string) (map[string]any, bool) {

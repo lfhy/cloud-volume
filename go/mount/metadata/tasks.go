@@ -38,6 +38,7 @@ type Task struct {
 	TaskGroupID       string    `json:"taskGroupId,omitempty"`
 	LastSeq           uint64    `json:"lastSeq"`
 	SourceSeqs        []uint64  `json:"sourceSeqs,omitempty"`
+	SourceKinds       []string  `json:"sourceKinds,omitempty"`
 	Type              OpType    `json:"type"`
 	State             TaskState `json:"state"`
 	Kind              string    `json:"kind"`
@@ -143,6 +144,7 @@ type taskEntry struct {
 	created int64
 	typeOp  OpType
 	seqs    []uint64
+	kinds   []string
 	lastSeq uint64
 	deps    []*taskEntry
 }
@@ -186,7 +188,7 @@ func (s *Service) ListTasks() ([]Task, error) {
 			continue
 		}
 		op := ops[i]
-		entry := &taskEntry{op: op, created: op.CreatedAtUnixNano, typeOp: op.Type, seqs: []uint64{op.Seq}, lastSeq: op.Seq}
+		entry := &taskEntry{op: op, created: op.CreatedAtUnixNano, typeOp: op.Type, seqs: []uint64{op.Seq}, kinds: []string{taskKind(op.Type)}, lastSeq: op.Seq}
 		if op.TaskGroupID != "" && taskStateFoldable(op.State) {
 			for j := i + 1; j < len(ops); j++ {
 				if consumed[j] || ops[j].TaskGroupID != op.TaskGroupID || ops[j].State != op.State || !canFoldTaskOps(entry.op, ops[j]) {
@@ -194,6 +196,7 @@ func (s *Service) ListTasks() ([]Task, error) {
 				}
 				entry.op = ops[j]
 				entry.seqs = append(entry.seqs, ops[j].Seq)
+				entry.kinds = append(entry.kinds, taskKind(ops[j].Type))
 				entry.lastSeq = ops[j].Seq
 				consumed[j] = true
 			}
@@ -232,7 +235,7 @@ func (s *Service) taskFromEntry(entry *taskEntry, inodes map[uint64]Inode) Task 
 	if groupID == "" {
 		groupID = fmt.Sprintf("journal-%d", entry.seqs[0])
 	}
-	task := Task{ID: taskIDForGroup(namespace, groupID), Namespace: namespace, NamespaceID: namespace, ProfileID: s.store.namespace.Config.ProfileID, Bucket: s.store.namespace.Bucket, Seq: entry.seqs[0], TaskGroupID: groupID, LastSeq: entry.lastSeq, SourceSeqs: append([]uint64(nil), entry.seqs...), Type: entry.typeOp, Kind: taskKind(entry.typeOp), Source: "metadata", InodeID: op.InodeID, OldParent: op.OldParent, OldName: op.OldName, NewParent: op.NewParent, NewName: op.NewName, ContentGeneration: op.ContentGeneration, Retry: op.Retry, LastError: op.LastError, NextAttemptUnixNs: op.NextAttemptUnixNano, Origin: op.Origin, CreatedAtUnixNs: entry.created, AppliedAtUnixNs: op.AppliedAtUnixNano, CanceledAtUnixNs: op.CanceledAtUnixNano}
+	task := Task{ID: taskIDForGroup(namespace, groupID), Namespace: namespace, NamespaceID: namespace, ProfileID: s.store.namespace.Config.ProfileID, Bucket: s.store.namespace.Bucket, Seq: entry.seqs[0], TaskGroupID: groupID, LastSeq: entry.lastSeq, SourceSeqs: append([]uint64(nil), entry.seqs...), SourceKinds: append([]string(nil), entry.kinds...), Type: entry.typeOp, Kind: taskKind(entry.typeOp), Source: "metadata", InodeID: op.InodeID, OldParent: op.OldParent, OldName: op.OldName, NewParent: op.NewParent, NewName: op.NewName, ContentGeneration: op.ContentGeneration, Retry: op.Retry, LastError: op.LastError, NextAttemptUnixNs: op.NextAttemptUnixNano, Origin: op.Origin, CreatedAtUnixNs: entry.created, AppliedAtUnixNs: op.AppliedAtUnixNano, CanceledAtUnixNs: op.CanceledAtUnixNano}
 	if task.Type == OpMkdir || task.Type == OpWrite {
 		task.ParentID, task.Name = op.NewParent, op.NewName
 	}

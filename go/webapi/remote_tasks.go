@@ -270,6 +270,18 @@ func webMetadataTaskWire(task bucketmetadata.Task, physical map[string]s3ops.Tra
 	_ = json.Unmarshal(raw, &wire)
 	wire["source"] = "metadata"
 	wire["rawEventCount"] = len(task.SourceSeqs)
+	events := make([]map[string]any, 0, len(task.SourceSeqs))
+	for index, seq := range task.SourceSeqs {
+		kind := task.Kind
+		if index < len(task.SourceKinds) {
+			kind = task.SourceKinds[index]
+		}
+		events = append(events, map[string]any{
+			"sequence": seq, "kind": kind, "state": task.Status,
+			"targetPath": task.DisplayPath, "folded": index != len(task.SourceSeqs)-1,
+		})
+	}
+	wire["events"] = events
 	physicalIDs := task.PhysicalTaskIDs
 	if len(physicalIDs) == 0 && task.PhysicalSnapshot != "" {
 		physicalIDs = []string{task.PhysicalSnapshot}
@@ -277,8 +289,24 @@ func webMetadataTaskWire(task bucketmetadata.Task, physical map[string]s3ops.Tra
 	wire["physicalTaskIds"] = physicalIDs
 	if progress, ok := webMergeTransferProgress(physical, physicalIDs); ok {
 		wire["progress"] = progress
+		wire["phases"] = webTransferPhases(physical, physicalIDs)
 	}
 	return wire
+}
+
+func webTransferPhases(physical map[string]s3ops.TransferSnapshot, ids []string) []map[string]any {
+	phases := make([]map[string]any, 0, len(ids))
+	for _, id := range ids {
+		snapshot, ok := physical[id]
+		if !ok {
+			continue
+		}
+		phases = append(phases, map[string]any{
+			"name": id, "status": snapshot.Status, "detail": snapshot.StatusDetail,
+			"progress": webTransferProgress(snapshot),
+		})
+	}
+	return phases
 }
 
 func webMergeTransferProgress(physical map[string]s3ops.TransferSnapshot, ids []string) (map[string]any, bool) {
