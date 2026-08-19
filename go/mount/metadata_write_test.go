@@ -17,8 +17,10 @@ import (
 )
 
 type metadataMountWriteBackend struct {
-	mu      sync.Mutex
-	objects map[string]storageops.ObjectInfo
+	mu                         sync.Mutex
+	objects                    map[string]storageops.ObjectInfo
+	rejectUnknownDirectoryList bool
+	listPrefixes               []string
 }
 
 func newMetadataMountWriteBackend() *metadataMountWriteBackend {
@@ -31,6 +33,12 @@ func (b *metadataMountWriteBackend) ListObjectsPage(
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	parent := strings.Trim(prefix, "/")
+	b.listPrefixes = append(b.listPrefixes, parent)
+	if b.rejectUnknownDirectoryList && parent != "" {
+		if _, ok := b.objects[parent+"/"]; !ok {
+			return storageops.ObjectPage{}, os.ErrNotExist
+		}
+	}
 	items := make([]storageops.ObjectInfo, 0)
 	for key, object := range b.objects {
 		clean := strings.TrimSuffix(key, "/")

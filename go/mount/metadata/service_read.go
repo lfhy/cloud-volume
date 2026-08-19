@@ -3,6 +3,7 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -278,13 +279,21 @@ func (s *Service) ListPage(ctx context.Context, dirInode uint64, token string, p
 }
 
 func (s *Service) ensureMaterialized(ctx context.Context, dirInode uint64, revision uint64) error {
-	materialized := false
+	materialized, localOnly := false, false
 	_ = s.store.view(func(tx *bolt.Tx) error {
+		record, err := getInode(tx, dirInode)
+		if err != nil {
+			return err
+		}
+		// A newly created directory has no provider edge yet. Its desired
+		// dirents are authoritative until the mkdir worker confirms it, so a
+		// nested Finder copy must not try to list a remote path that cannot exist.
+		localOnly = record.Kind == KindDirectory && record.ID != rootInode && record.RemoteParentID == 0 && record.RemoteName == ""
 		state, err := getListingState(tx, dirInode)
 		materialized = err == nil && state.Materialized && (revision == 0 || state.Revision == revision)
 		return nil
 	})
-	if materialized {
+	if materialized || localOnly {
 		return nil
 	}
 	return s.MaterializeDirectory(ctx, dirInode)
@@ -297,10 +306,16 @@ func (s *Service) resolvePath(ctx context.Context, path string) (uint64, error) 
 	}
 	current := rootInode
 	for index, segment := range segments {
-		if err := s.ensureMaterialized(ctx, current, 0); err != nil {
-			return 0, err
-		}
+		// Desired dirents are the local metadata cache and the authoritative
+		// source for known paths. Materialize only on a miss so a Finder copy
+		// does not dial the provider for every already-known parent segment.
 		next, err := s.Resolve(current, segment)
+		if errors.Is(err, ErrNotFound) {
+			if err := s.ensureMaterialized(ctx, current, 0); err != nil {
+				return 0, err
+			}
+			next, err = s.Resolve(current, segment)
+		}
 		if err != nil {
 			return 0, err
 		}
