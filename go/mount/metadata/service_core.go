@@ -9,18 +9,20 @@ import (
 
 // Service exposes read/write APIs to page and mount adapters.
 type Service struct {
-	store       *Store
-	backendMu   sync.RWMutex
-	backend     Backend
-	policyMu    sync.RWMutex
-	quiet       time.Duration
-	readOnly    bool
-	operationMu sync.RWMutex
-	pathWriteMu sync.Mutex
-	chunkMu     sync.Mutex
-	chunkTouch  map[string]int64
-	workerMu    sync.RWMutex
-	worker      *Worker
+	store                *Store
+	backendMu            sync.RWMutex
+	backend              Backend
+	policyMu             sync.RWMutex
+	quiet                time.Duration
+	readOnly             bool
+	operationMu          sync.RWMutex
+	remoteQuietMu        sync.Mutex
+	remoteQuietUntilNano int64
+	pathWriteMu          sync.Mutex
+	chunkMu              sync.Mutex
+	chunkTouch           map[string]int64
+	workerMu             sync.RWMutex
+	worker               *Worker
 }
 
 // NewService wires a durable store to one provider backend.
@@ -32,6 +34,7 @@ func NewService(store *Store, backend Backend) *Service {
 	if err := service.SweepChunkStore(); err != nil {
 		log.Printf("[metadata/chunks] startup sweep namespace=%q err=%v", store.namespace.ID, err)
 	}
+	service.rebuildRemoteQuietDeadline()
 	return service
 }
 
@@ -41,6 +44,7 @@ func (s *Service) SetQuietPeriod(value time.Duration) {
 		s.policyMu.Lock()
 		s.quiet = value
 		s.policyMu.Unlock()
+		s.rebuildRemoteQuietDeadline()
 	}
 }
 
@@ -72,11 +76,15 @@ func (s *Service) backendSnapshot() Backend {
 // existing namespace never observes a partially refreshed configuration.
 func (s *Service) setPolicy(quiet time.Duration, readOnly bool) {
 	s.policyMu.Lock()
+	quietChanged := quiet > 0
 	if quiet > 0 {
 		s.quiet = quiet
 	}
 	s.readOnly = readOnly
 	s.policyMu.Unlock()
+	if quietChanged {
+		s.rebuildRemoteQuietDeadline()
+	}
 }
 
 func (s *Service) policy() (time.Duration, bool) {

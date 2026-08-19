@@ -70,20 +70,20 @@ func (w *Worker) Drain(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		pending, failed, running, next := w.snapshotWork()
+		pending, failed, running, due, next := w.snapshotWork()
 		if pending == 0 && failed == 0 {
 			return nil
 		}
 		if failed > 0 {
 			return fmt.Errorf("metadata worker: %d failed operations", failed)
 		}
-		if running == 0 && !next.IsZero() && next.After(time.Now()) && time.Now().Before(deadline) {
+		if running == 0 && !due && !next.IsZero() && next.After(time.Now()) && time.Now().Before(deadline) {
 			w.sleepUntil(minTime(next, deadline))
 			continue
 		}
 		before := pending
-		w.runDueOnce(ctx)
-		pending, failed, running, _ = w.snapshotWork()
+		w.runDueOnceIgnoringRemoteQuiet(ctx)
+		pending, failed, running, _, _ = w.snapshotWork()
 		if failed > 0 {
 			return fmt.Errorf("metadata worker: %d failed operations", failed)
 		}
@@ -93,6 +93,22 @@ func (w *Worker) Drain(ctx context.Context) error {
 		// Stop when a pass made no progress; otherwise a repeatedly deferred
 		// retry would turn Drain into a busy loop until its deadline.
 		if pending >= before && running == 0 {
+			// A due child can still be blocked behind a parent retry whose own
+			// persisted deadline is in the future. After the forced pass proves
+			// nothing is currently claimable, wait for that parent instead of
+			// reporting a false drain timeout.
+			_, _, _, due, next = w.snapshotWork()
+			if due {
+				// A prerequisite can become due between the forced claim pass and
+				// this resnapshot. Give it a short turn before declaring the
+				// dependent queue permanently stalled.
+				w.sleepUntil(minTime(time.Now().Add(workerPoll), deadline))
+				continue
+			}
+			if !next.IsZero() && next.After(time.Now()) && time.Now().Before(deadline) {
+				w.sleepUntil(minTime(next, deadline))
+				continue
+			}
 			return context.DeadlineExceeded
 		}
 		if time.Now().After(deadline) {
@@ -132,7 +148,7 @@ func (w *Worker) sleepUntil(when time.Time) {
 	}
 }
 
-func (w *Worker) snapshotWork() (pending int, failed int, running int, next time.Time) {
+func (w *Worker) snapshotWork() (pending int, failed int, running int, due bool, next time.Time) {
 	_ = w.service.store.view(func(tx boltTxT) error {
 		now := time.Now().UnixNano()
 		journal := tx.Bucket([]byte(bucketJournal))
@@ -154,30 +170,50 @@ func (w *Worker) snapshotWork() (pending int, failed int, running int, next time
 					if next.IsZero() || nextTime.Before(next) {
 						next = nextTime
 					}
+				} else {
+					due = true
 				}
 			}
 			return nil
 		})
 		return nil
 	})
-	return pending, failed, running, next
+	return pending, failed, running, due, next
 }
 
 func (w *Worker) runDueOnce(ctx context.Context) {
+	w.runDueOnceWithOptions(ctx, false)
+}
+
+// runDueOnceIgnoringRemoteQuiet is reserved for explicit drain. It preserves
+// every persisted retry deadline and dependency, skipping only the transient
+// namespace quiet barrier that would otherwise delay application shutdown.
+func (w *Worker) runDueOnceIgnoringRemoteQuiet(ctx context.Context) {
+	w.runDueOnceWithOptions(ctx, true)
+}
+
+func (w *Worker) runDueOnceWithOptions(ctx context.Context, ignoreRemoteQuiet bool) {
 	w.service.operationMu.RLock()
 	defer w.service.operationMu.RUnlock()
-	ops := w.claimDue()
+	ops := w.claimDueWithOptions(ignoreRemoteQuiet)
 	for _, op := range ops {
 		w.execute(ctx, op)
 	}
 }
 
 func (w *Worker) claimDue() []Op {
+	return w.claimDueWithOptions(false)
+}
+
+func (w *Worker) claimDueWithOptions(ignoreRemoteQuiet bool) []Op {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	w.service.remoteQuietMu.Lock()
+	defer w.service.remoteQuietMu.Unlock()
 	var claimed []Op
 	_ = w.service.store.update(func(tx boltTxT) error {
 		now := time.Now().UnixNano()
+		quietUntil := w.service.remoteQuietUntilNano
 		journal := tx.Bucket([]byte(bucketJournal))
 		ready := tx.Bucket([]byte(bucketReadyOps))
 		cursor := ready.Cursor()
@@ -211,9 +247,12 @@ func (w *Worker) claimDue() []Op {
 				}
 				w.running[op.InodeID] = struct{}{}
 				claimed = append(claimed, op)
-				continue
+				break
 			}
 			if op.State != OpStatePending {
+				continue
+			}
+			if !ignoreRemoteQuiet && !op.SkipQuiet && quietUntil > now {
 				continue
 			}
 			if blocked, _ := w.blocked(tx, op); blocked {
@@ -222,10 +261,15 @@ func (w *Worker) claimDue() []Op {
 			w.running[op.InodeID] = struct{}{}
 			previous := op
 			op.State = OpStateRunning
+			op.SkipQuiet = false
 			if err := putOp(tx, op, previous); err != nil {
 				return err
 			}
 			claimed = append(claimed, op)
+			// Worker execution is sequential. Claiming just one entry prevents a
+			// later queued provider call from overtaking a new local mutation that
+			// arrives while an earlier operation is executing.
+			break
 		}
 		return nil
 	})

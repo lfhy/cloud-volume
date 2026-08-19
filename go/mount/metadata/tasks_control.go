@@ -95,6 +95,7 @@ func (s *Service) CancelTask(taskID string) (Task, error) {
 // RetryTask makes a failed task eligible for the next worker pass.
 func (s *Service) RetryTask(taskID string) (Task, error) {
 	s.operationMu.RLock()
+	s.remoteQuietMu.Lock()
 	err := s.store.update(func(tx boltTxT) error {
 		ops, err := s.taskOpsForControl(tx, taskID)
 		if err != nil {
@@ -111,12 +112,14 @@ func (s *Service) RetryTask(taskID string) (Task, error) {
 			op.Retry = 0
 			op.LastError = ""
 			op.NextAttemptUnixNano = nowUnix()
+			op.SkipQuiet = true
 			if err := putOp(tx, op, previous); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+	s.remoteQuietMu.Unlock()
 	s.operationMu.RUnlock()
 	if err != nil {
 		return Task{}, err
@@ -130,6 +133,7 @@ func (s *Service) RetryTask(taskID string) (Task, error) {
 // TriggerTask bypasses the quiet/retry delay but never bypasses dependencies.
 func (s *Service) TriggerTask(taskID string) (Task, error) {
 	s.operationMu.RLock()
+	s.remoteQuietMu.Lock()
 	err := s.store.update(func(tx boltTxT) error {
 		ops, err := s.taskOpsForControl(tx, taskID)
 		if err != nil {
@@ -143,12 +147,14 @@ func (s *Service) TriggerTask(taskID string) (Task, error) {
 		for _, op := range ops {
 			previous := op
 			op.NextAttemptUnixNano = nowUnix()
+			op.SkipQuiet = true
 			if err := putOp(tx, op, previous); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+	s.remoteQuietMu.Unlock()
 	s.operationMu.RUnlock()
 	if err != nil {
 		return Task{}, err

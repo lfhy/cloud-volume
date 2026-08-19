@@ -32,6 +32,8 @@ func (s *Service) CreateDirectory(parent uint64, name string, opts WriteOptions)
 		return 0, fmt.Errorf("metadata: directory name is required")
 	}
 	nameKey := MakeNameKey(name)
+	mutation := s.beginRemoteMutation()
+	committed := false
 	var inode uint64
 	err := s.store.update(func(tx boltTxT) error {
 		parentRecord, err := getInode(tx, parent)
@@ -71,13 +73,18 @@ func (s *Service) CreateDirectory(parent uint64, name string, opts WriteOptions)
 		if err := putInode(tx, parentRecord); err != nil {
 			return err
 		}
-		return appendOp(tx, Op{
+		if err := appendOp(tx, Op{
 			Type: OpMkdir, InodeID: inode, NewParent: parent, NewName: name,
 			TaskGroupID: strings.TrimSpace(opts.TaskID),
 			State:       OpStatePending, Origin: origin(opts), CreatedAtUnixNano: nowUnix(),
-			NextAttemptUnixNano: time.Now().Add(s.quietPeriod()).UnixNano(),
-		})
+			NextAttemptUnixNano: mutation.nextAttempt(),
+		}); err != nil {
+			return err
+		}
+		committed = true
+		return nil
 	})
+	mutation.finish(err == nil && committed)
 	return inode, err
 }
 
@@ -93,6 +100,8 @@ func (s *Service) Write(parent uint64, name string, ref ContentRef, opts WriteOp
 		return 0, fmt.Errorf("metadata: file name is required")
 	}
 	nameKey := MakeNameKey(name)
+	mutation := s.beginRemoteMutation()
+	committed := false
 	var inode uint64
 	err := s.store.update(func(tx boltTxT) error {
 		parentRecord, err := getInode(tx, parent)
@@ -146,14 +155,19 @@ func (s *Service) Write(parent uint64, name string, ref ContentRef, opts WriteOp
 		if err := putInode(tx, parentRecord); err != nil {
 			return err
 		}
-		return appendOp(tx, Op{
+		if err := appendOp(tx, Op{
 			Type: OpWrite, InodeID: inode, ContentGeneration: ref.Generation, NewParent: parent, NewName: name,
 			TaskGroupID:               strings.TrimSpace(opts.TaskID),
 			ExpectedRemoteFingerprint: expectedFingerprint(record), State: OpStatePending,
 			Origin: origin(opts), CreatedAtUnixNano: nowUnix(),
-			NextAttemptUnixNano: time.Now().Add(s.quietPeriod()).UnixNano(),
-		})
+			NextAttemptUnixNano: mutation.nextAttempt(),
+		}); err != nil {
+			return err
+		}
+		committed = true
+		return nil
 	})
+	mutation.finish(err == nil && committed)
 	return inode, err
 }
 
@@ -172,7 +186,9 @@ func (s *Service) Rename(inode, newParent uint64, newName string, opts WriteOpti
 		return fmt.Errorf("metadata: target name is required")
 	}
 	nameKey := MakeNameKey(newName)
-	return s.store.update(func(tx boltTxT) error {
+	mutation := s.beginRemoteMutation()
+	committed := false
+	err := s.store.update(func(tx boltTxT) error {
 		record, err := getInode(tx, inode)
 		if err != nil {
 			return err
@@ -209,7 +225,7 @@ func (s *Service) Rename(inode, newParent uint64, newName string, opts WriteOpti
 			if err := deleteDirent(tx, newParent, nameKey); err != nil {
 				return err
 			}
-			if err := appendReplacedDelete(tx, targetRecord, opts); err != nil {
+			if err := appendReplacedDelete(tx, targetRecord, opts, mutation.nextAttempt()); err != nil {
 				return err
 			}
 		} else if !errors.Is(err, ErrNotFound) {
@@ -242,15 +258,21 @@ func (s *Service) Rename(inode, newParent uint64, newName string, opts WriteOpti
 		if err := putDirent(tx, newParent, Dirent{ChildID: inode, DisplayName: newName, NameKey: nameKey}); err != nil {
 			return err
 		}
-		return appendOp(tx, Op{
+		if err := appendOp(tx, Op{
 			Type: OpRename, InodeID: inode, ContentGeneration: record.ContentGeneration,
 			TaskGroupID: strings.TrimSpace(opts.TaskID),
 			OldParent:   oldParent(record), NewParent: newParent,
 			OldName: record.RemoteName, NewName: newName, State: OpStatePending,
 			Origin: origin(opts), CreatedAtUnixNano: nowUnix(),
-			NextAttemptUnixNano: time.Now().Add(s.quietPeriod()).UnixNano(),
-		})
+			NextAttemptUnixNano: mutation.nextAttempt(),
+		}); err != nil {
+			return err
+		}
+		committed = true
+		return nil
 	})
+	mutation.finish(err == nil && committed)
+	return err
 }
 
 // Delete marks an inode tombstoned and schedules provider deletion.
@@ -263,7 +285,9 @@ func (s *Service) Delete(inode uint64, opts WriteOptions) error {
 	if inode == rootInode {
 		return fmt.Errorf("metadata: root cannot be deleted")
 	}
-	return s.store.update(func(tx boltTxT) error {
+	mutation := s.beginRemoteMutation()
+	committed := false
+	err := s.store.update(func(tx boltTxT) error {
 		record, err := getInode(tx, inode)
 		if err != nil {
 			return err
@@ -285,13 +309,19 @@ func (s *Service) Delete(inode uint64, opts WriteOptions) error {
 		if err := markTombstone(tx, inode); err != nil {
 			return err
 		}
-		return appendOp(tx, Op{
+		if err := appendOp(tx, Op{
 			Type: OpDelete, InodeID: inode, OldParent: record.RemoteParentID,
 			TaskGroupID: strings.TrimSpace(opts.TaskID),
 			OldName:     record.RemoteName, HardDelete: opts.HardDelete, State: OpStatePending, Origin: origin(opts),
-			CreatedAtUnixNano: nowUnix(), NextAttemptUnixNano: time.Now().Add(s.quietPeriod()).UnixNano(),
-		})
+			CreatedAtUnixNano: nowUnix(), NextAttemptUnixNano: mutation.nextAttempt(),
+		}); err != nil {
+			return err
+		}
+		committed = true
+		return nil
 	})
+	mutation.finish(err == nil && committed)
+	return err
 }
 
 func markTombstone(tx boltTxT, inode uint64) error {
@@ -335,7 +365,7 @@ func appendOp(tx boltTxT, op Op) error {
 	return putOp(tx, op, Op{})
 }
 
-func appendReplacedDelete(tx boltTxT, victim Inode, opts WriteOptions) error {
+func appendReplacedDelete(tx boltTxT, victim Inode, opts WriteOptions, nextAttempt int64) error {
 	if victim.RemoteParentID == 0 && victim.RemoteName == "" {
 		// The replaced inode never reached the provider, so no remote delete is
 		// needed; its tombstone already hides it from desired listings.
@@ -345,7 +375,7 @@ func appendReplacedDelete(tx boltTxT, victim Inode, opts WriteOptions) error {
 		Type: OpDelete, InodeID: victim.ID, OldParent: victim.RemoteParentID,
 		TaskGroupID: strings.TrimSpace(opts.TaskID),
 		OldName:     victim.RemoteName, HardDelete: opts.HardDelete, State: OpStatePending, Origin: origin(opts),
-		CreatedAtUnixNano: nowUnix(), NextAttemptUnixNano: nowUnix(),
+		CreatedAtUnixNano: nowUnix(), NextAttemptUnixNano: nextAttempt,
 	})
 }
 

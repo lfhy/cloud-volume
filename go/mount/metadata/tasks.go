@@ -97,6 +97,7 @@ type taskEntry struct {
 func (s *Service) ListTasks() ([]Task, error) {
 	s.operationMu.RLock()
 	defer s.operationMu.RUnlock()
+	remoteQuietUntil := s.remoteQuietDeadline()
 	var ops []Op
 	var inodes map[uint64]Inode
 	err := s.store.view(func(tx boltTxT) error {
@@ -183,13 +184,13 @@ func (s *Service) ListTasks() ([]Task, error) {
 	}
 	result := make([]Task, 0, len(entries))
 	for _, entry := range entries {
-		task := s.taskFromEntry(entry, inodes)
+		task := s.taskFromEntry(entry, inodes, remoteQuietUntil)
 		result = append(result, task)
 	}
 	return result, nil
 }
 
-func (s *Service) taskFromEntry(entry *taskEntry, inodes map[uint64]Inode) Task {
+func (s *Service) taskFromEntry(entry *taskEntry, inodes map[uint64]Inode, remoteQuietUntil int64) Task {
 	op := entry.op
 	namespace := s.NamespaceID()
 	groupID := op.TaskGroupID
@@ -200,7 +201,11 @@ func (s *Service) taskFromEntry(entry *taskEntry, inodes map[uint64]Inode) Task 
 	if taskID == "" {
 		taskID = taskIDForEntry(namespace, groupID, entry.seqs[0], entry.segmented)
 	}
-	task := Task{ID: taskID, Namespace: namespace, NamespaceID: namespace, ProfileID: s.store.namespace.Config.ProfileID, Bucket: s.store.namespace.Bucket, Seq: entry.seqs[0], TaskGroupID: groupID, LastSeq: entry.lastSeq, SourceSeqs: append([]uint64(nil), entry.seqs...), SourceKinds: append([]string(nil), entry.kinds...), Type: entry.typeOp, Kind: taskKind(entry.typeOp), Source: "metadata", InodeID: op.InodeID, OldParent: op.OldParent, OldName: op.OldName, NewParent: op.NewParent, NewName: op.NewName, ContentGeneration: op.ContentGeneration, Retry: op.Retry, LastError: op.LastError, NextAttemptUnixNs: op.NextAttemptUnixNano, Origin: op.Origin, CreatedAtUnixNs: entry.created, AppliedAtUnixNs: op.AppliedAtUnixNano, CanceledAtUnixNs: op.CanceledAtUnixNano}
+	nextAttempt := op.NextAttemptUnixNano
+	if op.State == OpStatePending && !op.SkipQuiet && remoteQuietUntil > nextAttempt {
+		nextAttempt = remoteQuietUntil
+	}
+	task := Task{ID: taskID, Namespace: namespace, NamespaceID: namespace, ProfileID: s.store.namespace.Config.ProfileID, Bucket: s.store.namespace.Bucket, Seq: entry.seqs[0], TaskGroupID: groupID, LastSeq: entry.lastSeq, SourceSeqs: append([]uint64(nil), entry.seqs...), SourceKinds: append([]string(nil), entry.kinds...), Type: entry.typeOp, Kind: taskKind(entry.typeOp), Source: "metadata", InodeID: op.InodeID, OldParent: op.OldParent, OldName: op.OldName, NewParent: op.NewParent, NewName: op.NewName, ContentGeneration: op.ContentGeneration, Retry: op.Retry, LastError: op.LastError, NextAttemptUnixNs: nextAttempt, Origin: op.Origin, CreatedAtUnixNs: entry.created, AppliedAtUnixNs: op.AppliedAtUnixNano, CanceledAtUnixNs: op.CanceledAtUnixNano}
 	for index, raw := range entry.ops {
 		kind := taskKind(raw.Type)
 		sourcePath := taskPath(inodes, raw.OldParent, raw.OldName)

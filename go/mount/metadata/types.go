@@ -128,6 +128,7 @@ type Op struct {
 	Retry                     int
 	LastError                 string
 	NextAttemptUnixNano       int64  `json:"nextAttemptUnixNs"`
+	SkipQuiet                 bool   `json:"skipQuiet,omitempty"`
 	ExpectedRemoteFingerprint string `json:"expectedRemoteFingerprint,omitempty"`
 	HardDelete                bool   `json:"hardDelete,omitempty"`
 	MoveApplied               bool   `json:"moveApplied,omitempty"`

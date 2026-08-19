@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	storageops "remote-storage/go/storage"
 )
 
 func TestCancelTaskRollsBackPendingMkdirAndRename(t *testing.T) {
@@ -155,6 +157,13 @@ func (b *cancelBlockingBackend) CreateDirectory(ctx context.Context, _, _, _ str
 	<-ctx.Done()
 	close(b.ended)
 	return ctx.Err()
+}
+
+// HeadObject keeps the provider outcome unknown after cancellation so this
+// test exercises the durable reconciling state rather than a valid immediate
+// canceled result when a probe can prove the directory was never created.
+func (b *cancelBlockingBackend) HeadObject(context.Context, string, string) (storageops.ObjectInfo, error) {
+	return storageops.ObjectInfo{}, errors.New("temporary provider outage")
 }
 
 func TestCancelRunningTaskRequestsReconciliationAndHistoryStays(t *testing.T) {

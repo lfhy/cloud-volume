@@ -388,6 +388,7 @@ func (s *Service) Reset(force bool) (ResetResult, error) {
 	if err := s.store.rebuild(); err != nil {
 		return ResetResult{}, err
 	}
+	s.clearRemoteQuietDeadline()
 	if err := s.SweepChunkStore(); err != nil {
 		return ResetResult{}, err
 	}
