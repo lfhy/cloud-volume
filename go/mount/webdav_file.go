@@ -300,6 +300,9 @@ func (f *readableWebDAVFile) startTransferTask() {
 		f.objectInfo.Size,
 		transferCancel,
 	)
+	// The Web task API scopes runtime snapshots to the active profile. A mounted
+	// read is no exception: its range is physical progress for this account.
+	s3ops.SetTransferProfile(taskID, f.access.config.ProfileID)
 	s3ops.SetTransferStatusDetail(taskID, "mount_read")
 	s3ops.SetTransferTarget(taskID, "等待范围请求")
 }

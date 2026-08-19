@@ -4,6 +4,7 @@ package webapi
 import (
 	"testing"
 
+	storageconfig "remote-storage/go/config"
 	s3ops "remote-storage/go/s3"
 )
 
@@ -37,5 +38,50 @@ func TestWebRuntimeTaskWireKeepsMountReadFileAndRangeDistinct(t *testing.T) {
 	}
 	if wire["phaseDetail"] != "mount_read" {
 		t.Fatalf("mount-read phase detail = %#v", wire["phaseDetail"])
+	}
+}
+
+func TestWebMountReadSnapshotUsesActiveProfileScope(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+	config := storageconfig.DefaultConfig()
+	config.ProfileID = "profile-mounted-read"
+	if err := storageconfig.SaveProfile("default", config); err != nil {
+		t.Fatalf("save active profile: %v", err)
+	}
+	const taskID = "mount-read-web-profile"
+	s3ops.QueueTransfer(taskID, "download", "bucket-a", "root/charge.tar", "", 11)
+	s3ops.SetTransferProfile(taskID, config.ProfileID)
+	s3ops.SetTransferStatusDetail(taskID, "mount_read")
+	s3ops.SetTransferTarget(taskID, "bytes=0-10")
+	t.Cleanup(func() { s3ops.ForgetTransfer(taskID) })
+
+	result, err := listWebRemoteTasks(invokeEnvelope{Bucket: "bucket-a", IncludeHistory: true})
+	if err != nil {
+		t.Fatalf("list remote tasks: %v", err)
+	}
+	page, ok := result.(webRemoteTaskPage)
+	if !ok {
+		t.Fatalf("list result = %T, want webRemoteTaskPage", result)
+	}
+	var listed map[string]any
+	for _, item := range page.Items {
+		candidate, _ := item.(map[string]any)
+		if candidate["id"] == "transfer:"+taskID {
+			listed = candidate
+			break
+		}
+	}
+	if listed == nil || listed["phaseDetail"] != "mount_read" {
+		t.Fatalf("listed mount read = %#v", listed)
+	}
+
+	detail, err := getWebRemoteTask(invokeEnvelope{TaskID: "transfer:" + taskID, Bucket: "bucket-a"})
+	if err != nil {
+		t.Fatalf("get remote task: %v", err)
+	}
+	got, ok := detail.(map[string]any)
+	if !ok || got["sourcePath"] != "root/charge.tar" || got["targetPath"] != "bytes=0-10" {
+		t.Fatalf("mounted read detail = %#v", detail)
 	}
 }
