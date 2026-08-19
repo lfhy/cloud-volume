@@ -30,17 +30,26 @@ func (s *mountSession) stop() error {
 	}
 
 	var mountErr error
-	if s.mounted && s.mountTarget != "" {
-		active, err := probeWebDAVMountActive(s.mountTarget)
-		if err != nil {
-			mountErr = err
-		} else if active {
-			mountErr = executeUnmountWebDAV(s.mountTarget)
+	if (s.mounted || s.mountAttempted) && s.mountTarget != "" {
+		if s.mountAttempted && !s.mounted && s.serverURL != "" {
+			// A failed custom-path attempt must not unmount another process's
+			// volume that happens to use the same directory.
+			if target := probeMountedWebDAV(s.serverURL, s.mountTarget); target != "" {
+				mountErr = executeUnmountWebDAV(target)
+			}
+		} else {
+			active, err := probeWebDAVMountActive(s.mountTarget)
+			if err != nil {
+				mountErr = err
+			} else if active {
+				mountErr = executeUnmountWebDAV(s.mountTarget)
+			}
 		}
 		if mountErr != nil {
 			return s.keepWebDAVMountAfterStopError("unmount", mountErr)
 		}
 		s.mounted = false
+		s.mountAttempted = false
 	}
 
 	var serverErr error

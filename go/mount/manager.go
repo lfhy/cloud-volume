@@ -115,7 +115,7 @@ func (m *manager) mountBucket(
 		// A platform backend can report Start failure after making a live mount,
 		// then reject its cleanup Stop. Keep that session registered so its
 		// queue, metadata handle, and a later unmount attempt remain reachable.
-		if session.mounted && !session.stopping && session.access != nil {
+		if (session.mounted || session.mountAttempted) && !session.stopping && session.access != nil {
 			m.sessions[trimmedBucket] = session
 			delete(m.lastProbes, session.mountTarget)
 			log.Printf("[mount/manager] mount-start-retained bucket=%q", session.bucket)
@@ -149,7 +149,7 @@ func startMountSession(session *mountSession) (resultErr error) {
 		if startInvoked {
 			if err := session.backend.Stop(session); err != nil {
 				log.Printf("[mount/manager] mount-start-cleanup-error bucket=%q err=%v", session.bucket, err)
-				if session.mounted && !session.stopping {
+				if (session.mounted || session.mountAttempted) && !session.stopping {
 					retainAccess = true
 					session.lastError = fmt.Sprintf(
 						"启动挂载失败: %v\n停止挂载失败: %v", resultErr, err,

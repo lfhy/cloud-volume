@@ -109,7 +109,7 @@ make run
 `make run` 是本仓库的标准启动方式：
 
 - macOS: 先构建 Go bridge 到 `bin/bridge/libremote_storage_bridge.dylib`，再以正确的 `DEVELOPER_DIR` 启动 Flutter macOS 应用
-- macOS 调试挂载卡住时，可直接查看 `~/.cloud-volume/runtime/logs/bridge.log`；当前版本会额外记录 `cleanup-stale`、`mount-volume`、`unmount`、`open-mount-path`、`[storage/quota-cache]` 与 `[mount/quota]` 等阶段日志。`osascript` / `mount_webdav` 运行时会并行确认系统 mount 表，卷出现即完成挂载；Finder 打开请求异步且按路径合并，卸载则保持本地 WebDAV 到系统卷成功断开之后。排查 WebDAV 目录可写/只读误判时，可搜索 `[webdav/access]`；排查新建目录失败时，可搜索 `[webdav/mkdir]`。
+- macOS 调试挂载卡住时，可直接查看 `~/.cloud-volume/runtime/logs/bridge.log`；当前版本会记录 `mount-webdav-path`、`mount-webdav-registered`、`cleanup-stale`、`unmount`、`open-mount-path`、`[storage/quota-cache]` 与 `[mount/quota]` 等阶段。挂载使用非交互的 `mount_webdav -S`，命令成功后还必须等本次随机 loopback URL 的系统 mount 表项登记；命令超时或登记失败会清理半挂载并报错，绝不把普通目录当成成功卷。Finder 打开请求仍异步且按路径合并，卸载成功后才关闭本地 WebDAV。排查 WebDAV 目录可写/只读误判时，可搜索 `[webdav/access]`；排查新建目录失败时，可搜索 `[webdav/mkdir]`。
 - macOS WebDAV 挂载的内容写入会先落到本地缓存，再按 quiet period 异步推送上游。Finder 为文件时间等属性发送的 `PROPPATCH` 元数据探测不会触发文件内容下载或重复上传；新建目录和新鲜目录快照中的缺失目标直接由本地视图返回，不会为每个待写小文件同步查询 SFTP。FTP、SFTP 和 WebDAV 上游的上传进度、成功和失败会及时反映到传输队列，不会在实际同步完成后继续停留在“等待同步”。挂载根目录通过 RFC 4331 向 `webdavfs` 返回容量：桶自定义容量优先，上游支持配额时同时返回实际已用量，因此 macOS `df` 可显示非零的总量、已用和可用空间；上游与配置均没有容量信息时仍保持未知。桶列表获取的配额会在 Go 后端缓存 5 分钟；挂载即使在 TTL 到期后也会先使用同一账号/桶最后一次已知容量并异步刷新，缓存目录、RootPrefix、挂载参数或显示设置不同不会造成缓存 miss。macOS `webdavfs_agent` 偶尔会延迟发布首次 `statfs`，此时第一次 `df` 可能暂时为 `0/0`，而后续查询显示服务端已在首次 `PROPFIND` 返回的容量。SFTP 挂载不推测预取子目录，也不后台重复轮询 Finder/Spotlight 递归扫到的深层目录；用户打开目录仍按需读取，SSH 建连与握手也服从请求超时。
 - Linux: 先构建 Go bridge 到 `bin/bridge/libremote_storage_bridge.so`，并把它随 Linux bundle 一起安装后再启动 Flutter Linux 应用
 

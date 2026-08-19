@@ -60,6 +60,7 @@ type mountSession struct {
 	serverURL            string
 	port                 int
 	mounted              bool
+	mountAttempted       bool
 	server               *webDAVServer
 	access               *bucketAccess
 	backend              mountBackend

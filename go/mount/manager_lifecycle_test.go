@@ -62,6 +62,24 @@ func (b *retainedStartFailureMountBackend) Stop(session *mountSession) error {
 	return errors.New("injected cleanup stop failure")
 }
 
+type retainedAttemptedStartFailureMountBackend struct{ stopCalls int }
+
+func (*retainedAttemptedStartFailureMountBackend) Initialize(*mountSession) error { return nil }
+func (b *retainedAttemptedStartFailureMountBackend) Start(session *mountSession) error {
+	session.mountAttempted = true
+	return errors.New("injected attempted start failure")
+}
+func (b *retainedAttemptedStartFailureMountBackend) Stop(session *mountSession) error {
+	b.stopCalls++
+	session.mountAttempted = true
+	session.stopping = false
+	return errors.New("injected attempted cleanup stop failure")
+}
+func (*retainedAttemptedStartFailureMountBackend) IsActive(*mountSession) (bool, error) {
+	return false, nil
+}
+func (*retainedAttemptedStartFailureMountBackend) CleanupStale(*mountSession) error { return nil }
+
 func TestMountConfigChangeKeepsSessionWhenStopFails(t *testing.T) {
 	access := newTestBucketAccess(t)
 	config := storageconfig.RemoteStorageConfig{Endpoint: "https://old.example", Bucket: "bucket"}.Normalized()
@@ -220,6 +238,36 @@ func TestStartMountSessionRetainsAccessWhenPartialStartStopFails(t *testing.T) {
 	}
 	if session.lastError == "" {
 		t.Fatal("retained session did not expose cleanup failure")
+	}
+	_ = session.access.close()
+}
+
+func TestStartMountSessionRetainsAccessWhenAttemptCleanupFails(t *testing.T) {
+	manager := metadata.NewManager(filepath.Join(t.TempDir(), "metadata"))
+	defer manager.RemoveAllForTest()
+	config := storageconfig.RemoteStorageConfig{
+		ProfileID:      "retained-attempt-profile",
+		CacheDirectory: t.TempDir(),
+	}
+	handle, err := manager.AcquireWithBackend(config, "bucket", mountTestBackend{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	access := &bucketAccess{metadataHandle: handle}
+	backend := &retainedAttemptedStartFailureMountBackend{}
+	session := &mountSession{bucket: "bucket", access: access, backend: backend}
+
+	if err := startMountSession(session); err == nil {
+		t.Fatal("start unexpectedly succeeded")
+	}
+	if backend.stopCalls != 1 {
+		t.Fatalf("partial start Stop calls = %d, want 1", backend.stopCalls)
+	}
+	if session.access != access || session.mounted || !session.mountAttempted || session.stopping {
+		t.Fatalf("attempt cleanup failure did not retain retryable session: %+v", session)
+	}
+	if len(manager.List()) != 1 {
+		t.Fatalf("retained attempt lost metadata namespace: %+v", manager.List())
 	}
 	_ = session.access.close()
 }

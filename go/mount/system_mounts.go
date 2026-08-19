@@ -52,16 +52,31 @@ func listWebDAVMountEntries() ([]mountEntry, error) {
 }
 
 func mountOutputContainsPath(output, mountPath string) bool {
-	target := filepath.Clean(strings.TrimSpace(mountPath))
+	target := canonicalMountPath(mountPath)
 	if target == "." || target == "" {
 		return false
 	}
 	for _, current := range parseMountPaths(output) {
-		if filepath.Clean(current) == target {
+		if canonicalMountPath(current) == target {
 			return true
 		}
 	}
 	return false
+}
+
+// canonicalMountPath compares the parent directory after resolving macOS's
+// /var -> /private/var alias. Resolving only the parent avoids touching a live
+// WebDAV root, where a full EvalSymlinks call could enter the slow VFS path.
+func canonicalMountPath(value string) string {
+	clean := filepath.Clean(strings.TrimSpace(value))
+	if clean == "." || clean == "" {
+		return clean
+	}
+	parent := filepath.Dir(clean)
+	if resolvedParent, err := filepath.EvalSymlinks(parent); err == nil {
+		return filepath.Join(resolvedParent, filepath.Base(clean))
+	}
+	return clean
 }
 
 func parseMountPaths(output string) []string {
