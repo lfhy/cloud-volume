@@ -115,14 +115,16 @@ mixin _RemoteStorageDesktopStorageApiMixin
     String bucket,
     String key,
     bool isDirectory,
-    String newName,
-  ) async {
+    String newName, {
+    String taskId = '',
+  }) async {
     await runBridgeCall('rename_object', <String, dynamic>{
       'config': config.toJson(),
       'bucket': bucket,
       'key': key,
       'isDirectory': isDirectory,
       'newName': newName,
+      if (taskId.trim().isNotEmpty) 'taskId': taskId,
     });
   }
 

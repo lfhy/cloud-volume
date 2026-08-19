@@ -65,11 +65,11 @@ func downloadInstaller(
 		if expectedSize > 0 {
 			s3ops.AddTransferTotal(taskID, expectedSize)
 			s3ops.SetTransferCurrentFile(taskID, filepath.Base(destPath), expectedSize)
-			s3ops.AdvanceTransfer(taskID, expectedSize)
+			s3ops.SeedTransferProgress(taskID, expectedSize)
 		} else if info, statErr := os.Stat(destPath); statErr == nil {
 			s3ops.AddTransferTotal(taskID, info.Size())
 			s3ops.SetTransferCurrentFile(taskID, filepath.Base(destPath), info.Size())
-			s3ops.AdvanceTransfer(taskID, info.Size())
+			s3ops.SeedTransferProgress(taskID, info.Size())
 		}
 		s3ops.SetTransferStatusDetail(taskID, "cached")
 		return nil
@@ -85,7 +85,7 @@ func downloadInstaller(
 			return existingErr
 		}
 		if existing > 0 && attempt == 1 {
-			s3ops.AdvanceTransfer(taskID, existing)
+			s3ops.SeedTransferProgress(taskID, existing)
 		}
 
 		received, fetchErr := fetchOnce(ctx, client, taskID, url, destPath, existing, expectedSize)

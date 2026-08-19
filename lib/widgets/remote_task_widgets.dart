@@ -303,8 +303,25 @@ class _TaskDetails extends StatelessWidget {
             _detailLine('依赖', task.blockedReason),
           if (task.mountReadRange.isNotEmpty)
             _detailLine('读取范围', task.mountReadRange)
-          else if (task.phaseDetail.isNotEmpty)
-            _detailLine('阶段', task.phaseDetail),
+          else if (task.phaseLabel.isNotEmpty)
+            _detailLine('阶段', task.phaseLabel),
+          if (task.sourceTargetSummary.isNotEmpty)
+            _detailLine('路径', task.sourceTargetSummary),
+          if (task.localPath.isNotEmpty) _detailLine('本地路径', task.localPath),
+          if (task.progress.currentKey.isNotEmpty &&
+              task.progress.currentFileTotalBytes > 0)
+            _detailLine(
+              '当前文件',
+              '${task.progress.currentKey} '
+                  '${formatBytes(task.progress.currentFileBytesCompleted)} / '
+                  '${formatBytes(task.progress.currentFileTotalBytes)}',
+            ),
+          if (task.progress.currentPart > 0 && task.progress.totalParts > 0)
+            _detailLine(
+              '分块',
+              '第 ${task.progress.currentPart} / ${task.progress.totalParts} 块'
+                  '${task.progress.currentRange.isEmpty ? '' : ' · ${task.progress.currentRange}'}',
+            ),
           if (task.error.isNotEmpty) _detailLine('错误', task.error),
           if (task.remoteOutcome.isNotEmpty)
             _detailLine('远端结果', task.remoteOutcome),
@@ -391,7 +408,7 @@ String _taskSubtitle(RemoteTask task) {
   if (task.progress.totalItems > 0) {
     return '${task.progress.itemsCompleted} / ${task.progress.totalItems} 个对象';
   }
-  return task.phaseDetail.isNotEmpty ? task.phaseDetail : _statusLabel(task);
+  return task.phaseLabel.isNotEmpty ? task.phaseLabel : _statusLabel(task);
 }
 
 String _statusLabel(RemoteTask task) => switch (task.status) {

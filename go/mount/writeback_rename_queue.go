@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	s3ops "remote-storage/go/s3"
 )
 
 const writebackBarrierPollInterval = 50 * time.Millisecond
@@ -77,6 +79,9 @@ func (q *writebackQueue) enqueueMutation(
 	if err := q.mutations.Upsert(record); err != nil {
 		q.mu.Unlock()
 		return fmt.Errorf("persist rename mutation: %w", err)
+	}
+	if access := q.currentAccess(); access != nil {
+		beginMutationTransferTask(record, access.bucket, newLocal, access.config.ProfileID)
 	}
 	queue := q.renameQueue
 	stop := q.stop
@@ -449,6 +454,14 @@ func (q *writebackQueue) finishRenameBarrier(op *queuedWritebackRename, err erro
 	}
 	q.mu.Unlock()
 
+	// A local-only directory rebase has no provider call to finish its queued
+	// snapshot. Terminal barriers close any still-active task exactly once.
+	if op != nil && op.record.TaskID != "" {
+		if snapshot, exists := s3ops.GetTransferSnapshot(op.record.TaskID); exists &&
+			(snapshot.Status == "pending" || snapshot.Status == "running") {
+			s3ops.FinishQueuedTransfer(op.record.TaskID, err)
+		}
+	}
 	if op != nil {
 		log.Printf(
 			"[mount/writeback] rename-finished bucket=%q old=%q new=%q error=%v",

@@ -160,7 +160,8 @@ func getRemoteTask(args json.RawMessage) (any, error) {
 	}
 	if strings.HasPrefix(input.TaskID, "transfer:") {
 		snapshot, ok := s3ops.GetTransferSnapshot(strings.TrimPrefix(input.TaskID, "transfer:"))
-		if !ok {
+		if !ok || (input.ProfileID != "" && snapshot.ProfileID != input.ProfileID) ||
+			(input.Bucket != "" && snapshot.Bucket != input.Bucket) {
 			return nil, bucketmetadata.ErrNotFound
 		}
 		return runtimeTaskWire(snapshot), nil
@@ -209,6 +210,11 @@ func controlRemoteTask(args json.RawMessage, action string) (any, error) {
 	}
 	if strings.HasPrefix(input.TaskID, "transfer:") {
 		id := strings.TrimPrefix(input.TaskID, "transfer:")
+		snapshot, exists := s3ops.GetTransferSnapshot(id)
+		if !exists || (input.ProfileID != "" && snapshot.ProfileID != input.ProfileID) ||
+			(input.Bucket != "" && snapshot.Bucket != input.Bucket) {
+			return nil, bucketmetadata.ErrNotFound
+		}
 		var ok bool
 		switch action {
 		case "cancel":
@@ -305,7 +311,7 @@ func runtimeTaskMatches(snapshot s3ops.TransferSnapshot, input remoteTaskListArg
 	if input.Bucket != "" && snapshot.Bucket != input.Bucket {
 		return false
 	}
-	if input.ProfileID != "" && snapshot.ProfileID != input.ProfileID {
+	if input.ProfileID != "" && snapshot.ProfileID != input.ProfileID && snapshot.Type != "app_update" {
 		return false
 	}
 	if !input.IncludeHistory && (snapshot.Status == "done" || snapshot.Status == "completed" || snapshot.Status == "canceled" || snapshot.Status == "cancelled") {
@@ -421,70 +427,4 @@ func taskCursorOffset(cursor string) int {
 		return 0
 	}
 	return value
-}
-
-func runtimeTaskWire(snapshot s3ops.TransferSnapshot) map[string]any {
-	kind := runtimeTaskKind(snapshot.Type)
-	status := snapshot.Status
-	phase := snapshot.StatusDetail
-	source := "runtime"
-	if strings.HasPrefix(snapshot.Type, "sync_") {
-		source = "sync"
-	}
-	if snapshot.Type == "app_update" {
-		source = "app_update"
-	}
-	return map[string]any{
-		"id":          "transfer:" + snapshot.ID,
-		"source":      source,
-		"kind":        kind,
-		"profileId":   snapshot.ProfileID,
-		"status":      status,
-		"phase":       phase,
-		"phaseDetail": phase,
-		"bucket":      snapshot.Bucket,
-		"sourcePath":  snapshot.Key,
-		"targetPath":  snapshot.TargetPath,
-		"displayPath": snapshot.Key,
-		"createdAt":   snapshot.CreatedAt,
-		"cancelable":  status == "pending" || status == "running",
-		// Runtime producers do not yet expose a replayable request contract.
-		"retryable":       false,
-		"triggerable":     status == "pending" && kind == "upload",
-		"error":           snapshot.Error,
-		"progress":        transferProgressWire(snapshot),
-		"physicalTaskIds": []string{snapshot.ID},
-	}
-}
-
-func transferProgressWire(snapshot s3ops.TransferSnapshot) map[string]any {
-	return map[string]any{
-		"bytesCompleted": snapshot.BytesCompleted,
-		"totalBytes":     snapshot.TotalBytes,
-		"itemsCompleted": snapshot.ItemsCompleted,
-		"totalItems":     snapshot.TotalItems,
-		"speedBytes":     snapshot.SpeedBytes,
-		"currentKey":     snapshot.CurrentFileKey,
-	}
-}
-
-func runtimeTaskKind(value string) string {
-	switch value {
-	case "upload", "sync_upload":
-		return "upload"
-	case "download", "sync_download":
-		return "download"
-	case "copy":
-		return "copy"
-	case "move", "sync_rename":
-		return "move"
-	case "delete", "sync_delete":
-		return "delete"
-	case "app_update":
-		return "app_update"
-	case "sync_mkdir":
-		return "mkdir"
-	default:
-		return "unknown"
-	}
 }

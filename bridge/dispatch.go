@@ -244,7 +244,9 @@ type downloadArgs struct {
 }
 
 type transferTaskArgs struct {
-	TaskID string `json:"taskId"`
+	TaskID    string `json:"taskId"`
+	ProfileID string `json:"profileId"`
+	Bucket    string `json:"bucket"`
 }
 
 // bridgeListBucketsTimeout bounds the per-account bucket list call. S3 client

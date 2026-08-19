@@ -187,6 +187,31 @@ void main() {
     expect(task.operationPath, 'root/charge.tar');
     expect(task.mountReadRange, 'bytes=1048576-1572863');
   });
+
+  test('runtime tasks retain local destination and multipart range', () {
+    final task = RemoteTask.fromJson(const <String, dynamic>{
+      'id': 'transfer:download-1',
+      'kind': 'download',
+      'status': 'running',
+      'source': 'runtime',
+      'sourcePath': 'remote.bin',
+      'localPath': '/tmp/remote.bin',
+      'phaseDetail': 'downloading',
+      'progress': <String, dynamic>{
+        'currentKey': 'remote.bin',
+        'currentFileBytesCompleted': 4,
+        'currentFileTotalBytes': 8,
+        'currentRange': 'bytes=0-7',
+        'currentPart': 1,
+        'totalParts': 4,
+      },
+    });
+    expect(task.localPath, '/tmp/remote.bin');
+    expect(task.phaseLabel, '下载中');
+    expect(task.progress.currentFileBytesCompleted, 4);
+    expect(task.progress.currentRange, 'bytes=0-7');
+    expect(task.progress.totalParts, 4);
+  });
 }
 
 class _FakeGateway extends Fake implements RemoteStorageGateway {

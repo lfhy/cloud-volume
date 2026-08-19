@@ -631,8 +631,9 @@ class _FakeApi implements RemoteStorageGateway {
     String bucket,
     String key,
     bool isDirectory,
-    String newName,
-  ) async {}
+    String newName, {
+    String taskId = '',
+  }) async {}
 
   @override
   Future<void> copyObject(

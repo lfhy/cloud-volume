@@ -168,6 +168,7 @@ func UploadFileContext(
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(ctx)
 		startTransfer(taskID, "upload", bucket, key, localPath, info.Size(), cancel)
+		SetTransferProfile(taskID, cfg.ProfileID)
 		defer func() { finishTransfer(taskID, err) }()
 	}
 
@@ -228,6 +229,7 @@ func DownloadFileContext(
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(ctx)
 		startTransfer(taskID, "download", bucket, key, localPath, totalBytes, cancel)
+		SetTransferProfile(taskID, cfg.ProfileID)
 		defer func() { finishTransfer(taskID, err) }()
 	}
 
@@ -246,7 +248,7 @@ func DownloadFileContext(
 
 	writeOffset := resolvedResumeOffset(resumeOffset, out.ContentRange)
 	if taskID != "" && writeOffset > 0 {
-		advanceTransfer(taskID, writeOffset)
+		SeedTransferProgress(taskID, writeOffset)
 	}
 
 	f, err := openDownloadTarget(localPath, writeOffset)

@@ -79,6 +79,7 @@ func (q *deleteQueue) enqueue(virtualPath string, isDir bool, hardDelete bool) {
 	}
 	q.entries[clean] = entry
 	s3ops.QueueTransfer(entry.taskID, "delete", q.access.bucket, clean, "", 0)
+	s3ops.SetTransferProfile(entry.taskID, q.access.config.ProfileID)
 	queue := q.queue
 	q.mu.Unlock()
 
@@ -251,6 +252,7 @@ func (q *deleteQueue) runDelete(
 	s3ops.StartQueuedTransfer(
 		entry.taskID, "delete", q.access.bucket, virtualPath, "", 0, transferCancel,
 	)
+	s3ops.SetTransferProfile(entry.taskID, q.access.config.ProfileID)
 	defer func() { s3ops.FinishQueuedTransfer(entry.taskID, err) }()
 	deleteFunc := q.access.backend.DeleteObject
 	if entry.hardDelete {

@@ -248,15 +248,11 @@ func (s *Server) invokeMethod(
 		}
 		return map[string]any{"ok": true}, http.StatusOK, err
 	case "rename_object":
-		err := storageops.ForConfig(config).RenameObject(
-			ctx,
-			input.Bucket,
-			input.Key,
-			input.IsDirectory,
-			input.NewName,
+		newPath := joinWebapiChildPath(webapiParentDirectoryOf(input.Key), input.NewName)
+		err := storageops.ForConfig(config).MoveObject(
+			ctx, input.Bucket, input.Key, newPath, input.IsDirectory, input.TaskID,
 		)
 		if err == nil {
-			newPath := joinWebapiChildPath(webapiParentDirectoryOf(input.Key), input.NewName)
 			bucketmount.NotifyExternalRename(config, input.Bucket, input.Key, newPath, input.IsDirectory)
 		}
 		return map[string]any{"ok": true}, http.StatusOK, err

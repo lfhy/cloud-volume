@@ -5,7 +5,6 @@ package s3
 import (
 	"context"
 	"errors"
-	"io"
 	"sort"
 	"sync"
 	"time"
@@ -34,15 +33,23 @@ type TransferSnapshot struct {
 	CurrentFileKey            string  `json:"currentFileKey,omitempty"`
 	CurrentFileBytesCompleted int64   `json:"currentFileBytesCompleted,omitempty"`
 	CurrentFileTotalBytes     int64   `json:"currentFileTotalBytes,omitempty"`
+	CurrentRange              string  `json:"currentRange,omitempty"`
+	CurrentPart               int32   `json:"currentPart,omitempty"`
+	TotalParts                int32   `json:"totalParts,omitempty"`
+	Cancelable                bool    `json:"cancelable"`
 	SpeedBytes                float64 `json:"speedBytes"`
 	Error                     string  `json:"error,omitempty"`
 }
 
 type transferState struct {
-	snapshot  TransferSnapshot
-	startedAt time.Time
-	updatedAt time.Time
-	cancel    context.CancelFunc
+	snapshot     TransferSnapshot
+	startedAt    time.Time
+	updatedAt    time.Time
+	cancel       context.CancelFunc
+	activeOwners int
+	// transferredBytes excludes pre-existing resume bytes so speed always
+	// reflects the current transfer attempt rather than cached work.
+	transferredBytes int64
 	// phaseItems tracks per-phase item contributions so re-planning a phase
 	// adjusts the running total instead of adding it twice.
 	phaseItems map[string]int64
@@ -57,136 +64,6 @@ type transferMonitor struct {
 var globalTransferMonitor = &transferMonitor{
 	tasks:          map[string]*transferState{},
 	pendingCancels: map[string]time.Time{},
-}
-
-func startTransfer(
-	id,
-	kind,
-	bucket,
-	key,
-	localPath string,
-	totalBytes int64,
-	cancel context.CancelFunc,
-) {
-	now := time.Now()
-	globalTransferMonitor.mu.Lock()
-	defer globalTransferMonitor.mu.Unlock()
-	profileID := ""
-	if existing, ok := globalTransferMonitor.tasks[id]; ok {
-		profileID = existing.snapshot.ProfileID
-	}
-
-	globalTransferMonitor.tasks[id] = &transferState{
-		snapshot: TransferSnapshot{
-			ID:           id,
-			Type:         kind,
-			ProfileID:    profileID,
-			Bucket:       bucket,
-			Key:          key,
-			LocalPath:    localPath,
-			Status:       "running",
-			StatusDetail: "uploading",
-			CreatedAt:    now.Format(time.RFC3339),
-			TotalBytes:   totalBytes,
-		},
-		startedAt: now,
-		updatedAt: now,
-		cancel:    cancel,
-	}
-	if _, ok := globalTransferMonitor.pendingCancels[id]; ok {
-		delete(globalTransferMonitor.pendingCancels, id)
-		globalTransferMonitor.tasks[id].snapshot.Status = "canceled"
-		globalTransferMonitor.tasks[id].updatedAt = now
-		if cancel != nil {
-			cancel()
-		}
-	}
-}
-
-// QueueTransfer registers a pending task before bytes start moving.
-func QueueTransfer(
-	id,
-	kind,
-	bucket,
-	key,
-	localPath string,
-	totalBytes int64,
-) {
-	now := time.Now()
-	globalTransferMonitor.mu.Lock()
-	defer globalTransferMonitor.mu.Unlock()
-
-	task, ok := globalTransferMonitor.tasks[id]
-	if !ok {
-		globalTransferMonitor.tasks[id] = &transferState{
-			snapshot: TransferSnapshot{
-				ID:           id,
-				Type:         kind,
-				Bucket:       bucket,
-				Key:          key,
-				LocalPath:    localPath,
-				Status:       "pending",
-				StatusDetail: "queued",
-				CreatedAt:    now.Format(time.RFC3339),
-				TotalBytes:   totalBytes,
-			},
-			startedAt: now,
-			updatedAt: now,
-		}
-		return
-	}
-	task.snapshot.Type = kind
-	task.snapshot.Bucket = bucket
-	task.snapshot.Key = key
-	task.snapshot.LocalPath = localPath
-	task.snapshot.TotalBytes = totalBytes
-	task.snapshot.Status = "pending"
-	task.snapshot.StatusDetail = "queued"
-	task.snapshot.Error = ""
-	task.snapshot.SpeedBytes = 0
-	task.updatedAt = now
-}
-
-// SetTransferProfile associates a physical snapshot with the durable account
-// or sync-profile identity that owns it. It is metadata for projection only.
-func SetTransferProfile(id, profileID string) {
-	globalTransferMonitor.mu.Lock()
-	defer globalTransferMonitor.mu.Unlock()
-	if task, ok := globalTransferMonitor.tasks[id]; ok {
-		task.snapshot.ProfileID = profileID
-		task.updatedAt = time.Now()
-	}
-}
-
-// SetTransferStatusDetail refines a task's current phase without changing its main status.
-func SetTransferStatusDetail(id, detail string) {
-	globalTransferMonitor.mu.Lock()
-	defer globalTransferMonitor.mu.Unlock()
-
-	task, ok := globalTransferMonitor.tasks[id]
-	if !ok {
-		return
-	}
-	task.snapshot.StatusDetail = detail
-	task.updatedAt = time.Now()
-}
-
-// StartQueuedTransfer switches a previously queued task into the running state.
-func StartQueuedTransfer(
-	id,
-	kind,
-	bucket,
-	key,
-	localPath string,
-	totalBytes int64,
-	cancel context.CancelFunc,
-) {
-	startTransfer(id, kind, bucket, key, localPath, totalBytes, cancel)
-}
-
-// FinishQueuedTransfer finalizes a queued task after the mount layer finishes the remote operation.
-func FinishQueuedTransfer(id string, err error) {
-	finishTransfer(id, err)
 }
 
 func setTransferTotal(id string, totalBytes int64) {
@@ -334,11 +211,12 @@ func advanceTransfer(id string, delta int64) {
 		return
 	}
 	task.snapshot.BytesCompleted += delta
+	task.transferredBytes += delta
 	task.updatedAt = time.Now()
 
 	elapsed := task.updatedAt.Sub(task.startedAt).Seconds()
 	if elapsed > 0 {
-		task.snapshot.SpeedBytes = float64(task.snapshot.BytesCompleted) / elapsed
+		task.snapshot.SpeedBytes = float64(task.transferredBytes) / elapsed
 	}
 }
 
@@ -351,7 +229,15 @@ func finishTransfer(id string, err error) {
 		return
 	}
 	task.updatedAt = time.Now()
+	if task.activeOwners > 1 {
+		task.activeOwners--
+		return
+	}
+	if task.activeOwners > 0 {
+		task.activeOwners--
+	}
 	task.cancel = nil
+	task.snapshot.Cancelable = false
 	task.snapshot.SpeedBytes = 0
 	if task.snapshot.Status == "canceled" {
 		task.snapshot.Error = ""
@@ -388,7 +274,7 @@ func CancelTransfer(id string) bool {
 		globalTransferMonitor.mu.Unlock()
 		return true
 	}
-	if task.snapshot.Status == "done" || task.snapshot.Status == "failed" {
+	if task.snapshot.Status == "done" || task.snapshot.Status == "failed" || !task.snapshot.Cancelable {
 		globalTransferMonitor.mu.Unlock()
 		return false
 	}
@@ -463,84 +349,4 @@ func GetTransferSnapshot(id string) (TransferSnapshot, bool) {
 		return TransferSnapshot{}, false
 	}
 	return task.snapshot, true
-}
-
-type countingReader struct {
-	reader io.Reader
-	onRead func(int)
-}
-
-func (r *countingReader) Read(p []byte) (int, error) {
-	n, err := r.reader.Read(p)
-	if n > 0 && r.onRead != nil {
-		r.onRead(n)
-	}
-	return n, err
-}
-
-type contextReader struct {
-	ctx    context.Context
-	reader io.Reader
-	onRead func(int)
-}
-
-func (r *contextReader) Read(p []byte) (int, error) {
-	select {
-	case <-r.ctx.Done():
-		return 0, r.ctx.Err()
-	default:
-	}
-
-	n, err := r.reader.Read(p)
-	if n > 0 && r.onRead != nil {
-		r.onRead(n)
-	}
-	if err != nil {
-		return n, err
-	}
-
-	select {
-	case <-r.ctx.Done():
-		return n, r.ctx.Err()
-	default:
-		return n, nil
-	}
-}
-
-type contextReadSeeker struct {
-	ctx    context.Context
-	reader io.ReadSeeker
-	onRead func(int)
-}
-
-func (r *contextReadSeeker) Read(p []byte) (int, error) {
-	select {
-	case <-r.ctx.Done():
-		return 0, r.ctx.Err()
-	default:
-	}
-
-	n, err := r.reader.Read(p)
-	if n > 0 && r.onRead != nil {
-		r.onRead(n)
-	}
-	if err != nil {
-		return n, err
-	}
-
-	select {
-	case <-r.ctx.Done():
-		return n, r.ctx.Err()
-	default:
-		return n, nil
-	}
-}
-
-func (r *contextReadSeeker) Seek(offset int64, whence int) (int64, error) {
-	select {
-	case <-r.ctx.Done():
-		return 0, r.ctx.Err()
-	default:
-		return r.reader.Seek(offset, whence)
-	}
 }

@@ -1,5 +1,8 @@
 // Unified remote-operation models shared by the task page, sidebar, and sync cards.
 
+part 'remote_task_parsing.dart';
+part 'remote_task_filter.dart';
+
 enum RemoteTaskStatus {
   waiting,
   blocked,
@@ -122,6 +125,11 @@ class RemoteTaskProgress {
     this.totalItems = 0,
     this.speedBytes = 0,
     this.currentKey = '',
+    this.currentFileBytesCompleted = 0,
+    this.currentFileTotalBytes = 0,
+    this.currentRange = '',
+    this.currentPart = 0,
+    this.totalParts = 0,
   });
 
   factory RemoteTaskProgress.fromJson(Object? value) {
@@ -134,6 +142,11 @@ class RemoteTaskProgress {
       speedBytes: _double(value['speedBytes']),
       currentKey: (value['currentKey'] ?? value['currentFileKey'] ?? '')
           .toString(),
+      currentFileBytesCompleted: _int(value['currentFileBytesCompleted']),
+      currentFileTotalBytes: _int(value['currentFileTotalBytes']),
+      currentRange: (value['currentRange'] ?? '').toString(),
+      currentPart: _int(value['currentPart']),
+      totalParts: _int(value['totalParts']),
     );
   }
 
@@ -143,6 +156,11 @@ class RemoteTaskProgress {
   final int totalItems;
   final double speedBytes;
   final String currentKey;
+  final int currentFileBytesCompleted;
+  final int currentFileTotalBytes;
+  final String currentRange;
+  final int currentPart;
+  final int totalParts;
 
   double get fraction {
     if (totalBytes > 0) return (bytesCompleted / totalBytes).clamp(0, 1);
@@ -157,6 +175,11 @@ class RemoteTaskProgress {
     'totalItems': totalItems,
     'speedBytes': speedBytes,
     'currentKey': currentKey,
+    'currentFileBytesCompleted': currentFileBytesCompleted,
+    'currentFileTotalBytes': currentFileTotalBytes,
+    'currentRange': currentRange,
+    'currentPart': currentPart,
+    'totalParts': totalParts,
   };
 }
 
@@ -240,6 +263,7 @@ class RemoteTask {
     this.bucket = '',
     this.sourcePath = '',
     this.targetPath = '',
+    this.localPath = '',
     this.displayPath = '',
     this.phase = RemoteTaskPhase.unknown,
     this.phaseDetail = '',
@@ -283,6 +307,7 @@ class RemoteTask {
       bucket: (json['bucket'] ?? '').toString(),
       sourcePath: (json['sourcePath'] ?? json['key'] ?? '').toString(),
       targetPath: (json['targetPath'] ?? '').toString(),
+      localPath: (json['localPath'] ?? '').toString(),
       displayPath: (json['displayPath'] ?? '').toString(),
       phase: _phaseFromWire(json['phase']),
       phaseDetail:
@@ -323,6 +348,7 @@ class RemoteTask {
   final String bucket;
   final String sourcePath;
   final String targetPath;
+  final String localPath;
   final String displayPath;
   final RemoteTaskPhase phase;
   final String phaseDetail;
@@ -371,6 +397,7 @@ class RemoteTask {
       bucket: bucket,
       sourcePath: sourcePath,
       targetPath: targetPath,
+      localPath: localPath,
       displayPath: displayPath,
       phase: phase,
       phaseDetail: phaseDetail,
@@ -442,55 +469,4 @@ class RemoteTaskPage {
   final String serverTime;
   final String freshness;
   final Map<String, bool> capabilities;
-}
-
-class RemoteTaskFilter {
-  const RemoteTaskFilter({
-    this.profileId = '',
-    this.bucket = '',
-    this.statuses = const <RemoteTaskStatus>[],
-    this.includeHistory = true,
-    this.cursor = '',
-    this.limit = 100,
-  });
-
-  final String profileId;
-  final String bucket;
-  final List<RemoteTaskStatus> statuses;
-  final bool includeHistory;
-  final String cursor;
-  final int limit;
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    if (profileId.trim().isNotEmpty) 'profileId': profileId.trim(),
-    if (bucket.trim().isNotEmpty) 'bucket': bucket.trim(),
-    if (statuses.isNotEmpty)
-      'statuses': statuses
-          .map((status) => status.wireName)
-          .toList(growable: false),
-    'includeHistory': includeHistory,
-    if (cursor.isNotEmpty) 'cursor': cursor,
-    'limit': limit,
-  };
-}
-
-int _int(Object? value) =>
-    value is num ? value.toInt() : int.tryParse('$value') ?? 0;
-double _double(Object? value) =>
-    value is num ? value.toDouble() : double.tryParse('$value') ?? 0;
-List<Object?> _records(Object? value) =>
-    value is List ? value.cast<Object?>() : const <Object?>[];
-List<String> _strings(Object? value) => value is List
-    ? value.map((item) => item.toString()).toList(growable: false)
-    : const <String>[];
-RemoteTaskPhase _phaseFromWire(Object? value) {
-  return switch (value?.toString().trim().toLowerCase()) {
-    'quiet_period' || 'quiet-period' => RemoteTaskPhase.quietPeriod,
-    'dependency' || 'blocked' => RemoteTaskPhase.dependency,
-    'provider' || 'uploading' || 'downloading' => RemoteTaskPhase.provider,
-    'verification' || 'verifying' => RemoteTaskPhase.verification,
-    'cleanup' => RemoteTaskPhase.cleanup,
-    'local' => RemoteTaskPhase.local,
-    _ => RemoteTaskPhase.unknown,
-  };
 }

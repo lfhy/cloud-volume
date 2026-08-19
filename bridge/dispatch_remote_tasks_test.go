@@ -48,3 +48,20 @@ func TestRuntimeTaskWireKeepsMountReadFileAndRangeDistinct(t *testing.T) {
 		t.Fatalf("mount-read phase detail = %#v", wire["phaseDetail"])
 	}
 }
+
+func TestRuntimeTaskWireCarriesLocalAndMultipartDetails(t *testing.T) {
+	wire := runtimeTaskWire(s3ops.TransferSnapshot{
+		ID: "copy-1", Type: "copy", ProfileID: "profile-a", Bucket: "bucket-a",
+		Key: "old.bin", TargetPath: "new.bin", LocalPath: "/tmp/download.bin",
+		Status: "running", StatusDetail: "copying", Cancelable: true,
+		CurrentFileKey: "new.bin", CurrentFileBytesCompleted: 4, CurrentFileTotalBytes: 8,
+		CurrentRange: "bytes=0-7", CurrentPart: 1, TotalParts: 4,
+	})
+	if wire["localPath"] != "/tmp/download.bin" || wire["cancelable"] != true {
+		t.Fatalf("runtime fields = %#v", wire)
+	}
+	progress := wire["progress"].(map[string]any)
+	if progress["currentRange"] != "bytes=0-7" || progress["totalParts"] != int32(4) {
+		t.Fatalf("runtime multipart progress = %#v", progress)
+	}
+}

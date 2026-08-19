@@ -43,6 +43,7 @@ func CopyObjectContext(
 		ctx,
 		taskID,
 		"copy",
+		cfg.ProfileID,
 		bucket,
 		sourceKey,
 		targetKey,

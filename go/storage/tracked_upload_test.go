@@ -31,13 +31,45 @@ func TestRunTrackedUploadFinishesFailedTask(t *testing.T) {
 			}
 			return wantErr
 		},
+		"profile-upload",
 	)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("runTrackedUpload error = %v, want %v", err, wantErr)
 	}
 	snapshot, ok := s3ops.GetTransferSnapshot(taskID)
-	if !ok || snapshot.Status != "failed" || snapshot.Error != wantErr.Error() {
+	if !ok || snapshot.Status != "failed" || snapshot.Error != wantErr.Error() || snapshot.ProfileID != "profile-upload" {
 		t.Fatalf("failed transfer snapshot = %#v, ok=%t", snapshot, ok)
+	}
+}
+
+func TestRunTrackedMutationPublishesProfiledMove(t *testing.T) {
+	const taskID = "shared-mutation-tracker"
+	s3ops.ForgetTransfer(taskID)
+	t.Cleanup(func() { s3ops.ForgetTransfer(taskID) })
+
+	err := runTrackedMutation(
+		context.Background(),
+		"move",
+		"bucket-a",
+		"old.txt",
+		"new.txt",
+		taskID,
+		"profile-mutation",
+		func(context.Context) error {
+			snapshot, ok := s3ops.GetTransferSnapshot(taskID)
+			if !ok || snapshot.Status != "running" || snapshot.ProfileID != "profile-mutation" ||
+				snapshot.TargetPath != "new.txt" {
+				t.Fatalf("running mutation snapshot = %#v", snapshot)
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("runTrackedMutation error = %v", err)
+	}
+	snapshot, ok := s3ops.GetTransferSnapshot(taskID)
+	if !ok || snapshot.Status != "done" || snapshot.Type != "move" {
+		t.Fatalf("completed mutation snapshot = %#v", snapshot)
 	}
 }
 

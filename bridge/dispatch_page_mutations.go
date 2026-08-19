@@ -34,6 +34,7 @@ type renameObjectArgs struct {
 	Key         string                            `json:"key"`
 	IsDirectory bool                              `json:"isDirectory"`
 	NewName     string                            `json:"newName"`
+	TaskID      string                            `json:"taskId"`
 }
 
 type uploadArgs struct {
@@ -107,7 +108,8 @@ func renameObject(args json.RawMessage) (any, error) {
 	newPath := joinChildPath(parentDirectoryOf(input.Key), input.NewName)
 	var projection bucketmetadata.PathProjection
 	if handled, err := metadataMutationFunc(metadataMutationRequest{
-		Kind: metadataMutationRename, Config: input.Config, Bucket: input.Bucket, Path: input.Key, TargetPath: newPath, Projection: &projection,
+		Kind: metadataMutationRename, Config: input.Config, Bucket: input.Bucket, Path: input.Key,
+		TargetPath: newPath, TaskID: input.TaskID, Projection: &projection,
 	}); handled || err != nil {
 		if err != nil {
 			return nil, err
@@ -115,8 +117,8 @@ func renameObject(args json.RawMessage) (any, error) {
 		bucketmount.ProjectMetadataRename(input.Config, input.Bucket, input.Key, projection, input.IsDirectory)
 		return map[string]any{"ok": true}, nil
 	}
-	if err := storageops.ForConfig(input.Config).RenameObject(
-		context.Background(), input.Bucket, input.Key, input.IsDirectory, input.NewName,
+	if err := storageops.ForConfig(input.Config).MoveObject(
+		context.Background(), input.Bucket, input.Key, newPath, input.IsDirectory, input.TaskID,
 	); err != nil {
 		return nil, err
 	}
@@ -163,7 +165,7 @@ func uploadDirectory(args json.RawMessage) (any, error) {
 	}
 	backend := storageops.ForConfig(input.Config)
 	go func() {
-		_ = storageops.UploadDirectory(context.Background(), backend, input.Bucket, input.Key, input.LocalPath, input.TaskID)
+		_ = storageops.UploadDirectory(context.Background(), backend, input.Bucket, input.Key, input.LocalPath, input.TaskID, input.Config.ProfileID)
 		bucketmount.NotifyExternalUpload(input.Config, input.Bucket, input.Key, true)
 		broadcastPeerMutation(input.Config, input.Bucket, input.Key, "upload")
 	}()

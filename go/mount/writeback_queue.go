@@ -423,5 +423,6 @@ func s3opsQueueTransferForEntry(access *bucketAccess, entry *pendingWriteback) {
 		entry.localPath,
 		entry.size,
 	)
+	s3ops.SetTransferProfile(entry.taskID, access.config.ProfileID)
 	s3ops.SetTransferStatusDetail(entry.taskID, "sync_wait")
 }

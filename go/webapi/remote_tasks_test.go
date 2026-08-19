@@ -41,6 +41,22 @@ func TestWebRuntimeTaskWireKeepsMountReadFileAndRangeDistinct(t *testing.T) {
 	}
 }
 
+func TestWebRuntimeTaskWireCarriesLocalAndMultipartDetails(t *testing.T) {
+	wire := webRuntimeTaskWire(s3ops.TransferSnapshot{
+		ID: "download-1", Type: "download", Bucket: "bucket-a", Key: "remote.bin",
+		LocalPath: "/tmp/remote.bin", Status: "running", StatusDetail: "downloading",
+		CurrentFileKey: "remote.bin", CurrentFileBytesCompleted: 4, CurrentFileTotalBytes: 8,
+		CurrentRange: "bytes=0-7", CurrentPart: 1, TotalParts: 4,
+	})
+	if wire["localPath"] != "/tmp/remote.bin" {
+		t.Fatalf("local path = %#v", wire)
+	}
+	progress := wire["progress"].(map[string]any)
+	if progress["currentFileBytesCompleted"] != int64(4) || progress["currentPart"] != int32(1) {
+		t.Fatalf("multipart progress = %#v", progress)
+	}
+}
+
 func TestWebMountReadSnapshotUsesActiveProfileScope(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("USERPROFILE", t.TempDir())

@@ -131,7 +131,8 @@ func getWebRemoteTask(input invokeEnvelope) (any, error) {
 	}
 	if strings.HasPrefix(input.TaskID, "transfer:") {
 		snapshot, ok := s3ops.GetTransferSnapshot(strings.TrimPrefix(input.TaskID, "transfer:"))
-		if !ok || snapshot.ProfileID != config.ProfileID || (input.Bucket != "" && snapshot.Bucket != input.Bucket) {
+		if !ok || (snapshot.ProfileID != config.ProfileID && snapshot.Type != "app_update") ||
+			(input.Bucket != "" && snapshot.Bucket != input.Bucket) {
 			return nil, bucketmetadata.ErrNotFound
 		}
 		return webRuntimeTaskWire(snapshot), nil
@@ -172,7 +173,8 @@ func controlWebRemoteTask(input invokeEnvelope, action string) (any, error) {
 	if strings.HasPrefix(input.TaskID, "transfer:") {
 		id := strings.TrimPrefix(input.TaskID, "transfer:")
 		snapshot, ok := s3ops.GetTransferSnapshot(id)
-		if !ok || snapshot.ProfileID != config.ProfileID || (input.Bucket != "" && snapshot.Bucket != input.Bucket) {
+		if !ok || (snapshot.ProfileID != config.ProfileID && snapshot.Type != "app_update") ||
+			(input.Bucket != "" && snapshot.Bucket != input.Bucket) {
 			return nil, bucketmetadata.ErrNotFound
 		}
 		ok = false
@@ -269,7 +271,7 @@ func webMetadataTaskMatches(task bucketmetadata.Task, input invokeEnvelope) bool
 }
 
 func webRuntimeTaskMatches(snapshot s3ops.TransferSnapshot, input invokeEnvelope) bool {
-	if input.ProfileID != "" && snapshot.ProfileID != input.ProfileID {
+	if input.ProfileID != "" && snapshot.ProfileID != input.ProfileID && snapshot.Type != "app_update" {
 		return false
 	}
 	if input.Bucket != "" && snapshot.Bucket != input.Bucket {
@@ -294,7 +296,6 @@ func webMetadataTaskWire(task bucketmetadata.Task, physical map[string]s3ops.Tra
 	var wire map[string]any
 	_ = json.Unmarshal(raw, &wire)
 	wire["source"] = "metadata"
-	wire["rawEventCount"] = len(task.SourceSeqs)
 	wire["rawEventCount"] = len(task.Events)
 	wire["events"] = task.Events
 	physicalIDs := task.PhysicalTaskIDs
@@ -388,67 +389,4 @@ func webRemoteTaskNamespace(taskID string) string {
 		return trimmed[:index]
 	}
 	return ""
-}
-
-func webRuntimeTaskWire(snapshot s3ops.TransferSnapshot) map[string]any {
-	source := "runtime"
-	if strings.HasPrefix(snapshot.Type, "sync_") {
-		source = "sync"
-	}
-	if snapshot.Type == "app_update" {
-		source = "app_update"
-	}
-	return map[string]any{
-		"id":          "transfer:" + snapshot.ID,
-		"source":      source,
-		"kind":        webRuntimeKind(snapshot.Type),
-		"profileId":   snapshot.ProfileID,
-		"status":      snapshot.Status,
-		"phase":       snapshot.StatusDetail,
-		"phaseDetail": snapshot.StatusDetail,
-		"bucket":      snapshot.Bucket,
-		"sourcePath":  snapshot.Key,
-		"targetPath":  snapshot.TargetPath,
-		"displayPath": snapshot.Key,
-		"createdAt":   snapshot.CreatedAt,
-		"cancelable":  snapshot.Status == "pending" || snapshot.Status == "running",
-		// Runtime producers do not yet expose a replayable request contract.
-		"retryable":       false,
-		"triggerable":     snapshot.Status == "pending" && webRuntimeKind(snapshot.Type) == "upload",
-		"error":           snapshot.Error,
-		"progress":        webTransferProgress(snapshot),
-		"physicalTaskIds": []string{snapshot.ID},
-	}
-}
-
-func webTransferProgress(snapshot s3ops.TransferSnapshot) map[string]any {
-	return map[string]any{
-		"bytesCompleted": snapshot.BytesCompleted,
-		"totalBytes":     snapshot.TotalBytes,
-		"itemsCompleted": snapshot.ItemsCompleted,
-		"totalItems":     snapshot.TotalItems,
-		"speedBytes":     snapshot.SpeedBytes,
-		"currentKey":     snapshot.CurrentFileKey,
-	}
-}
-
-func webRuntimeKind(value string) string {
-	switch value {
-	case "upload", "sync_upload":
-		return "upload"
-	case "download", "sync_download":
-		return "download"
-	case "copy":
-		return "copy"
-	case "move", "sync_rename":
-		return "move"
-	case "delete", "sync_delete":
-		return "delete"
-	case "sync_mkdir":
-		return "mkdir"
-	case "app_update":
-		return "app_update"
-	default:
-		return "unknown"
-	}
 }

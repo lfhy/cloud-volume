@@ -59,6 +59,7 @@ func UploadFileContextResumable(
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(ctx)
 		startTransfer(taskID, "upload", bucket, key, localPath, info.Size(), cancel)
+		SetTransferProfile(taskID, cfg.ProfileID)
 		defer func() { finishTransfer(taskID, err) }()
 	}
 
@@ -80,7 +81,7 @@ func UploadFileContextResumable(
 	}
 
 	if taskID != "" {
-		advanceTransfer(taskID, completedUploadBytes(state, info.Size()))
+		SeedTransferProgress(taskID, completedUploadBytes(state, info.Size()))
 	}
 
 	if err := uploadPendingParts(ctx, client, bucket, key, file, state, taskID, uploadWorkers); err != nil {

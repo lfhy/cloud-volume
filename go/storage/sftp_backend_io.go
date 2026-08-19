@@ -77,24 +77,29 @@ func (b sftpBackend) DeleteObject(
 	ctx context.Context,
 	bucket, key string,
 	isDirectory bool,
-	_ string,
+	taskID string,
 ) error {
-	if err := b.ensureBucketWritable(bucket); err != nil {
-		return err
-	}
-	client, sshConn, err := b.sftpClient(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = client.Close()
-		_ = sshConn.Close()
-	}()
-	remotePath := sftpRemotePath(key)
-	if isDirectory {
-		return removeSFTPDirectoryRecursive(ctx, client, remotePath)
-	}
-	return client.Remove(remotePath)
+	return runTrackedMutation(
+		ctx, "delete", bucket, key, "", taskID, b.cfg.ProfileID,
+		func(operationCtx context.Context) error {
+			if err := b.ensureBucketWritable(bucket); err != nil {
+				return err
+			}
+			client, sshConn, err := b.sftpClient(operationCtx)
+			if err != nil {
+				return err
+			}
+			defer func() {
+				_ = client.Close()
+				_ = sshConn.Close()
+			}()
+			remotePath := sftpRemotePath(key)
+			if isDirectory {
+				return removeSFTPDirectoryRecursive(operationCtx, client, remotePath)
+			}
+			return client.Remove(remotePath)
+		},
+	)
 }
 
 // removeSFTPDirectoryRecursive removes files before each directory so the
@@ -163,33 +168,44 @@ func (b sftpBackend) RenameObject(
 func (b sftpBackend) CopyObject(
 	ctx context.Context,
 	bucket, sourceKey, targetKey string,
-	_ bool,
-	_ string,
+	isDirectory bool,
+	taskID string,
 ) error {
-	if err := b.ensureBucketWritable(bucket); err != nil {
-		return err
-	}
-	return b.sftpCopy(ctx, bucket, sourceKey, targetKey)
+	return runTrackedMutation(
+		ctx, "copy", bucket, sourceKey, targetKey, taskID, b.cfg.ProfileID,
+		func(operationCtx context.Context) error {
+			if err := b.ensureBucketWritable(bucket); err != nil {
+				return err
+			}
+			_ = isDirectory // SFTP copy preserves the provider's native source type.
+			return b.sftpCopy(operationCtx, bucket, sourceKey, targetKey)
+		},
+	)
 }
 
 func (b sftpBackend) MoveObject(
 	ctx context.Context,
 	bucket, sourceKey, targetKey string,
 	_ bool,
-	_ string,
+	taskID string,
 ) error {
-	if err := b.ensureBucketWritable(bucket); err != nil {
-		return err
-	}
-	client, sshConn, err := b.sftpClient(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = client.Close()
-		_ = sshConn.Close()
-	}()
-	return client.Rename(sftpRemotePath(sourceKey), sftpRemotePath(targetKey))
+	return runTrackedMutation(
+		ctx, "move", bucket, sourceKey, targetKey, taskID, b.cfg.ProfileID,
+		func(operationCtx context.Context) error {
+			if err := b.ensureBucketWritable(bucket); err != nil {
+				return err
+			}
+			client, sshConn, err := b.sftpClient(operationCtx)
+			if err != nil {
+				return err
+			}
+			defer func() {
+				_ = client.Close()
+				_ = sshConn.Close()
+			}()
+			return client.Rename(sftpRemotePath(sourceKey), sftpRemotePath(targetKey))
+		},
+	)
 }
 
 func (b sftpBackend) UploadFile(
@@ -219,6 +235,7 @@ func (b sftpBackend) UploadFile(
 		func(uploadCtx context.Context, body io.Reader) error {
 			return b.sftpStore(uploadCtx, key, body)
 		},
+		b.cfg.ProfileID,
 	)
 }
 
@@ -243,13 +260,23 @@ func (b sftpBackend) UploadReader(
 		func(uploadCtx context.Context, tracked io.Reader) error {
 			return b.sftpStore(uploadCtx, key, tracked)
 		},
+		b.cfg.ProfileID,
 	)
 }
 
 func (b sftpBackend) DownloadFile(
 	ctx context.Context,
-	_, key, localPath, _ string,
-) error {
+	bucket, key, localPath, taskID string,
+) (err error) {
+	var total int64
+	if taskID != "" {
+		if info, statErr := b.HeadObject(ctx, bucket, key); statErr == nil {
+			total = info.Size
+		}
+		var finish func(error)
+		ctx, finish = beginTrackedDownload(ctx, bucket, key, localPath, total, taskID, b.cfg.ProfileID)
+		defer func() { finish(err) }()
+	}
 	client, sshConn, err := b.sftpClient(ctx)
 	if err != nil {
 		return err
@@ -272,7 +299,11 @@ func (b sftpBackend) DownloadFile(
 		return err
 	}
 	defer out.Close()
-	_, err = io.Copy(out, r)
+	reader := io.Reader(r)
+	if taskID != "" {
+		reader = &trackedDownloadReader{ctx: ctx, reader: r, taskID: taskID}
+	}
+	_, err = io.Copy(out, reader)
 	return err
 }
 

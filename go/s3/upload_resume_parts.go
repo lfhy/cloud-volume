@@ -258,6 +258,10 @@ func uploadSinglePendingPart(
 	part pendingUploadPart,
 ) (resumablePartInfo, error) {
 	offset := int64(part.partNumber-1) * state.PartSize
+	totalParts := partCount(state.FileSize, state.PartSize)
+	if taskID != "" {
+		SetTransferCurrentPart(taskID, key, part.partNumber, totalParts, offset, part.size)
+	}
 	section := io.NewSectionReader(file, offset, part.size)
 	partInfo := resumablePartInfo{
 		PartNumber: part.partNumber,
@@ -277,7 +281,7 @@ func uploadSinglePendingPart(
 			body = &contextReadSeeker{
 				ctx:    attemptCtx,
 				reader: section,
-				onRead: func(n int) { advanceTransfer(taskID, int64(n)) },
+				onRead: func(n int) { AdvanceTransferCurrentPart(taskID, part.partNumber, int64(n)) },
 			}
 		}
 		partOut, err := client.UploadPart(attemptCtx, &s3.UploadPartInput{

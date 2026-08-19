@@ -278,7 +278,13 @@ class _RemoteHoverRow extends StatelessWidget {
           ],
           const SizedBox(width: 6),
           Text(
-            active ? '进行中' : _remoteStatus(task.status),
+            active
+                ? (task.isMountRead && task.mountReadRange.isNotEmpty
+                      ? '读取中'
+                      : task.phaseLabel.isNotEmpty
+                      ? task.phaseLabel
+                      : '进行中')
+                : _remoteStatus(task.status),
             style: TextStyle(
               fontSize: 10.5,
               color: active

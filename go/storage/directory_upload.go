@@ -28,6 +28,7 @@ func UploadDirectory(
 	prefix,
 	localPath,
 	taskID string,
+	profileIDs ...string,
 ) (err error) {
 	cleanPrefix := strings.Trim(strings.TrimSpace(prefix), "/")
 	if cleanPrefix != "" {
@@ -42,6 +43,9 @@ func UploadDirectory(
 	rootKey := cleanRemoteJoin(cleanPrefix, rootName)
 	if taskID != "" {
 		s3ops.StartQueuedTransfer(taskID, "upload", bucket, rootKey, localPath, 0, cancel)
+		if len(profileIDs) > 0 {
+			s3ops.SetTransferProfile(taskID, profileIDs[0])
+		}
 		s3ops.SetTransferStatusDetail(taskID, "scanning")
 		defer func() { s3ops.FinishQueuedTransfer(taskID, err) }()
 	}
@@ -52,7 +56,11 @@ func UploadDirectory(
 	if !rootInfo.IsDir() {
 		return fmt.Errorf("local path is not a directory: %s", localPath)
 	}
-	plan, err := planDirectoryUpload(ctx, localPath, cleanPrefix, taskID, bucket)
+	profileID := ""
+	if len(profileIDs) > 0 {
+		profileID = profileIDs[0]
+	}
+	plan, err := planDirectoryUpload(ctx, localPath, cleanPrefix, taskID, bucket, profileID)
 	if err != nil {
 		return err
 	}
@@ -70,7 +78,7 @@ func UploadDirectory(
 	if taskID != "" {
 		s3ops.SetTransferStatusDetail(taskID, "uploading")
 	}
-	return uploadDirectoryFiles(ctx, backend, bucket, plan.files, taskID)
+	return uploadDirectoryFiles(ctx, backend, bucket, plan.files, taskID, profileID)
 }
 
 func planDirectoryUpload(
@@ -78,7 +86,7 @@ func planDirectoryUpload(
 	localPath,
 	cleanPrefix,
 	taskID,
-	bucket string,
+	bucket, profileID string,
 ) (directoryUploadPlan, error) {
 	plan := directoryUploadPlan{}
 	err := filepath.WalkDir(localPath, func(currentPath string, entry os.DirEntry, walkErr error) error {
@@ -111,6 +119,9 @@ func planDirectoryUpload(
 		childTaskID := directoryUploadChildTaskID(taskID, remoteKey)
 		if childTaskID != "" {
 			s3ops.QueueTransfer(childTaskID, "upload", bucket, remoteKey, currentPath, info.Size())
+			if profileID != "" {
+				s3ops.SetTransferProfile(childTaskID, profileID)
+			}
 			s3ops.SetTransferStatusDetail(childTaskID, directoryChildStatusDetail)
 		}
 		plan.files = append(plan.files, directoryUploadFile{
@@ -160,7 +171,7 @@ func uploadDirectoryFiles(
 	backend Backend,
 	bucket string,
 	files []directoryUploadFile,
-	taskID string,
+	taskID, profileID string,
 ) error {
 	if len(files) == 0 {
 		return nil
@@ -190,6 +201,11 @@ func uploadDirectoryFiles(
 				}
 				if file.childID != "" {
 					s3ops.StartQueuedTransfer(file.childID, "upload", bucket, file.remoteKey, file.localPath, file.size, nil)
+					// The child snapshot is created during the worker phase; keep
+					// its profile aligned with the parent directory task.
+					if profileID != "" {
+						s3ops.SetTransferProfile(file.childID, profileID)
+					}
 					s3ops.SetTransferStatusDetail(file.childID, directoryChildStatusDetail)
 				}
 				if err := uploadDirectoryFileWithRetry(ctx, backend, bucket, file, taskID); err != nil {

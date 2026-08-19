@@ -429,6 +429,7 @@ class _TaskList extends StatelessWidget {
   String _subtitleFor(RemoteTask task) {
     final parts = <String>[
       if (task.operationPath.isNotEmpty) task.operationPath,
+      if (task.localPath.isNotEmpty) '本地：${task.localPath}',
     ];
     if (task.phaseDetail == 'selecting_path') {
       parts.add('等待选择保存位置');

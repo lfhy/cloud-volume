@@ -167,7 +167,7 @@ func (q *writebackQueue) restorePersistedMutations() error {
 		// reconciled rename executes, matching the live-queue semantics.
 		q.rebasePendingSourcesLocked(q.sourceRebases[len(q.sourceRebases)-1])
 		if access != nil {
-			beginMutationTransferTask(record, access.bucket, record.NewLocalPath)
+			beginMutationTransferTask(record, access.bucket, record.NewLocalPath, access.config.ProfileID)
 		}
 		live[id] = record
 		// Restored records carry no closure: the reconciler alone converges

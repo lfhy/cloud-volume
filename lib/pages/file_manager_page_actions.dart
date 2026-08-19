@@ -349,13 +349,32 @@ extension _FileManagerPageActions on _FileManagerPageState {
             newName == object.displayName) {
           return;
         }
-        await widget.api.renameObject(
-          _activeConfig,
-          _activeBucket!,
-          object.key,
-          object.isDir,
-          newName,
+        final trimmedKey = object.key.replaceFirst(RegExp(r'/+$'), '');
+        final slash = trimmedKey.lastIndexOf('/');
+        final targetPath = slash < 0
+            ? newName
+            : '${trimmedKey.substring(0, slash + 1)}$newName';
+        final task = TransferQueue.instance.startTask(
+          kind: TransferKind.move,
+          bucket: _activeBucket!,
+          key: object.key,
+          localPath: '',
+          targetPath: targetPath,
         );
+        try {
+          await widget.api.renameObject(
+            _activeConfig,
+            _activeBucket!,
+            object.key,
+            object.isDir,
+            newName,
+            taskId: task.id,
+          );
+          TransferQueue.instance.markTaskDone(task.id);
+        } catch (error) {
+          TransferQueue.instance.markTaskFailed(task.id, error);
+          rethrow;
+        }
         await FileAccessService.instance.evictCacheForObject(
           api: widget.api,
           config: _activeConfig,

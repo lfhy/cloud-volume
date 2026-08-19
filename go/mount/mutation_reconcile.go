@@ -24,10 +24,12 @@ import (
 func (a *bucketAccess) reconcileRemoteMove(
 	ctx context.Context,
 	record mutationRecord,
-) error {
+) (err error) {
 	if a == nil {
 		return fmt.Errorf("missing bucket access")
 	}
+	ctx, finishTransfer := a.beginMutationTransferAttempt(ctx, record)
+	defer func() { finishTransfer(err) }()
 	oldClean := cleanVirtualPath(record.OldVirtualPath)
 	newClean := cleanVirtualPath(record.NewVirtualPath)
 	if oldClean == "" || newClean == "" {
@@ -113,6 +115,41 @@ func (a *bucketAccess) reconcileRemoteMove(
 	return nil
 }
 
+// beginMutationTransferAttempt owns the whole reconcile pass so a copy plus
+// source cleanup remains one visible move task instead of two terminal rows.
+func (a *bucketAccess) beginMutationTransferAttempt(
+	ctx context.Context,
+	record mutationRecord,
+) (context.Context, func(error)) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if record.TaskID == "" {
+		return ctx, func(error) {}
+	}
+	if snapshot, exists := s3ops.GetTransferSnapshot(record.TaskID); exists && snapshot.Status == "running" {
+		s3ops.SetTransferProfile(record.TaskID, a.config.ProfileID)
+		s3ops.SetTransferTarget(record.TaskID, record.NewVirtualPath)
+		return ctx, func(error) {}
+	}
+	transferCtx, cancel := context.WithCancel(ctx)
+	s3ops.StartQueuedTransfer(
+		record.TaskID,
+		"move",
+		a.bucket,
+		record.OldVirtualPath,
+		record.NewLocalPath,
+		0,
+		cancel,
+	)
+	s3ops.SetTransferProfile(record.TaskID, a.config.ProfileID)
+	s3ops.SetTransferTarget(record.TaskID, record.NewVirtualPath)
+	return transferCtx, func(err error) {
+		s3ops.FinishQueuedTransfer(record.TaskID, err)
+		cancel()
+	}
+}
+
 // applyMutationSuccess updates local caches, peer knowledge, and broadcast
 // state after a verified remote move.
 func (a *bucketAccess) applyMutationSuccess(record mutationRecord) error {
@@ -165,7 +202,7 @@ func newMutationID() string {
 
 // beginMutationTransferTask registers (or re-registers after restore) the
 // shared transfer-monitor entry for a reconciled move.
-func beginMutationTransferTask(record mutationRecord, bucket, localPath string) {
+func beginMutationTransferTask(record mutationRecord, bucket, localPath, profileID string) {
 	if record.TaskID == "" {
 		return
 	}
@@ -173,10 +210,12 @@ func beginMutationTransferTask(record mutationRecord, bucket, localPath string) 
 		record.TaskID,
 		"move",
 		bucket,
-		record.NewVirtualPath,
+		record.OldVirtualPath,
 		localPath,
 		0,
 	)
+	s3ops.SetTransferProfile(record.TaskID, profileID)
+	s3ops.SetTransferTarget(record.TaskID, record.NewVirtualPath)
 	s3ops.SetTransferStatusDetail(record.TaskID, "sync_wait")
 }
 
