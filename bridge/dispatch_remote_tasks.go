@@ -441,6 +441,7 @@ func runtimeTaskWire(snapshot s3ops.TransferSnapshot) map[string]any {
 		"profileId":   snapshot.ProfileID,
 		"status":      status,
 		"phase":       phase,
+		"phaseDetail": phase,
 		"bucket":      snapshot.Bucket,
 		"sourcePath":  snapshot.Key,
 		"targetPath":  snapshot.TargetPath,

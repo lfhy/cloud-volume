@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:remote_storage/models/remote_task.dart';
+import 'package:remote_storage/models/remote_task_display.dart';
 import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/utils/bridge_error_text.dart';
 import 'package:remote_storage/utils/transfer_format.dart';
@@ -426,7 +427,9 @@ class _TaskList extends StatelessWidget {
   }
 
   String _subtitleFor(RemoteTask task) {
-    final parts = <String>[task.displayPath];
+    final parts = <String>[
+      if (task.operationPath.isNotEmpty) task.operationPath,
+    ];
     if (task.phaseDetail == 'selecting_path') {
       parts.add('等待选择保存位置');
     }
@@ -457,6 +460,8 @@ class _TaskList extends StatelessWidget {
             ? '当前文件 ${task.progress.currentKey}'
             : '当前文件 ${task.progress.currentKey}  $currentBytes',
       );
+    } else if (task.mountReadRange.isNotEmpty) {
+      parts.add('读取范围 ${task.mountReadRange}');
     } else if (task.targetPath.isNotEmpty) {
       parts.add(task.targetPath);
     }

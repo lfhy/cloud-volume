@@ -4,6 +4,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:remote_storage/models/remote_task.dart';
+import 'package:remote_storage/models/remote_task_display.dart';
 import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/widgets/app_tooltip.dart';
 import 'package:remote_storage/widgets/remote_task_widgets.dart';
@@ -242,7 +243,7 @@ class _RemoteHoverRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    final path = task.targetPath.isNotEmpty ? task.targetPath : task.sourcePath;
+    final path = task.operationPath;
     final active = task.status.isActive;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),

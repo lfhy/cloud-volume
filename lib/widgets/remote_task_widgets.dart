@@ -4,6 +4,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:remote_storage/models/remote_task.dart';
+import 'package:remote_storage/models/remote_task_display.dart';
 import 'package:remote_storage/theme/list_interaction_colors.dart';
 import 'package:remote_storage/utils/transfer_format.dart';
 import 'package:remote_storage/widgets/app_tooltip.dart';
@@ -177,9 +178,7 @@ class _TaskText extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final action = _kindLabel(task.kind);
-    final target = task.targetPath.isNotEmpty
-        ? task.targetPath
-        : task.sourcePath;
+    final target = task.operationPath;
     final subtitle = _taskSubtitle(task);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -302,7 +301,10 @@ class _TaskDetails extends StatelessWidget {
         children: [
           if (task.blockedReason.isNotEmpty)
             _detailLine('依赖', task.blockedReason),
-          if (task.phaseDetail.isNotEmpty) _detailLine('阶段', task.phaseDetail),
+          if (task.mountReadRange.isNotEmpty)
+            _detailLine('读取范围', task.mountReadRange)
+          else if (task.phaseDetail.isNotEmpty)
+            _detailLine('阶段', task.phaseDetail),
           if (task.error.isNotEmpty) _detailLine('错误', task.error),
           if (task.remoteOutcome.isNotEmpty)
             _detailLine('远端结果', task.remoteOutcome),
@@ -375,6 +377,14 @@ String _taskSubtitle(RemoteTask task) {
     return '将在 ${task.nextRetryAt} 重试';
   }
   if (task.error.isNotEmpty) return task.error;
+  if (task.isMountRead) {
+    final parts = <String>[
+      if (task.mountReadRange.isNotEmpty) '读取范围 ${task.mountReadRange}',
+      if (task.progress.totalBytes > 0)
+        '${formatBytes(task.progress.bytesCompleted)} / ${formatBytes(task.progress.totalBytes)}',
+    ];
+    return parts.isEmpty ? '挂载读取' : parts.join(' · ');
+  }
   if (task.progress.totalBytes > 0) {
     return '${formatBytes(task.progress.bytesCompleted)} / ${formatBytes(task.progress.totalBytes)}';
   }

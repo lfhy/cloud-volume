@@ -1,6 +1,7 @@
 // RemoteTaskStore tests ensure endpoint failures never resurrect legacy rows.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:remote_storage/models/remote_task.dart';
+import 'package:remote_storage/models/remote_task_display.dart';
 import 'package:remote_storage/services/remote_storage_api.dart';
 import 'package:remote_storage/state/remote_task_store.dart';
 
@@ -170,6 +171,21 @@ void main() {
       RemoteTaskStatus.done,
     );
     expect(RemoteTaskStore.instance.cancelLocalTask('missing'), isFalse);
+  });
+
+  test('mount reads retain their object path and byte range', () {
+    final task = RemoteTask.fromJson(const <String, dynamic>{
+      'id': 'transfer:mount-read-1',
+      'kind': 'download',
+      'status': 'done',
+      'sourcePath': 'root/charge.tar',
+      'targetPath': 'bytes=1048576-1572863',
+      // Older bridge versions sent the detail only through phase.
+      'phase': 'mount_read',
+    });
+    expect(task.isMountRead, isTrue);
+    expect(task.operationPath, 'root/charge.tar');
+    expect(task.mountReadRange, 'bytes=1048576-1572863');
   });
 }
 

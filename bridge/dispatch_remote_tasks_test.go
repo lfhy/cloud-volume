@@ -34,3 +34,17 @@ func TestRuntimeTaskWireCarriesProfileAndPhysicalProgress(t *testing.T) {
 		t.Fatalf("runtime progress = %#v", wire["progress"])
 	}
 }
+
+func TestRuntimeTaskWireKeepsMountReadFileAndRangeDistinct(t *testing.T) {
+	wire := runtimeTaskWire(s3ops.TransferSnapshot{
+		ID: "mount-read-1", Type: "download", Bucket: "bucket-a",
+		Key: "root/charge.tar", TargetPath: "bytes=1048576-1572863",
+		Status: "done", StatusDetail: "mount_read",
+	})
+	if wire["sourcePath"] != "root/charge.tar" || wire["targetPath"] != "bytes=1048576-1572863" {
+		t.Fatalf("mount-read paths = %#v", wire)
+	}
+	if wire["phaseDetail"] != "mount_read" {
+		t.Fatalf("mount-read phase detail = %#v", wire["phaseDetail"])
+	}
+}

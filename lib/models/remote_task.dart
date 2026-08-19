@@ -285,8 +285,9 @@ class RemoteTask {
       targetPath: (json['targetPath'] ?? '').toString(),
       displayPath: (json['displayPath'] ?? '').toString(),
       phase: _phaseFromWire(json['phase']),
-      phaseDetail: (json['phaseDetail'] ?? json['statusDetail'] ?? '')
-          .toString(),
+      phaseDetail:
+          (json['phaseDetail'] ?? json['statusDetail'] ?? json['phase'] ?? '')
+              .toString(),
       blockedReason: (json['blockedReason'] ?? '').toString(),
       error: (json['error'] ?? json['lastError'] ?? '').toString(),
       createdAt: (json['createdAt'] ?? '').toString(),

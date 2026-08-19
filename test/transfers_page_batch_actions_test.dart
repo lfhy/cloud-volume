@@ -132,6 +132,46 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     RemoteTaskStore.instance.resetForTest();
   });
+
+  testWidgets('mount reads show the file path and byte range', (tester) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _TransfersPageFakeApi();
+    api.tasks.add(
+      const RemoteTask(
+        id: 'transfer:mount-read-1',
+        kind: RemoteTaskKind.download,
+        status: RemoteTaskStatus.done,
+        source: RemoteTaskSource.runtime,
+        sourcePath: 'root/charge.tar',
+        targetPath: 'bytes=1048576-1572863',
+        displayPath: 'root/charge.tar',
+        phaseDetail: 'mount_read',
+        progress: RemoteTaskProgress(
+          bytesCompleted: 524288,
+          totalBytes: 405169152,
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Material(
+          child: TransfersPage(api: api, config: RemoteStorageConfig.empty()),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('下载 root/charge.tar'), findsOneWidget);
+    expect(find.textContaining('读取范围 bytes=1048576-1572863'), findsOneWidget);
+    expect(find.text('下载 bytes=1048576-1572863'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    RemoteTaskStore.instance.resetForTest();
+  });
 }
 
 class _TransfersPageFakeApi implements RemoteStorageGateway {
