@@ -214,7 +214,7 @@ func (s *Service) commitConfirmation(inode, confirmedSeq, parent uint64, name, f
 		if fingerprint != "" {
 			record.RemoteFingerprint = fingerprint
 		}
-		if strings.TrimSpace(lastModified) != "" {
+		if strings.TrimSpace(lastModified) != "" && !hasLaterUnsettledWrite(tx, inode, confirmedSeq) {
 			record.MTime = lastModified
 		}
 		// A write can confirm its old Remote edge while a later rename/delete is
@@ -242,6 +242,29 @@ func hasLaterPendingOp(tx boltTxT, inode, confirmedSeq uint64) bool {
 			continue
 		}
 		if op.State == OpStatePending || op.State == OpStateRunning || op.State == OpStateReconciling || op.State == OpStateVerifying || op.State == OpStateCancelRequested {
+			return true
+		}
+	}
+	return false
+}
+
+// hasLaterUnsettledWrite preserves the local mtime for a newer generation
+// until that exact write has either confirmed or been explicitly canceled.
+func hasLaterUnsettledWrite(tx boltTxT, inode, confirmedSeq uint64) bool {
+	index := tx.Bucket([]byte(bucketInodeOps))
+	journal := tx.Bucket([]byte(bucketJournal))
+	prefix := encodeUint64(inode)
+	cursor := index.Cursor()
+	for key, _ := cursor.Seek(prefix); key != nil && bytes.HasPrefix(key, prefix); key, _ = cursor.Next() {
+		seq := decodeUint64(key[8:])
+		if seq <= confirmedSeq {
+			continue
+		}
+		var op Op
+		if decodeJSON(journal.Get(encodeUint64(seq)), &op) != nil {
+			continue
+		}
+		if op.Type == OpWrite && opStateUnsettled(op.State) {
 			return true
 		}
 	}
