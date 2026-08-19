@@ -21,13 +21,14 @@ var workerVerificationTimeout = 45 * time.Second
 
 // Worker executes pending journal operations against one backend.
 type Worker struct {
-	service *Service
-	mu      sync.Mutex
-	wake    chan struct{}
-	stop    chan struct{}
-	done    chan struct{}
-	running map[uint64]struct{}
-	cancels map[uint64]context.CancelFunc
+	service   *Service
+	mu        sync.Mutex
+	executeMu sync.Mutex
+	wake      chan struct{}
+	stop      chan struct{}
+	done      chan struct{}
+	running   map[uint64]struct{}
+	cancels   map[uint64]context.CancelFunc
 }
 
 // NewWorker starts one drain goroutine for a metadata service.
@@ -76,6 +77,13 @@ func (w *Worker) Drain(ctx context.Context) error {
 		}
 		if failed > 0 {
 			return fmt.Errorf("metadata worker: %d failed operations", failed)
+		}
+		if running > 0 {
+			// Another complete pass owns the provider call. Do not block on its
+			// pass mutex here: Drain must continue polling its own context while
+			// a background request is in flight.
+			w.sleepUntil(minTime(time.Now().Add(workerPoll), deadline))
+			continue
 		}
 		if running == 0 && !due && !next.IsZero() && next.After(time.Now()) && time.Now().Before(deadline) {
 			w.sleepUntil(minTime(next, deadline))
@@ -193,6 +201,11 @@ func (w *Worker) runDueOnceIgnoringRemoteQuiet(ctx context.Context) {
 }
 
 func (w *Worker) runDueOnceWithOptions(ctx context.Context, ignoreRemoteQuiet bool) {
+	// Drain can run while the background loop wakes. Serialize complete passes,
+	// not just claims, so independent replacement delete/move events retain
+	// their journal order at the provider.
+	w.executeMu.Lock()
+	defer w.executeMu.Unlock()
 	w.service.operationMu.RLock()
 	defer w.service.operationMu.RUnlock()
 	ops := w.claimDueWithOptions(ignoreRemoteQuiet)
