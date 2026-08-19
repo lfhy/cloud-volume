@@ -98,6 +98,7 @@ type Inode struct {
 	RemoteName        string `json:"remoteName"`
 	Size              int64  `json:"size"`
 	MTime             string `json:"mtime"`
+	RemoteMTime       string `json:"remoteMtime,omitempty"`
 	LocalRevision     uint64 `json:"localRevision"`
 	RemoteFingerprint string `json:"remoteFingerprint"`
 	State             State  `json:"state"`

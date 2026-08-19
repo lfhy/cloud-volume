@@ -214,8 +214,11 @@ func (s *Service) commitConfirmation(inode, confirmedSeq, parent uint64, name, f
 		if fingerprint != "" {
 			record.RemoteFingerprint = fingerprint
 		}
-		if strings.TrimSpace(lastModified) != "" && !hasLaterUnsettledWrite(tx, inode, confirmedSeq) {
-			record.MTime = lastModified
+		if strings.TrimSpace(lastModified) != "" {
+			record.RemoteMTime = lastModified
+			if !hasLaterUnsettledWrite(tx, inode, confirmedSeq) {
+				record.MTime = lastModified
+			}
 		}
 		// A write can confirm its old Remote edge while a later rename/delete is
 		// still pending. Keep that Desired intent visible so a refresh cannot

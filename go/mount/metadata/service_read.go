@@ -70,7 +70,7 @@ func (s *Service) MaterializeDirectory(ctx context.Context, dirInode uint64) err
 			record := Inode{
 				ID: inode, Kind: KindFile, DesiredParentID: dirInode,
 				DesiredName: name, RemoteParentID: dirInode, RemoteName: name,
-				Size: item.Size, MTime: item.LastModified, ETag: item.ETag,
+				Size: item.Size, MTime: item.LastModified, RemoteMTime: item.LastModified, ETag: item.ETag,
 				RemoteFingerprint: Fingerprint(item), State: StateSynced,
 			}
 			if isDir {
@@ -94,6 +94,9 @@ func (s *Service) MaterializeDirectory(ctx context.Context, dirInode uint64) err
 					record.Kind = KindDirectory
 				}
 				record.RemoteParentID, record.RemoteName = dirInode, name
+				if item.LastModified != "" {
+					record.RemoteMTime = item.LastModified
+				}
 				record.ETag = item.ETag
 				record.RemoteFingerprint = Fingerprint(item)
 				record.DesiredParentID, record.DesiredName, record.State = desiredParent, desiredName, state

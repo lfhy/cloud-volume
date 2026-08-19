@@ -126,6 +126,11 @@ func (s *Service) Write(parent uint64, name string, ref ContentRef, opts WriteOp
 		if record.Kind == KindDirectory {
 			return ErrCollision
 		}
+		// Existing databases predating RemoteMTime can still recover a canceled
+		// overwrite from their last visible, confirmed timestamp.
+		if record.RemoteMTime == "" && record.State == StateSynced && record.RemoteParentID != 0 {
+			record.RemoteMTime = record.MTime
+		}
 		record.Kind = KindFile
 		record.DesiredParentID, record.DesiredName = parent, name
 		record.Size, record.MTime = ref.Size, opts.MTime
