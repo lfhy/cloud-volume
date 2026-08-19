@@ -28,8 +28,16 @@ func (s *Service) RefreshDirectory(ctx context.Context, path string) ([]Object, 
 	if err != nil {
 		return nil, err
 	}
-	if err := s.MaterializeDirectory(ctx, inode); err != nil {
+	// Polling is an explicit remote refresh only for directories that already
+	// have a confirmed provider edge. A local-only mkdir has no remote path yet.
+	localOnly, err := s.isLocalOnlyDirectory(inode)
+	if err != nil {
 		return nil, err
+	}
+	if !localOnly {
+		if err := s.MaterializeDirectory(ctx, inode); err != nil {
+			return nil, err
+		}
 	}
 	return s.listDirectoryInode(ctx, inode)
 }

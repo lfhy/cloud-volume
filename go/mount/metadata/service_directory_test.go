@@ -12,6 +12,20 @@ import (
 
 type deepListingBackend struct{ *fakeBackend }
 
+type countingListingBackend struct {
+	*fakeBackend
+	listCalls int
+}
+
+func (b *countingListingBackend) ListObjectsPage(
+	ctx context.Context,
+	bucket, prefix, token string,
+	pageSize int32,
+) (storageops.ObjectPage, error) {
+	b.listCalls++
+	return b.fakeBackend.ListObjectsPage(ctx, bucket, prefix, token, pageSize)
+}
+
 func (b *deepListingBackend) ListObjectsPage(
 	_ context.Context,
 	_ string,
@@ -67,5 +81,24 @@ func TestMaterializeDirectoryRejectsDeepListingEntries(t *testing.T) {
 	sort.Slice(items, func(i, j int) bool { return items[i].Key < items[j].Key })
 	if len(items) != 1 || items[0].Key != "dir/child.txt" {
 		t.Fatalf("deep child entry was flattened: %+v", items)
+	}
+}
+
+func TestRefreshDirectoryKeepsUnconfirmedDirectoryLocal(t *testing.T) {
+	backend := &countingListingBackend{fakeBackend: newFakeBackend()}
+	service := newTestService(t, backend)
+	if _, err := service.CreateDirectory(rootInode, "draft", WriteOptions{}); err != nil {
+		t.Fatalf("create local directory: %v", err)
+	}
+
+	items, err := service.RefreshDirectory(context.Background(), "draft")
+	if err != nil {
+		t.Fatalf("refresh local-only directory: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("local-only directory items = %+v, want empty", items)
+	}
+	if backend.listCalls != 0 {
+		t.Fatalf("provider listings = %d, want 0 for an unconfirmed directory", backend.listCalls)
 	}
 }

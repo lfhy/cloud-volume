@@ -279,24 +279,38 @@ func (s *Service) ListPage(ctx context.Context, dirInode uint64, token string, p
 }
 
 func (s *Service) ensureMaterialized(ctx context.Context, dirInode uint64, revision uint64) error {
-	materialized, localOnly := false, false
-	_ = s.store.view(func(tx *bolt.Tx) error {
-		record, err := getInode(tx, dirInode)
-		if err != nil {
-			return err
-		}
-		// A newly created directory has no provider edge yet. Its desired
-		// dirents are authoritative until the mkdir worker confirms it, so a
-		// nested Finder copy must not try to list a remote path that cannot exist.
-		localOnly = record.Kind == KindDirectory && record.ID != rootInode && record.RemoteParentID == 0 && record.RemoteName == ""
+	localOnly, err := s.isLocalOnlyDirectory(dirInode)
+	if err != nil {
+		return err
+	}
+	materialized := false
+	err = s.store.view(func(tx *bolt.Tx) error {
 		state, err := getListingState(tx, dirInode)
 		materialized = err == nil && state.Materialized && (revision == 0 || state.Revision == revision)
 		return nil
 	})
+	if err != nil {
+		return err
+	}
 	if materialized || localOnly {
 		return nil
 	}
 	return s.MaterializeDirectory(ctx, dirInode)
+}
+
+// isLocalOnlyDirectory identifies a Desired directory that has not acquired a
+// provider edge yet. Its local dirents are authoritative until mkdir confirms.
+func (s *Service) isLocalOnlyDirectory(dirInode uint64) (bool, error) {
+	localOnly := false
+	err := s.store.view(func(tx *bolt.Tx) error {
+		record, err := getInode(tx, dirInode)
+		if err != nil {
+			return err
+		}
+		localOnly = record.Kind == KindDirectory && record.ID != rootInode && record.RemoteParentID == 0 && record.RemoteName == ""
+		return nil
+	})
+	return localOnly, err
 }
 
 func (s *Service) resolvePath(ctx context.Context, path string) (uint64, error) {
