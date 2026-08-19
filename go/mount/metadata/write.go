@@ -4,8 +4,6 @@ package metadata
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -396,31 +394,6 @@ func expectedFingerprint(record Inode) string {
 func oldParent(record Inode) uint64 { return record.RemoteParentID }
 
 func nowUnix() int64 { return time.Now().UnixNano() }
-
-func syncFileAndParent(path string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	syncErr := file.Sync()
-	closeErr := file.Close()
-	if syncErr != nil {
-		return syncErr
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	dir, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	syncErr = dir.Sync()
-	closeErr = dir.Close()
-	if syncErr != nil {
-		return syncErr
-	}
-	return closeErr
-}
 
 func contentRefKey(inode, generation uint64) []byte {
 	return inodeOpKey(inode, generation)

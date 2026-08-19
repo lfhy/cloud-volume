@@ -104,6 +104,8 @@ Journal(seq -> op)  ──►  Remote Sync Worker(定期/静默期/退出前排�
 
 元数据数据库不放在用户可清理的 `CacheDirectory`，也不复用 `config.db`：使用 `RuntimeDir()/metadata/v1/<namespace-hash>/metadata.db`。未同步内容的数据面与元数据分离，固定 4 MiB SHA-256 块位于 `<CacheDirectory>/metadata-chunks/<namespace-hash>/chunks/<hash[:2]>/<hash>`；bbolt 的引用计数才是权威。每个 namespace 同时原子发布 `protection.json`，同一次多块暂存必须累积全部尚未提交的 hash；缓存清理读取失败时保守保护全部块，因此 pending 块不会被“清理缓存”删除。
 
+块落盘先同步文件、rename 到 hash 路径、再同步最终目录，随后才能提交 bbolt 引用。`tmp/` 源目录的 rename 后清理可由启动 sweep 恢复，不为每块额外同步；逐块发布的 cumulative `protection.json` 已覆盖所有 prospective hash，因此 ref 提交前不重复写同一份 manifest。失败会将 manifest 收敛回 bbolt 的精确引用集，残留 orphan 块可由清理或启动 sweep 回收。
+
 首次创建时把实际 chunk root 写入 schema；后续用户修改 CacheDirectory 也继续读取该根直到显式迁移，避免未同步内容因设置变更而丢失。
 
 `<namespace-hash>` 不能继续使用当前 `safeSegment(bucket)`：它会把不同名字（例如 `a/b` 与 `a_b`）折叠到同一目录，也没有 account/rootPrefix 身份。需要引入不可变 `ProfileID`，并以 `ProfileID + canonical backend identity + bucket + rootPrefix` 派生 namespace；改 display name 或 profile name 不得换库，改变 endpoint/bucket/rootPrefix 则必须显式创建或迁移一个新 namespace。

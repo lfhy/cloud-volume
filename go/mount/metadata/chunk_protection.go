@@ -85,11 +85,12 @@ func (s *Service) writeChunkProtection(chunks map[string]int64) error {
 		_ = os.Remove(tempPath)
 		return err
 	}
-	if err := temp.Close(); err != nil {
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
 		_ = os.Remove(tempPath)
 		return err
 	}
-	if err := syncFileAndParent(tempPath); err != nil {
+	if err := temp.Close(); err != nil {
 		_ = os.Remove(tempPath)
 		return err
 	}
@@ -97,5 +98,6 @@ func (s *Service) writeChunkProtection(chunks map[string]int64) error {
 		_ = os.Remove(tempPath)
 		return err
 	}
+	// Temp and final live in root, so this one parent sync persists the rename.
 	return syncDirectory(root)
 }

@@ -138,6 +138,63 @@ func TestStagingProtectsEveryUncommittedChunk(t *testing.T) {
 	}
 }
 
+func TestCommittedChunksStayProtectedDuringCacheClear(t *testing.T) {
+	service := newTestService(t, newFakeBackend())
+	ref, err := service.StageWrite(2, 1, strings.NewReader("committed pending content"), 25)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ref.Chunks) != 1 {
+		t.Fatalf("chunk count = %d, want 1", len(ref.Chunks))
+	}
+	result, err := storageconfig.CleanCache(
+		storageconfig.RemoteStorageConfig{CacheDirectory: service.store.chunkRoot},
+		storageconfig.CleanCacheRequest{ClearAll: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SkippedProtected != 1 {
+		t.Fatalf("clear result = %+v, want one protected chunk", result)
+	}
+	if _, err := os.Stat(service.chunkPath(ref.Chunks[0])); err != nil {
+		t.Fatalf("cache cleanup removed committed chunk: %v", err)
+	}
+}
+
+func TestStageWriteFailureRestoresExactChunkProtection(t *testing.T) {
+	service := newTestService(t, newFakeBackend())
+	payload := []byte("size mismatch")
+	if _, err := service.StageWrite(2, 1, bytes.NewReader(payload), 0); err == nil {
+		t.Fatal("expected staged size mismatch")
+	}
+	data, err := os.ReadFile(service.chunkProtectionPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest chunkProtection
+	if err := decodeJSON(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Chunks) != 0 {
+		t.Fatalf("failed staging left prospective protection: %+v", manifest)
+	}
+	sum := sha256.Sum256(payload)
+	hash := fmt.Sprintf("%x", sum)
+	if _, err := os.Stat(service.chunkPath(hash)); err != nil {
+		t.Fatalf("expected orphan before cache cleanup: %v", err)
+	}
+	if _, err := storageconfig.CleanCache(
+		storageconfig.RemoteStorageConfig{CacheDirectory: service.store.chunkRoot},
+		storageconfig.CleanCacheRequest{ClearAll: true},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(service.chunkPath(hash)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cleanup retained unprotected orphan chunk: %v", err)
+	}
+}
+
 func TestStartupSweepDropsUncommittedChunkFiles(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "runtime")
 	cacheRoot := filepath.Join(t.TempDir(), "cache")

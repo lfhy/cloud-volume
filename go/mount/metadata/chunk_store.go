@@ -146,11 +146,12 @@ func (s *Service) writeChunkLocked(hash string, block []byte) error {
 		_ = os.Remove(tempPath)
 		return err
 	}
-	if err := temp.Close(); err != nil {
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
 		_ = os.Remove(tempPath)
 		return err
 	}
-	if err := syncFileAndParent(tempPath); err != nil {
+	if err := temp.Close(); err != nil {
 		_ = os.Remove(tempPath)
 		return err
 	}
@@ -158,32 +159,26 @@ func (s *Service) writeChunkLocked(hash string, block []byte) error {
 		_ = os.Remove(tempPath)
 		return err
 	}
+	// The temporary source is recoverable; syncing the final parent makes the
+	// already-synced chunk visible and durable before bbolt can reference it.
 	return syncDirectory(filepath.Dir(finalPath))
 }
 
 // replaceContentRefLocked records a new generation and balances references for
-// any generation it replaces. The protection manifest is written first as a
-// conservative superset, so cache cleanup cannot race the bbolt transaction.
+// any generation it replaces. stageChunksLocked has already published every
+// prospective hash in a conservative manifest before this transaction begins.
 func (s *Service) replaceContentRefLocked(ref ContentRef, sizes []int64) error {
 	if len(ref.Chunks) != len(sizes) {
 		return fmt.Errorf("metadata: chunk hashes and sizes differ")
 	}
-	protection, err := s.chunkProtectionSnapshot()
-	if err != nil {
-		return err
-	}
-	for index, hash := range ref.Chunks {
+	for _, hash := range ref.Chunks {
 		if !validChunkHash(hash) {
 			return fmt.Errorf("metadata: invalid chunk hash %q", hash)
 		}
-		protection[hash] = sizes[index]
-	}
-	if err := s.writeChunkProtection(protection); err != nil {
-		return err
 	}
 
 	var remove []string
-	err = s.store.update(func(tx boltTxT) error {
+	err := s.store.update(func(tx boltTxT) error {
 		refs := tx.Bucket([]byte(bucketContentRefs))
 		var previous ContentRef
 		if raw := refs.Get(contentRefKey(ref.Inode, ref.Generation)); raw != nil {
