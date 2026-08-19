@@ -43,7 +43,6 @@ extension TransferQueueRemoteTasks on TransferQueue {
       createdAt: task.createdAt,
       updatedAt: DateTime.now().toUtc().toIso8601String(),
       retryCount: 0,
-      cancelable: task.isCancelable,
       // Local producers retain their execution closure rather than a
       // replayable request payload, so only cancellation/trigger is safe.
       retryable: false,
@@ -56,6 +55,9 @@ extension TransferQueueRemoteTasks on TransferQueue {
         speedBytes: task.speedBytes,
         currentKey: task.currentFileKey,
       ),
+      // Metadata-backed page mutations are already controlled by the Go
+      // journal; this compatibility snapshot must never offer a fake cancel.
+      cancelable: task.publishRemoteTask && task.isCancelable,
     );
   }
 
@@ -74,7 +76,10 @@ extension TransferQueueRemoteTasks on TransferQueue {
 
   Future<bool> _cancelRemoteTask(String taskId) async {
     final id = taskId.replaceFirst('transfer:', '');
-    if (!_canCancelTask(_taskById(id))) return false;
+    final task = _taskById(id);
+    if (task == null || !task.publishRemoteTask || !_canCancelTask(task)) {
+      return false;
+    }
     await cancelTask(id);
     return true;
   }

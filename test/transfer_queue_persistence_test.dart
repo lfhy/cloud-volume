@@ -1,6 +1,7 @@
 // Transfer queue persistence tests verify restart recovery for finished and interrupted tasks.
 
 import 'package:flutter_test/flutter_test.dart';
+import 'dart:convert';
 import 'package:remote_storage/state/transfer_queue.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -75,4 +76,38 @@ void main() {
       expect(queue.tasks, isEmpty);
     },
   );
+
+  test(
+    'invalidates pre-v2 persisted rows that lack ownership metadata',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'transfer_queue.tasks.v1': jsonEncode([
+          <String, dynamic>{
+            'id': 'legacy-page-move',
+            'kind': 'move',
+            'bucket': 'bucket-a',
+            'key': 'old.txt',
+            'targetPath': 'new.txt',
+            'status': 'done',
+          },
+        ]),
+      });
+      final queue = TransferQueue.instance;
+      await queue.restorePersistedStateForTest();
+
+      expect(queue.tasks, isEmpty);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.containsKey('transfer_queue.tasks.v1'), isFalse);
+    },
+  );
+
+  test('cleans a stale v1 key even when v2 data already exists', () async {
+    SharedPreferences.setMockInitialValues({
+      'transfer_queue.tasks.v1': '[]',
+      'transfer_queue.tasks.v2': '[]',
+    });
+    await TransferQueue.instance.restorePersistedStateForTest();
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.containsKey('transfer_queue.tasks.v1'), isFalse);
+  });
 }

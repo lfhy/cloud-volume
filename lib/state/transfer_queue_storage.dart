@@ -3,7 +3,8 @@
 part of 'transfer_queue.dart';
 
 const Duration _persistDebounce = Duration(milliseconds: 400);
-const String _storageKey = 'transfer_queue.tasks.v1';
+const String _storageKey = 'transfer_queue.tasks.v2';
+const String _legacyStorageKey = 'transfer_queue.tasks.v1';
 const int _persistedTaskLimit = 200;
 const String _interruptedTaskMessage = '应用上次关闭前该任务未完成，请重新发起。';
 
@@ -37,6 +38,8 @@ Future<void> loadPersistedTransferQueueStateData(TransferQueue queue) async {
   }
   final prefs = await SharedPreferences.getInstance();
   final raw = prefs.getString(_storageKey);
+  // v1 rows predate the producer ownership bit and are never safe to keep.
+  await prefs.remove(_legacyStorageKey);
   if (raw == null || raw.isEmpty) {
     return;
   }

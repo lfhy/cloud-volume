@@ -36,6 +36,7 @@ void main() {
       );
 
       expect(find.text('取消更新'), findsNothing);
+      expect(find.text('一键更新'), findsNothing);
       expect(find.text('GitHub 下载'), findsOneWidget);
     },
   );

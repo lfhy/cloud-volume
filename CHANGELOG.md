@@ -3,6 +3,7 @@
 ## Unreleased
 
 - 统一任务队列修复：metadata journal 接管的页面上传、移动、重命名和删除不再与 Dart 兼容执行任务重复展示；上传/删除进度弹窗仍保留临时执行快照。应用更新进入不可逆安装阶段后会隐藏取消并拒绝无效取消请求。
+- 兼容队列升级：metadata 页面操作的临时执行快照不再伪装成可取消任务；旧版 `transfer_queue.tasks.v1` 会在升级时失效，避免重启后再次显示无法归属的重复页面操作。
 
 - Unified physical task projection now preserves profile ownership across legacy mount/non-S3 uploads, downloads, copies, moves, and deletes; it reports operation-specific phases, local destinations, current-file and multipart ranges, and excludes resumed bytes from throughput estimates. Page renames now use the tracked move path. App-update tasks now show their asset name and become non-cancelable once installation starts.
 - Fixed mounted-file read history showing `bytes=...` as the task path. It now shows the remote file path with the exact requested byte range as supporting detail across desktop and Web task projections, including profile-scoped Web task requests.

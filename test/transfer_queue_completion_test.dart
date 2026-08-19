@@ -88,7 +88,7 @@ void main() {
 
   test(
     'metadata upload keeps transient progress outside the main task list',
-    () {
+    () async {
       final task = TransferQueue.instance.startTask(
         id: 'metadata-page-upload',
         kind: TransferKind.upload,
@@ -100,6 +100,17 @@ void main() {
 
       expect(RemoteTaskStore.instance.tasks, isEmpty);
       expect(RemoteTaskStore.instance.hasActiveFileTransfers, isTrue);
+      expect(
+        RemoteTaskStore.instance
+            .executionTask('transfer:${task.id}')
+            ?.cancelable,
+        isFalse,
+      );
+      expect(
+        await RemoteTaskStore.instance.cancel('transfer:${task.id}'),
+        isFalse,
+      );
+      expect(TransferQueue.instance.statusOf(task.id), TransferStatus.pending);
       expect(
         RemoteTaskStore.instance.executionTask('transfer:${task.id}'),
         isNotNull,

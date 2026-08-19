@@ -45,6 +45,7 @@ class BatchTaskProgressDialog extends StatelessWidget {
           if (task != null) tasksById[id] = task;
         }
         final tasks = tasksById.values.toList(growable: false);
+        final canCancel = tasks.any((task) => task.cancelable);
         final finishedCount = tasks
             .where((task) => !task.status.isActive)
             .length;
@@ -140,11 +141,12 @@ class BatchTaskProgressDialog extends StatelessWidget {
                             child: const Text('关闭'),
                           )
                         else ...[
-                          ShadButton.destructive(
-                            onPressed: () => _cancelActiveTasks(tasks),
-                            child: Text(resolvedMode.cancelLabel),
-                          ),
-                          const SizedBox(width: 10),
+                          if (canCancel)
+                            ShadButton.destructive(
+                              onPressed: () => _cancelActiveTasks(tasks),
+                              child: Text(resolvedMode.cancelLabel),
+                            ),
+                          if (canCancel) const SizedBox(width: 10),
                           ShadButton(
                             onPressed: onRunInBackground,
                             child: const Text('后台运行'),

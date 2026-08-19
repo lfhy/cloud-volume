@@ -183,8 +183,8 @@ class UpdateStatusRow extends StatelessWidget {
                 const Text('取消更新'),
               ],
             ),
-          )
-        else if (canInstallInApp)
+          ),
+        if (!installing && canInstallInApp)
           ShadButton(
             onPressed: onInstall,
             child: Row(

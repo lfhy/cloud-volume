@@ -148,10 +148,8 @@ void main() {
     await tester.pump();
 
     expect(find.text('draft.txt'), findsOneWidget);
-    expect(find.text('取消上传'), findsOneWidget);
-    await tester.tap(find.text('取消上传'));
-    await tester.pump();
-    expect(TransferQueue.instance.statusOf(task.id), TransferStatus.canceled);
+    expect(find.text('取消上传'), findsNothing);
+    expect(find.text('后台运行'), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 500));
     await tester.pumpWidget(const SizedBox.shrink());
   });
