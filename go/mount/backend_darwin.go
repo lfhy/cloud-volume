@@ -16,6 +16,11 @@ const managedMountPrefix = "云卷-"
 
 type macOSWebDAVBackend struct{}
 
+var (
+	probeExactWebDAVMountActive = isExactWebDAVMountActive
+	probePathWebDAVMountActive  = isWebDAVMountActive
+)
+
 func newPlatformMountBackend(_ storageconfig.RemoteStorageConfig) (mountBackend, error) {
 	return &macOSWebDAVBackend{}, nil
 }
@@ -40,7 +45,13 @@ func (b *macOSWebDAVBackend) Stop(session *mountSession) error {
 }
 
 func (b *macOSWebDAVBackend) IsActive(session *mountSession) (bool, error) {
-	return isWebDAVMountActive(session.mountTarget)
+	if session != nil && session.mountAttempted && !session.mounted {
+		if strings.TrimSpace(session.serverURL) == "" {
+			return false, nil
+		}
+		return probeExactWebDAVMountActive(session.serverURL, session.mountTarget)
+	}
+	return probePathWebDAVMountActive(session.mountTarget)
 }
 
 func (b *macOSWebDAVBackend) CleanupStale(session *mountSession) error {

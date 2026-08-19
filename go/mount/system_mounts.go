@@ -21,6 +21,16 @@ func isWebDAVMountActive(mountPath string) (bool, error) {
 	return mountOutputContainsPath(string(output), mountPath), nil
 }
 
+// isExactWebDAVMountActive verifies both the mount point and the loopback URL
+// that owns it. It is required while a failed attempt is still being retained.
+func isExactWebDAVMountActive(serverURL, mountPath string) (bool, error) {
+	entries, err := listWebDAVMountEntries()
+	if err != nil {
+		return false, err
+	}
+	return findMountedWebDAVPath(serverURL, mountPath, entries) != "", nil
+}
+
 // mountEntry pairs a WebDAV volume's source URL with its on-disk mount path.
 // macOS `mount -t webdav` reports both, and the URL (which carries our random
 // loopback port) is the only reliable signal that a row belongs to this app's

@@ -439,6 +439,45 @@ func TestStopFailedAttemptDoesNotUnmountDifferentVolume(t *testing.T) {
 	}
 }
 
+func TestUnconfirmedAttemptDoesNotPromoteDifferentURLMount(t *testing.T) {
+	oldExact := probeExactWebDAVMountActive
+	oldPath := probePathWebDAVMountActive
+	oldMounted := probeMountedWebDAV
+	exactCalls := 0
+	pathCalls := 0
+	probeExactWebDAVMountActive = func(serverURL, mountPath string) (bool, error) {
+		exactCalls++
+		if serverURL != "http://127.0.0.1:65075/ours/" || mountPath != "/tmp/shared-mount-path" {
+			t.Fatalf("exact probe got url=%q path=%q", serverURL, mountPath)
+		}
+		return false, nil // A different URL owns this same mount path.
+	}
+	probePathWebDAVMountActive = func(string) (bool, error) {
+		pathCalls++
+		return true, nil
+	}
+	probeMountedWebDAV = func(_, _ string) string { return "" }
+	t.Cleanup(func() {
+		probeExactWebDAVMountActive = oldExact
+		probePathWebDAVMountActive = oldPath
+		probeMountedWebDAV = oldMounted
+	})
+
+	session := &mountSession{
+		mountAttempted: true,
+		mountTarget:    "/tmp/shared-mount-path",
+		serverURL:      "http://127.0.0.1:65075/ours/",
+		backend:        &macOSWebDAVBackend{},
+	}
+	manager := &manager{lastProbes: make(map[string]mountProbeSnapshot)}
+	if manager.syncSessionLocked(session) {
+		t.Fatal("different URL mount was promoted as this attempt")
+	}
+	if session.mounted || exactCalls != 1 || pathCalls != 0 {
+		t.Fatalf("mounted=%t exact_calls=%d path_calls=%d", session.mounted, exactCalls, pathCalls)
+	}
+}
+
 func TestStopDrainsWritebackBeforeUnmount(t *testing.T) {
 	access := newTestBucketAccess(t)
 	access.transferTimeout = time.Second
