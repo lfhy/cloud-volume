@@ -85,12 +85,17 @@ func (w *Worker) Drain(ctx context.Context) error {
 			w.sleepUntil(minTime(time.Now().Add(workerPoll), deadline))
 			continue
 		}
-		if running == 0 && !due && !next.IsZero() && next.After(time.Now()) && time.Now().Before(deadline) {
+		if !due && !next.IsZero() && next.After(time.Now()) && time.Now().Before(deadline) {
 			w.sleepUntil(minTime(next, deadline))
 			continue
 		}
 		before := pending
-		w.runDueOnceIgnoringRemoteQuiet(ctx)
+		if !w.tryRunDueOnceWithOptions(ctx, true) {
+			// A background pass acquired the gate after the snapshot above. Keep
+			// Drain cancelable rather than blocking behind its provider call.
+			w.sleepUntil(minTime(time.Now().Add(workerPoll), deadline))
+			continue
+		}
 		pending, failed, running, _, _ = w.snapshotWork()
 		if failed > 0 {
 			return fmt.Errorf("metadata worker: %d failed operations", failed)
@@ -206,6 +211,21 @@ func (w *Worker) runDueOnceWithOptions(ctx context.Context, ignoreRemoteQuiet bo
 	// their journal order at the provider.
 	w.executeMu.Lock()
 	defer w.executeMu.Unlock()
+	w.runDueOnceLocked(ctx, ignoreRemoteQuiet)
+}
+
+// tryRunDueOnceWithOptions lets Drain preserve context responsiveness when a
+// background pass acquires the execution gate between its state scan and claim.
+func (w *Worker) tryRunDueOnceWithOptions(ctx context.Context, ignoreRemoteQuiet bool) bool {
+	if !w.executeMu.TryLock() {
+		return false
+	}
+	defer w.executeMu.Unlock()
+	w.runDueOnceLocked(ctx, ignoreRemoteQuiet)
+	return true
+}
+
+func (w *Worker) runDueOnceLocked(ctx context.Context, ignoreRemoteQuiet bool) {
 	w.service.operationMu.RLock()
 	defer w.service.operationMu.RUnlock()
 	ops := w.claimDueWithOptions(ignoreRemoteQuiet)

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- 修复 metadata worker 的退出 drain 与后台轮询并发时可能让“覆盖式重命名”的 source move 先于旧目标 delete 执行，进而删掉刚移动的新对象：完整 claim/执行 pass 现已串行。
+- 修复 metadata worker 的退出 drain 与后台轮询并发时可能让“覆盖式重命名”的 source move 先于旧目标 delete 执行，进而删掉刚移动的新对象：完整 claim/执行 pass 现已串行，且 drain 在后台 provider 调用活跃时仍可响应取消。
 - 优化 metadata 分块暂存的本地持久化路径：保留块文件和最终 hash 目录的同步、缓存保护与启动 GC，但移除可恢复 tmp 源目录和重复 manifest 的同步步骤，降低 Finder 复制 Git 等大量小文件时的本地写入开销。
 - 修复 Finder 递归拷贝期间 metadata worker 按单个操作的 quiet 计时提前向 SFTP/WebDAV 推送：同一 namespace 的本地 mkdir/write/rename/delete 现在共享静默屏障，任务队列展示实际等待截止时间；重启会恢复未完成操作的剩余静默期，人工立即执行只跳过一次，卸载 drain 仍会收尾。取消测试同时区分“远端明确不存在”与“结果待对账”两种状态。
 - 修复 SFTP 页面新建目录在远端已确认后仍显示空的最后修改时间和“已同步”状态：metadata 确认会持久化 SFTP `Stat` 时间，目录任务会正确显示等待/同步状态，并在完成后自动刷新当前目录。

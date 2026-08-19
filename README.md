@@ -36,7 +36,7 @@ S3 账号支持 endpoint、access key、secret key、region 和 path-style URL �
 
 ![远端文件浏览](docs/screenshots/file-page.png)
 
-常用 bucket 可以挂载到本地目录，按系统文件管理器的方式读写远端对象；读写会先使用本地缓存和写回队列，再异步同步到远端。已通过远端确认前，挂载中尚未上传的内容直接由本地分块暂存提供字节读取。一个 namespace 内最近的本地 mkdir/write/rename/delete 会共享 quiet barrier，Finder 递归拷贝持续产生新操作时不会让早到的目录先单独同步；退出 drain 和人工立即执行仍会按依赖收尾，drain 与后台同步也会串行执行 provider 操作以保持覆盖式重命名的删除/移动顺序。macOS Finder 批量写入新目录时，目标存在性探测也由本地目录视图回答，避免 SFTP 等高握手延迟上游退化为每个小文件一次远端查询。
+常用 bucket 可以挂载到本地目录，按系统文件管理器的方式读写远端对象；读写会先使用本地缓存和写回队列，再异步同步到远端。已通过远端确认前，挂载中尚未上传的内容直接由本地分块暂存提供字节读取。一个 namespace 内最近的本地 mkdir/write/rename/delete 会共享 quiet barrier，Finder 递归拷贝持续产生新操作时不会让早到的目录先单独同步；退出 drain 和人工立即执行仍会按依赖收尾，drain 与后台同步也会串行执行 provider 操作以保持覆盖式重命名的删除/移动顺序，且可在后台请求进行时响应取消。macOS Finder 批量写入新目录时，目标存在性探测也由本地目录视图回答，避免 SFTP 等高握手延迟上游退化为每个小文件一次远端查询。
 
 ![挂载存储桶](docs/screenshots/mount.png)
 
