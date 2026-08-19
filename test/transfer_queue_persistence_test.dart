@@ -55,4 +55,24 @@ void main() {
     expect(queue.tasks.single.error, contains('未完成'));
     expect(queue.tasks.single.bytesCompleted, 512);
   });
+
+  test(
+    'does not persist metadata-backed execution compatibility tasks',
+    () async {
+      final queue = TransferQueue.instance;
+      queue.startTask(
+        kind: TransferKind.upload,
+        bucket: 'bucket-c',
+        key: 'pending.txt',
+        localPath: '/tmp/pending.txt',
+        publishRemoteTask: false,
+      );
+      await queue.flushPersistenceForTest();
+
+      queue.resetForTest();
+      await queue.restorePersistedStateForTest();
+
+      expect(queue.tasks, isEmpty);
+    },
+  );
 }

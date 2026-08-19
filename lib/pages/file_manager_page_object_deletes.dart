@@ -36,6 +36,7 @@ extension _FileManagerPageObjectDeletes on _FileManagerPageState {
             bucket: bucketEntry.bucket.name,
             key: object.key,
             localPath: '',
+            publishRemoteTask: !_usesMetadataRemoteTasks,
           ),
         )
         .toList(growable: false);

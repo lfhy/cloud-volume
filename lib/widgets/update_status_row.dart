@@ -172,7 +172,7 @@ class UpdateStatusRow extends StatelessWidget {
       runSpacing: 8,
       alignment: alignment,
       children: [
-        if (installing)
+        if (installing && canCancelInstall)
           ShadButton(
             onPressed: canCancelInstall ? onCancelInstall : null,
             child: Row(

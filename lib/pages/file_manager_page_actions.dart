@@ -52,6 +52,7 @@ extension _FileManagerPageActions on _FileManagerPageState {
       bucket: bucket,
       key: key,
       localPath: localPath,
+      publishRemoteTask: !_usesMetadataRemoteTasks,
     );
     unawaited(_runUploadTask(task, _activeBucketEntry!));
     return task;
@@ -67,6 +68,7 @@ extension _FileManagerPageActions on _FileManagerPageState {
       bucket: bucket,
       key: key,
       localPath: fileName,
+      publishRemoteTask: !_usesMetadataRemoteTasks,
     );
     unawaited(
       _runBrowserUploadTask(task, _activeBucketEntry!, bytes, fileName),
@@ -308,6 +310,8 @@ extension _FileManagerPageActions on _FileManagerPageState {
           key: object.key,
           localPath: '',
           targetPath: targetPath,
+          publishRemoteTask:
+              action != FileObjectAction.move || !_usesMetadataRemoteTasks,
         );
         try {
           if (action == FileObjectAction.move) {
@@ -360,6 +364,7 @@ extension _FileManagerPageActions on _FileManagerPageState {
           key: object.key,
           localPath: '',
           targetPath: targetPath,
+          publishRemoteTask: !_usesMetadataRemoteTasks,
         );
         try {
           await widget.api.renameObject(

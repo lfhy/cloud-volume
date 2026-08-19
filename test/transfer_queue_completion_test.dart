@@ -70,6 +70,48 @@ void main() {
     expect(RemoteTaskStore.instance.localTask('transfer:${task.id}'), isNull);
   });
 
+  test('metadata-backed producer does not create a duplicate remote row', () {
+    final task = TransferQueue.instance.startTask(
+      id: 'metadata-page-move',
+      kind: TransferKind.move,
+      bucket: 'bucket-a',
+      key: 'old.txt',
+      targetPath: 'new.txt',
+      localPath: '',
+      publishRemoteTask: false,
+    );
+
+    expect(RemoteTaskStore.instance.localTask('transfer:${task.id}'), isNull);
+    TransferQueue.instance.markTaskDone(task.id);
+    expect(RemoteTaskStore.instance.localTask('transfer:${task.id}'), isNull);
+  });
+
+  test(
+    'metadata upload keeps transient progress outside the main task list',
+    () {
+      final task = TransferQueue.instance.startTask(
+        id: 'metadata-page-upload',
+        kind: TransferKind.upload,
+        bucket: 'bucket-a',
+        key: 'file.txt',
+        localPath: '/tmp/file.txt',
+        publishRemoteTask: false,
+      );
+
+      expect(RemoteTaskStore.instance.tasks, isEmpty);
+      expect(RemoteTaskStore.instance.hasActiveFileTransfers, isTrue);
+      expect(
+        RemoteTaskStore.instance.executionTask('transfer:${task.id}'),
+        isNotNull,
+      );
+      TransferQueue.instance.markTaskDone(task.id);
+      expect(
+        RemoteTaskStore.instance.executionTask('transfer:${task.id}')?.status,
+        RemoteTaskStatus.done,
+      );
+    },
+  );
+
   test(
     'RemoteTaskStore routes local cancellation to the producer facade',
     () async {

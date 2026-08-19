@@ -3,48 +3,65 @@ part of 'transfer_queue.dart';
 // Mirrors the legacy producer state into the unified task store for local UI.
 extension TransferQueueRemoteTasks on TransferQueue {
   void _publishRemoteTask(TransferTask task) {
+    if (!task.publishRemoteTask) {
+      // A metadata-backed page mutation already has a durable sync:* task in
+      // Go. Keep only an execution projection for transient progress UI.
+      _bindRemoteTaskActions();
+      if (task.isUpload || task.isDelete) {
+        RemoteTaskStore.instance.publishExecutionTask(
+          _remoteTaskSnapshot(task),
+        );
+      } else {
+        RemoteTaskStore.instance.removeExecutionTask('transfer:${task.id}');
+      }
+      return;
+    }
     _bindRemoteTaskActions();
+    RemoteTaskStore.instance.removeExecutionTask('transfer:${task.id}');
+    RemoteTaskStore.instance.updateLocalTask(_remoteTaskSnapshot(task));
+  }
+
+  RemoteTask _remoteTaskSnapshot(TransferTask task) {
     final id = 'transfer:${task.id}';
-    RemoteTaskStore.instance.updateLocalTask(
-      RemoteTask(
-        id: id,
-        kind: _remoteKind(task.kind),
-        status: _remoteStatus(task.status),
-        source: task.isAppUpdate
-            ? RemoteTaskSource.appUpdate
-            : task.isSyncTask
-            ? RemoteTaskSource.sync
-            : RemoteTaskSource.local,
-        bucket: task.bucket,
-        sourcePath: task.key,
-        targetPath: task.targetPath,
-        localPath: task.localPath,
-        displayPath: task.key,
-        phase: _remotePhase(task.statusDetail),
-        phaseDetail: task.statusDetail,
-        error: task.error ?? '',
-        createdAt: task.createdAt,
-        updatedAt: DateTime.now().toUtc().toIso8601String(),
-        retryCount: 0,
-        cancelable: task.isCancelable,
-        // Local producers retain their execution closure rather than a
-        // replayable request payload, so only cancellation/trigger is safe.
-        retryable: false,
-        triggerable: task.canForceSyncNow,
-        progress: RemoteTaskProgress(
-          bytesCompleted: task.bytesCompleted,
-          totalBytes: task.totalBytes,
-          itemsCompleted: task.itemsCompleted,
-          totalItems: task.totalItems,
-          speedBytes: task.speedBytes,
-          currentKey: task.currentFileKey,
-        ),
+    return RemoteTask(
+      id: id,
+      kind: _remoteKind(task.kind),
+      status: _remoteStatus(task.status),
+      source: task.isAppUpdate
+          ? RemoteTaskSource.appUpdate
+          : task.isSyncTask
+          ? RemoteTaskSource.sync
+          : RemoteTaskSource.local,
+      bucket: task.bucket,
+      sourcePath: task.key,
+      targetPath: task.targetPath,
+      localPath: task.localPath,
+      displayPath: task.key,
+      phase: _remotePhase(task.statusDetail),
+      phaseDetail: task.statusDetail,
+      error: task.error ?? '',
+      createdAt: task.createdAt,
+      updatedAt: DateTime.now().toUtc().toIso8601String(),
+      retryCount: 0,
+      cancelable: task.isCancelable,
+      // Local producers retain their execution closure rather than a
+      // replayable request payload, so only cancellation/trigger is safe.
+      retryable: false,
+      triggerable: task.canForceSyncNow,
+      progress: RemoteTaskProgress(
+        bytesCompleted: task.bytesCompleted,
+        totalBytes: task.totalBytes,
+        itemsCompleted: task.itemsCompleted,
+        totalItems: task.totalItems,
+        speedBytes: task.speedBytes,
+        currentKey: task.currentFileKey,
       ),
     );
   }
 
   void _removeRemoteTask(String id) {
     RemoteTaskStore.instance.removeLocalTask('transfer:$id');
+    RemoteTaskStore.instance.removeExecutionTask('transfer:$id');
   }
 
   void _bindRemoteTaskActions() {

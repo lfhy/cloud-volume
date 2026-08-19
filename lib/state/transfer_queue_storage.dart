@@ -16,6 +16,7 @@ Future<void> persistTransferQueueState(TransferQueue queue) async {
   queue._persistTimer = null;
   final prefs = await SharedPreferences.getInstance();
   final payload = queue._tasks
+      .where((task) => task.publishRemoteTask)
       .take(_persistedTaskLimit)
       .map((task) => task.toJson())
       .toList(growable: false);
@@ -51,6 +52,11 @@ Future<void> loadPersistedTransferQueueStateData(TransferQueue queue) async {
         continue;
       }
       final task = TransferTask.fromJson(Map<String, dynamic>.from(item));
+      if (!task.publishRemoteTask) {
+        // Metadata-backed operations are durable in Go; do not resurrect an
+        // obsolete Dart execution row after an app restart.
+        continue;
+      }
       if (task.status == TransferStatus.pending ||
           task.status == TransferStatus.running) {
         task.status = TransferStatus.failed;

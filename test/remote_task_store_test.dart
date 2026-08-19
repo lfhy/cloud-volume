@@ -173,6 +173,35 @@ void main() {
     expect(RemoteTaskStore.instance.cancelLocalTask('missing'), isFalse);
   });
 
+  test(
+    'cancel refuses a task after the provider marks it non-cancelable',
+    () async {
+      final api = _FakeGateway()
+        ..page = const RemoteTaskPage(
+          items: <RemoteTask>[
+            RemoteTask(
+              id: 'transfer:app_update_1',
+              kind: RemoteTaskKind.appUpdate,
+              status: RemoteTaskStatus.running,
+              phaseDetail: 'installing',
+              cancelable: false,
+            ),
+          ],
+        );
+      RemoteTaskStore.instance.bindApi(api);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        await RemoteTaskStore.instance.cancel('transfer:app_update_1'),
+        isFalse,
+      );
+      expect(
+        RemoteTaskStore.instance.tasks.single.status,
+        RemoteTaskStatus.running,
+      );
+    },
+  );
+
   test('mount reads retain their object path and byte range', () {
     final task = RemoteTask.fromJson(const <String, dynamic>{
       'id': 'transfer:mount-read-1',

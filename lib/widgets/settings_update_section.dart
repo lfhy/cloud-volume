@@ -1,5 +1,4 @@
 // 更新检查区：在通用设置中展示版本状态，并提供 GitHub 下载页入口。
-
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -14,6 +13,7 @@ import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/widgets/settings_update_mirror_field.dart'
     show SettingsUpdateMirrorField;
+import 'package:remote_storage/widgets/settings_update_task_policy.dart';
 import 'package:remote_storage/widgets/update_status_row.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -121,11 +121,7 @@ class _SettingsUpdateSectionState extends State<SettingsUpdateSection> {
   void _onTransferQueueChanged() {
     final taskId = _installTaskId;
     if (taskId == null || !_installing) return;
-    final id = taskId.startsWith('transfer:') ? taskId : 'transfer:$taskId';
-    final task = RemoteTaskStore.instance.tasks.cast<RemoteTask?>().firstWhere(
-      (t) => t?.id == id,
-      orElse: () => null,
-    );
+    final task = findAppUpdateTask(RemoteTaskStore.instance.tasks, taskId);
     if (task == null) return;
 
     if (task.status == RemoteTaskStatus.done || task.phaseDetail == 'done') {
@@ -281,7 +277,7 @@ class _SettingsUpdateSectionState extends State<SettingsUpdateSection> {
         _errorText = null;
       });
       await _waitForFileTransfersIdle();
-      if (!mounted) return;
+      if (!mounted || !_installing) return;
     }
 
     setState(() {
@@ -340,7 +336,11 @@ class _SettingsUpdateSectionState extends State<SettingsUpdateSection> {
     }
   }
 
-  bool get _canCancelInstall => _installing;
+  bool get _canCancelInstall => canCancelAppUpdate(
+    installing: _installing,
+    taskId: _installTaskId,
+    tasks: RemoteTaskStore.instance.tasks,
+  );
 
   Future<void> _cancelInstall() async {
     if (_installTaskId == null && _installing) {
@@ -357,7 +357,14 @@ class _SettingsUpdateSectionState extends State<SettingsUpdateSection> {
     setState(() => _installStatusText = '正在取消更新...');
     try {
       final id = taskId.startsWith('transfer:') ? taskId : 'transfer:$taskId';
-      await RemoteTaskStore.instance.cancel(id);
+      final canceled = await RemoteTaskStore.instance.cancel(id);
+      if (!canceled) {
+        if (mounted) {
+          setState(() => _installStatusText = '已进入安装阶段，无法取消。');
+        }
+        await RemoteTaskStore.instance.refresh();
+        return;
+      }
     } catch (error) {
       if (!mounted) return;
       _showError('取消更新失败：$error');

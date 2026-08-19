@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 统一任务队列修复：metadata journal 接管的页面上传、移动、重命名和删除不再与 Dart 兼容执行任务重复展示；上传/删除进度弹窗仍保留临时执行快照。应用更新进入不可逆安装阶段后会隐藏取消并拒绝无效取消请求。
+
 - Unified physical task projection now preserves profile ownership across legacy mount/non-S3 uploads, downloads, copies, moves, and deletes; it reports operation-specific phases, local destinations, current-file and multipart ranges, and excludes resumed bytes from throughput estimates. Page renames now use the tracked move path. App-update tasks now show their asset name and become non-cancelable once installation starts.
 - Fixed mounted-file read history showing `bytes=...` as the task path. It now shows the remote file path with the exact requested byte range as supporting detail across desktop and Web task projections, including profile-scoped Web task requests.
 - Fixed macOS WebDAV mounts reporting success after a 20-second `mount_webdav` timeout while Finder still had no usable volume. Mount startup now uses non-interactive `-S`, retains the bucket display name, waits for the exact loopback URL/path mount-table registration, normalizes the `/var` and `/private/var` aliases, and fails closed with retryable cleanup when registration or unmount fails. Retained failed attempts keep using that exact ownership probe, so a foreign WebDAV volume at the same path cannot be promoted or unmounted. Added an opt-in real macOS Go mount test plus nonblocking open-dispatch coverage.

@@ -16,6 +16,7 @@ extension TransferQueueLifecycle on TransferQueue {
     required String key,
     required String localPath,
     String targetPath = '',
+    bool publishRemoteTask = true,
   }) {
     if (id != null && _tasksById.containsKey(id)) {
       return _tasksById[id]!;
@@ -27,6 +28,7 @@ extension TransferQueueLifecycle on TransferQueue {
       key: key,
       localPath: localPath,
       targetPath: targetPath,
+      publishRemoteTask: publishRemoteTask,
       createdAt: DateTime.now().toUtc().toIso8601String(),
     );
     _tasks.insert(0, task);

@@ -2,9 +2,11 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/services/app_update_service.dart';
 import 'package:remote_storage/services/update_settings.dart';
 import 'package:remote_storage/state/transfer_queue.dart';
+import 'package:remote_storage/widgets/settings_update_task_policy.dart';
 
 void main() {
   test('release API check uses a longer timeout budget', () {
@@ -38,6 +40,50 @@ void main() {
     expect(update.isActiveFileTransfer, isFalse);
   });
 
+  test('metadata-backed producer flag survives task persistence', () {
+    final task = TransferTask.fromJson(const {
+      'id': 'page-move',
+      'kind': 'move',
+      'publishRemoteTask': false,
+    });
+    expect(task.publishRemoteTask, isFalse);
+    expect(task.toJson()['publishRemoteTask'], isFalse);
+  });
+
+  test('app update cancellation stops at the installer boundary', () {
+    const installing = RemoteTask(
+      id: 'transfer:app_update_1',
+      kind: RemoteTaskKind.appUpdate,
+      status: RemoteTaskStatus.running,
+      phaseDetail: 'installing',
+      cancelable: false,
+    );
+    expect(
+      canCancelAppUpdate(
+        installing: true,
+        taskId: 'app_update_1',
+        tasks: const [installing],
+      ),
+      isFalse,
+    );
+    expect(
+      canCancelAppUpdate(
+        installing: true,
+        taskId: 'missing',
+        tasks: const <RemoteTask>[],
+      ),
+      isFalse,
+    );
+    expect(
+      canCancelAppUpdate(
+        installing: true,
+        taskId: null,
+        tasks: const <RemoteTask>[],
+      ),
+      isTrue,
+    );
+  });
+
   test('compareVersionLabels detects newer GitHub release tags', () {
     expect(compareVersionLabels('v1.2.2', 'v1.2.3'), lessThan(0));
     expect(compareVersionLabels('1.2.3+7', 'v1.2.3'), 0);
@@ -63,8 +109,10 @@ void main() {
     final loaded = await loadUpdateNetworkConfig();
     expect(loaded.mirrorPrefix, 'https://gh-proxy.com');
     expect(loaded.hasMirror, isTrue);
-    expect(loaded.wrapUrl('https://github.com/a/b'),
-        'https://gh-proxy.com/https://github.com/a/b');
+    expect(
+      loaded.wrapUrl('https://github.com/a/b'),
+      'https://gh-proxy.com/https://github.com/a/b',
+    );
 
     await saveUpdateNetworkConfig(const UpdateNetworkConfig(mirrorPrefix: ''));
     final reloaded = await loadUpdateNetworkConfig();

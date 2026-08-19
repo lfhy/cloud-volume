@@ -20,6 +20,9 @@ class RemoteTaskStore extends ChangeNotifier {
   final Map<String, RemoteTask> _tasks = <String, RemoteTask>{};
   // Local producers publish here until a durable/runtime snapshot supersedes them.
   final Map<String, RemoteTask> _localTasks = <String, RemoteTask>{};
+  // Execution-only projections are used by transient progress dialogs. They
+  // deliberately stay out of [tasks], which is the unified remote-task list.
+  final Map<String, RemoteTask> _executionTasks = <String, RemoteTask>{};
   LocalRemoteTaskAction? _cancelLocalTask;
   LocalRemoteTaskAction? _retryLocalTask;
   LocalRemoteTaskAction? _triggerLocalTask;
@@ -52,14 +55,23 @@ class RemoteTaskStore extends ChangeNotifier {
   }
 
   bool get hasActive => tasks.any((task) => task.status.isActive);
-  bool get hasActiveFileTransfers => tasks.any(
-    (task) =>
-        task.status.isActive &&
-        task.source != RemoteTaskSource.appUpdate &&
-        (task.kind == RemoteTaskKind.upload ||
-            task.kind == RemoteTaskKind.write ||
-            task.kind == RemoteTaskKind.download),
-  );
+  bool get hasActiveFileTransfers =>
+      tasks.any(
+        (task) =>
+            task.status.isActive &&
+            task.source != RemoteTaskSource.appUpdate &&
+            (task.kind == RemoteTaskKind.upload ||
+                task.kind == RemoteTaskKind.write ||
+                task.kind == RemoteTaskKind.download),
+      ) ||
+      _executionTasks.values.any(
+        (task) =>
+            task.status.isActive &&
+            task.source != RemoteTaskSource.appUpdate &&
+            (task.kind == RemoteTaskKind.upload ||
+                task.kind == RemoteTaskKind.write ||
+                task.kind == RemoteTaskKind.download),
+      );
   Object? get lastError => _lastError;
   DateTime? get lastFreshAt => _lastFreshAt;
   String get freshness => _freshness;
@@ -89,6 +101,22 @@ class RemoteTaskStore extends ChangeNotifier {
   }
 
   RemoteTask? localTask(String id) => _localTasks[id];
+
+  /// Returns an execution-only snapshot for transient UI such as the upload
+  /// dialog without exposing it in the durable remote task list.
+  RemoteTask? executionTask(String id) => _executionTasks[id];
+
+  void publishExecutionTask(RemoteTask task) {
+    if (task.id.trim().isEmpty) return;
+    _executionTasks[task.id] = task;
+    notifyListeners();
+  }
+
+  bool removeExecutionTask(String id) {
+    final removed = _executionTasks.remove(id) != null;
+    if (removed) notifyListeners();
+    return removed;
+  }
 
   void bindLocalTaskActions({
     LocalRemoteTaskAction? cancel,
@@ -181,10 +209,14 @@ class RemoteTaskStore extends ChangeNotifier {
 
   Future<bool> cancel(String id) async {
     final local = _localTasks[id];
+    final execution = _executionTasks[id];
     final remote = _tasks[id];
     if (local != null &&
         (remote == null || _preferLocal(local, remote)) &&
         local.cancelable) {
+      return _cancelLocalTask?.call(id) ?? false;
+    }
+    if (execution != null && remote == null && execution.cancelable) {
       return _cancelLocalTask?.call(id) ?? false;
     }
     final task = remote;
@@ -210,10 +242,12 @@ class RemoteTaskStore extends ChangeNotifier {
 
   Future<RemoteTask?> loadDetails(String id) async {
     final local = _localTasks[id];
+    final execution = _executionTasks[id];
     final remote = _tasks[id];
     if (_api == null ||
-        (local != null && (remote == null || _preferLocal(local, remote)))) {
-      return local ?? remote;
+        (local != null && (remote == null || _preferLocal(local, remote))) ||
+        (execution != null && remote == null)) {
+      return local ?? execution ?? remote;
     }
     try {
       final task = await _api!.getRemoteTask(id);
@@ -232,8 +266,12 @@ class RemoteTaskStore extends ChangeNotifier {
 
   Future<bool> retry(String id) async {
     final local = _localTasks[id];
+    final execution = _executionTasks[id];
     final remote = _tasks[id];
     if (local != null && (remote == null || _preferLocal(local, remote))) {
+      return _retryLocalTask?.call(id) ?? false;
+    }
+    if (execution != null && remote == null) {
       return _retryLocalTask?.call(id) ?? false;
     }
     if (_api == null) return false;
@@ -244,8 +282,12 @@ class RemoteTaskStore extends ChangeNotifier {
 
   Future<bool> trigger(String id) async {
     final local = _localTasks[id];
+    final execution = _executionTasks[id];
     final remote = _tasks[id];
     if (local != null && (remote == null || _preferLocal(local, remote))) {
+      return _triggerLocalTask?.call(id) ?? false;
+    }
+    if (execution != null && remote == null) {
       return _triggerLocalTask?.call(id) ?? false;
     }
     if (_api == null) return false;
@@ -283,8 +325,10 @@ class RemoteTaskStore extends ChangeNotifier {
     }
     if (taskIds.isEmpty) {
       removed += _clearLocalTaskHistory?.call() ?? _removeLocalTerminalTasks();
+      removed += _removeExecutionTerminalTasks();
     } else {
       removed += _removeLocalTerminalTasksById(taskIds);
+      removed += _removeExecutionTasksById(taskIds);
     }
     return removed;
   }
@@ -354,6 +398,34 @@ class RemoteTaskStore extends ChangeNotifier {
     return ids.length;
   }
 
+  int _removeExecutionTerminalTasks() {
+    final ids = _executionTasks.entries
+        .where((entry) => !entry.value.status.isActive)
+        .map((entry) => entry.key)
+        .toList(growable: false);
+    for (final id in ids) {
+      _executionTasks.remove(id);
+    }
+    if (ids.isNotEmpty) notifyListeners();
+    return ids.length;
+  }
+
+  int _removeExecutionTasksById(Iterable<String> taskIds) {
+    final selected = taskIds.toSet();
+    final ids = _executionTasks.entries
+        .where(
+          (entry) =>
+              selected.contains(entry.key) && !entry.value.status.isActive,
+        )
+        .map((entry) => entry.key)
+        .toList(growable: false);
+    for (final id in ids) {
+      _executionTasks.remove(id);
+    }
+    if (ids.isNotEmpty) notifyListeners();
+    return ids.length;
+  }
+
   bool _preferLocal(RemoteTask local, RemoteTask remote) {
     if (!local.status.isActive || remote.status.isActive) return false;
     final localAt = DateTime.tryParse(
@@ -390,6 +462,7 @@ class RemoteTaskStore extends ChangeNotifier {
     _hasLoadedMore = false;
     _tasks.clear();
     _localTasks.clear();
+    _executionTasks.clear();
     _cancelLocalTask = null;
     _retryLocalTask = null;
     _triggerLocalTask = null;

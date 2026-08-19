@@ -118,4 +118,41 @@ void main() {
     TransferQueue.instance.resetForTest();
     await tester.pump();
   });
+
+  testWidgets('metadata upload uses an execution-only progress snapshot', (
+    tester,
+  ) async {
+    final task = TransferQueue.instance.startTask(
+      id: 'metadata-page-upload',
+      kind: TransferKind.upload,
+      bucket: 'bucket-a',
+      key: 'docs/draft.txt',
+      localPath: '/tmp/draft.txt',
+      publishRemoteTask: false,
+    );
+    TransferQueue.instance.markTaskRunning(task.id, totalBytes: 7);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Material(
+          child: BatchTaskProgressDialog(
+            taskIds: <String>[task.id],
+            currentPathLabel: 'bucket-a / docs',
+            mode: BatchTaskProgressMode.upload,
+            onRunInBackground: () {},
+            onClose: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('draft.txt'), findsOneWidget);
+    expect(find.text('取消上传'), findsOneWidget);
+    await tester.tap(find.text('取消上传'));
+    await tester.pump();
+    expect(TransferQueue.instance.statusOf(task.id), TransferStatus.canceled);
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }

@@ -36,9 +36,15 @@ class BatchTaskProgressDialog extends StatelessWidget {
       animation: RemoteTaskStore.instance,
       builder: (context, _) {
         final ids = taskIds.map(_remoteTaskID).toSet();
-        final tasks = RemoteTaskStore.instance.tasks
-            .where((task) => ids.contains(task.id))
-            .toList(growable: false);
+        final tasksById = <String, RemoteTask>{};
+        for (final task in RemoteTaskStore.instance.tasks) {
+          if (ids.contains(task.id)) tasksById[task.id] = task;
+        }
+        for (final id in ids) {
+          final task = RemoteTaskStore.instance.executionTask(id);
+          if (task != null) tasksById[id] = task;
+        }
+        final tasks = tasksById.values.toList(growable: false);
         final finishedCount = tasks
             .where((task) => !task.status.isActive)
             .length;
