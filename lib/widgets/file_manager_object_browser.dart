@@ -47,6 +47,7 @@ class FileManagerObjectBrowser extends StatelessWidget {
     required this.listIconSize,
     this.mountedToDesktop = false,
     this.mountBucketName,
+    this.profileId,
     this.showSyncStatus = false,
     required this.onOpenDirectory,
     required this.onOpenFile,
@@ -84,6 +85,7 @@ class FileManagerObjectBrowser extends StatelessWidget {
   final double gridIconSize;
   final double listIconSize;
   final String? mountBucketName;
+  final String? profileId;
   final bool mountedToDesktop;
   final bool showSyncStatus;
   final ValueChanged<String> onOpenDirectory;

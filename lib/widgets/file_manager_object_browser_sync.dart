@@ -19,20 +19,18 @@ extension _FileManagerObjectBrowserSync on FileManagerObjectBrowser {
       return const FileSyncState.synced();
     }
     final bucket = mountBucketName!.trim();
-    final objectKey = object.key.trim();
-    final prefix = objectKey.endsWith('/') ? objectKey : '$objectKey/';
+    final expectedProfile = profileId?.trim() ?? '';
     var pending = 0;
     var running = 0;
     for (final task in tasks) {
       if (task.bucket.trim() != bucket || !task.status.isActive) continue;
-      if (task.kind != RemoteTaskKind.upload &&
-          task.kind != RemoteTaskKind.write) {
+      if (expectedProfile.isNotEmpty &&
+          task.profileId.trim() != expectedProfile) {
         continue;
       }
-      final path =
-          (task.targetPath.isNotEmpty ? task.targetPath : task.sourcePath)
-              .trim();
-      if (object.isDir ? !path.startsWith(prefix) : path != objectKey) continue;
+      if (!_taskCanChangeObject(task) || !_taskMatchesObject(task, object)) {
+        continue;
+      }
       if (task.status == RemoteTaskStatus.running ||
           task.status == RemoteTaskStatus.verifying) {
         running++;
@@ -47,4 +45,37 @@ extension _FileManagerObjectBrowserSync on FileManagerObjectBrowser {
       isDirectory: object.isDir,
     );
   }
+
+  bool _taskCanChangeObject(RemoteTask task) {
+    return switch (task.kind) {
+      RemoteTaskKind.mkdir ||
+      RemoteTaskKind.write ||
+      RemoteTaskKind.upload ||
+      RemoteTaskKind.rename ||
+      RemoteTaskKind.copy ||
+      RemoteTaskKind.move ||
+      RemoteTaskKind.delete => true,
+      RemoteTaskKind.download ||
+      RemoteTaskKind.appUpdate ||
+      RemoteTaskKind.unknown => false,
+    };
+  }
+
+  bool _taskMatchesObject(RemoteTask task, ObjectInfo object) {
+    final objectPath = _normalizedTaskPath(object.key);
+    if (objectPath.isEmpty) return false;
+    final paths = <String>{task.sourcePath, task.targetPath, task.displayPath};
+    return paths.any((path) {
+      final taskPath = _normalizedTaskPath(path);
+      if (taskPath.isEmpty) return false;
+      return object.isDir
+          ? taskPath == objectPath || taskPath.startsWith('$objectPath/')
+          : taskPath == objectPath;
+    });
+  }
+
+  String _normalizedTaskPath(String value) => value
+      .trim()
+      .replaceFirst(RegExp(r'^/+'), '')
+      .replaceFirst(RegExp(r'/+$'), '');
 }

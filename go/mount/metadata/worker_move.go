@@ -145,7 +145,7 @@ func (w *Worker) confirmMoveTarget(ctx context.Context, backend Backend, op Op, 
 	info, err := backend.HeadObject(ctx, w.service.store.namespace.Bucket, RemoteKey(op.MoveTarget))
 	if err == nil {
 		return w.service.commitConfirmation(
-			op.InodeID, op.Seq, op.MoveParent, op.MoveName, Fingerprint(info),
+			op.InodeID, op.Seq, op.MoveParent, op.MoveName, Fingerprint(info), info.LastModified,
 		)
 	}
 	if !errors.Is(err, os.ErrNotExist) || kind != KindDirectory {
@@ -158,7 +158,7 @@ func (w *Worker) confirmMoveTarget(ctx context.Context, backend Backend, op Op, 
 	if !exists {
 		return fmt.Errorf("%w: moved directory target %q is missing", errConflict, op.MoveTarget)
 	}
-	return w.service.commitConfirmation(op.InodeID, op.Seq, op.MoveParent, op.MoveName, "")
+	return w.service.commitConfirmation(op.InodeID, op.Seq, op.MoveParent, op.MoveName, "", "")
 }
 
 func (w *Worker) directoryTargetExists(ctx context.Context, backend Backend, target string) (bool, error) {

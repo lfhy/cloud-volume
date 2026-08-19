@@ -193,17 +193,18 @@ func (s *Service) confirmRemote(
 		if errors.Is(headErr, os.ErrNotExist) && !isFile {
 			// Providers without explicit directory markers may legitimately
 			// report missing markers once children exist.
-			return s.commitConfirmation(inode, op.Seq, parent, name, "")
+			return s.commitConfirmation(inode, op.Seq, parent, name, "", "")
 		}
 		return headErr
 	}
 	fingerprint := Fingerprint(storageops.ObjectInfo{
 		Size: info.Size, LastModified: info.LastModified, ETag: info.ETag,
 	})
-	return s.commitConfirmation(inode, op.Seq, parent, name, fingerprint)
+	return s.commitConfirmation(inode, op.Seq, parent, name, fingerprint, info.LastModified)
 }
 
-func (s *Service) commitConfirmation(inode, confirmedSeq, parent uint64, name, fingerprint string) error {
+// commitConfirmation atomically records the provider-confirmed edge and metadata.
+func (s *Service) commitConfirmation(inode, confirmedSeq, parent uint64, name, fingerprint, lastModified string) error {
 	return s.store.update(func(tx boltTxT) error {
 		record, err := getInode(tx, inode)
 		if err != nil {
@@ -212,6 +213,9 @@ func (s *Service) commitConfirmation(inode, confirmedSeq, parent uint64, name, f
 		record.RemoteParentID, record.RemoteName = parent, name
 		if fingerprint != "" {
 			record.RemoteFingerprint = fingerprint
+		}
+		if strings.TrimSpace(lastModified) != "" {
+			record.MTime = lastModified
 		}
 		// A write can confirm its old Remote edge while a later rename/delete is
 		// still pending. Keep that Desired intent visible so a refresh cannot

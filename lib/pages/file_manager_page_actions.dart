@@ -104,6 +104,7 @@ extension _FileManagerPageActions on _FileManagerPageState {
                   errorText = null;
                 });
                 try {
+                  final taskStartedAt = DateTime.now().toUtc();
                   await widget.api.createDirectory(
                     _activeConfig,
                     _activeBucket!,
@@ -111,6 +112,16 @@ extension _FileManagerPageActions on _FileManagerPageState {
                     name,
                   );
                   if (!mounted || !dialogContext.mounted) return;
+                  if (_usesMetadataRemoteTasks) {
+                    _trackMetadataTaskForRefresh(
+                      bucketId: _activeBucketEntry!.id,
+                      bucket: _activeBucket!,
+                      profileId: _activeConfig.profileId,
+                      prefix: _prefix,
+                      path: _prefix + name,
+                      startedAt: taskStartedAt,
+                    );
+                  }
                   Navigator.of(dialogContext).pop();
                   await _reloadObjectsAfterBucketMutation(
                     _activeBucketEntry!,
