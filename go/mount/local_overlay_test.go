@@ -51,6 +51,9 @@ func TestLocalMountOverlaySeedsWritableSystemPaths(t *testing.T) {
 	if !overlay.handles("codex-debug-dir/.DS_Store") {
 		t.Fatal("expected overlay to handle nested .DS_Store sidecar file")
 	}
+	if overlay.handles("project/Resources/.localized") {
+		t.Fatal("expected .localized to remain a regular project file")
+	}
 	if overlay.handles(".Trash") {
 		t.Fatal("expected overlay to stop handling .Trash")
 	}

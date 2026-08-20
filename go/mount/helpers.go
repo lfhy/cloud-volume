@@ -64,7 +64,7 @@ func isLocalMetadataPath(virtualPath string) bool {
 		return true
 	}
 	switch name {
-	case ".DS_Store", ".localized":
+	case ".DS_Store":
 		return true
 	default:
 		return false

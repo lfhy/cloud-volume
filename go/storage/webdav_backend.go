@@ -342,10 +342,7 @@ func objectInfoFromWebDAVKey(key string, resp webDAVResponse) ObjectInfo {
 }
 
 func (b webDAVBackend) keyFromHref(href string) (string, bool) {
-	value, err := url.QueryUnescape(strings.TrimSpace(href))
-	if err != nil {
-		value = strings.TrimSpace(href)
-	}
+	value := strings.TrimSpace(href)
 	base, err := url.Parse(b.cfg.Endpoint)
 	if err != nil {
 		return "", false

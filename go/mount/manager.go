@@ -212,9 +212,11 @@ func (m *manager) getBucketMountStatus(bucket string) (BucketMountStatus, error)
 		return BucketMountStatus{Bucket: trimmedBucket}, nil
 	}
 	if !m.syncSessionLocked(existing) {
+		status := existing.status()
+		status.Mounted = false
 		delete(m.sessions, trimmedBucket)
 		delete(m.lastProbes, existing.mountTarget)
-		return BucketMountStatus{Bucket: trimmedBucket}, nil
+		return status, nil
 	}
 	return existing.status(), nil
 }
@@ -228,10 +230,15 @@ func (m *manager) openBucketMount(bucket string) (BucketMountStatus, error) {
 		return BucketMountStatus{Bucket: trimmedBucket}, fmt.Errorf("bucket is not mounted")
 	}
 	if !m.syncSessionLocked(existing) {
+		status := existing.status()
+		status.Mounted = false
 		delete(m.sessions, trimmedBucket)
 		delete(m.lastProbes, existing.mountTarget)
 		m.mu.Unlock()
-		return BucketMountStatus{Bucket: trimmedBucket}, fmt.Errorf("bucket is not mounted")
+		if message := strings.TrimSpace(status.LastError); message != "" {
+			return status, fmt.Errorf("bucket is not mounted: %s", message)
+		}
+		return status, fmt.Errorf("bucket is not mounted")
 	}
 	session := existing
 	m.mu.Unlock()
@@ -254,19 +261,33 @@ func (m *manager) syncSessionLocked(session *mountSession) bool {
 	}
 	active, err := m.cachedSessionActiveLocked(session)
 	if err != nil {
-		session.lastError = err.Error()
-		if stopErr := session.backend.Stop(session); stopErr != nil {
-			session.lastError = fmt.Sprintf("%s\n停止挂载失败: %v", session.lastError, stopErr)
-			return session.mounted && !session.stopping
-		}
-		return false
+		// A status probe failure is not proof that the volume disappeared.
+		// Keeping the server open avoids tearing down an in-flight Finder copy
+		// because the mount table command had one transient failure.
+		session.lastError = fmt.Sprintf("检查挂载状态失败: %v", err)
+		log.Printf(
+			"[mount/manager] status-probe-error bucket=%q target=%q err=%v",
+			session.bucket,
+			session.mountTarget,
+			err,
+		)
+		return session.mounted && !session.stopping
 	}
 	if active {
 		session.mounted = true
+		if strings.HasPrefix(session.lastError, "检查挂载状态失败: ") {
+			session.lastError = ""
+		}
 		return true
 	}
+	session.lastError = "系统 WebDAV 挂载已意外断开；本地待同步内容已保留，请重新挂载。"
+	log.Printf(
+		"[mount/manager] status-probe-inactive bucket=%q target=%q",
+		session.bucket,
+		session.mountTarget,
+	)
 	if stopErr := session.backend.Stop(session); stopErr != nil {
-		session.lastError = stopErr.Error()
+		session.lastError = fmt.Sprintf("%s\n释放失效挂载失败: %v", session.lastError, stopErr)
 		return session.mounted && !session.stopping
 	}
 	return false

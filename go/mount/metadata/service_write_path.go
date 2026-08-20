@@ -3,6 +3,7 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -14,6 +15,44 @@ func (s *Service) CreateDirectoryPath(ctx context.Context, value string, opts Wr
 	s.pathWriteMu.Lock()
 	defer s.pathWriteMu.Unlock()
 	return s.createDirectoryPathLocked(ctx, value, opts)
+}
+
+// EnsureDirectoryPath creates any missing ancestors in the Desired tree.
+// Finder can issue a deep MKCOL before its parent MKCOL requests complete, so
+// mount callers need this local-only recursive form rather than HTTP 409.
+func (s *Service) EnsureDirectoryPath(ctx context.Context, value string, opts WriteOptions) (uint64, error) {
+	s.pathWriteMu.Lock()
+	defer s.pathWriteMu.Unlock()
+
+	segments := SplitPath(value)
+	if len(segments) == 0 {
+		return 0, fmt.Errorf("metadata: root cannot be created")
+	}
+	current := rootInode
+	for _, segment := range segments {
+		next, err := s.Resolve(current, segment)
+		if errors.Is(err, ErrNotFound) {
+			if err := s.ensureMaterialized(ctx, current, 0); err != nil {
+				return 0, err
+			}
+			next, err = s.Resolve(current, segment)
+		}
+		if errors.Is(err, ErrNotFound) {
+			next, err = s.CreateDirectory(current, segment, opts)
+		}
+		if err != nil {
+			return 0, err
+		}
+		object, err := s.StatInode(ctx, next)
+		if err != nil {
+			return 0, err
+		}
+		if !object.IsDir {
+			return 0, fmt.Errorf("metadata: parent %q is not a directory", segment)
+		}
+		current = next
+	}
+	return current, nil
 }
 
 // CreateDirectoryPathWithProjection returns the exact Desired version created

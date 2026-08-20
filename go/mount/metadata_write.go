@@ -65,7 +65,7 @@ func (a *bucketAccess) createMetadataDirectory(ctx context.Context, virtualPath 
 	}
 	a.writebackMu.Lock()
 	defer a.writebackMu.Unlock()
-	if _, err := service.CreateDirectoryPath(ctx, cleanVirtualPath(virtualPath), metadata.WriteOptions{Origin: "mount"}); err != nil {
+	if _, err := service.EnsureDirectoryPath(ctx, cleanVirtualPath(virtualPath), metadata.WriteOptions{Origin: "mount"}); err != nil {
 		return err
 	}
 	a.cache.invalidatePath(virtualPath)

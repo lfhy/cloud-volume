@@ -27,6 +27,31 @@ type inactiveStopFailureMountBackend struct{ stopFailureMountBackend }
 
 func (inactiveStopFailureMountBackend) IsActive(*mountSession) (bool, error) { return false, nil }
 
+type inactiveStopSuccessMountBackend struct{ stopCalls int }
+
+func (*inactiveStopSuccessMountBackend) Initialize(*mountSession) error { return nil }
+func (*inactiveStopSuccessMountBackend) Start(*mountSession) error      { return nil }
+func (b *inactiveStopSuccessMountBackend) Stop(session *mountSession) error {
+	b.stopCalls++
+	session.mounted = false
+	return nil
+}
+func (*inactiveStopSuccessMountBackend) IsActive(*mountSession) (bool, error) { return false, nil }
+func (*inactiveStopSuccessMountBackend) CleanupStale(*mountSession) error     { return nil }
+
+type probeErrorMountBackend struct{ stopCalls int }
+
+func (*probeErrorMountBackend) Initialize(*mountSession) error { return nil }
+func (*probeErrorMountBackend) Start(*mountSession) error      { return nil }
+func (b *probeErrorMountBackend) Stop(*mountSession) error {
+	b.stopCalls++
+	return nil
+}
+func (*probeErrorMountBackend) IsActive(*mountSession) (bool, error) {
+	return false, errors.New("injected probe failure")
+}
+func (*probeErrorMountBackend) CleanupStale(*mountSession) error { return nil }
+
 type cleanupFailureMountBackend struct{ stopCalls int }
 
 func (*cleanupFailureMountBackend) Initialize(*mountSession) error { return nil }
@@ -148,6 +173,84 @@ func TestStatusProbeKeepsSessionWhenInactiveStopFails(t *testing.T) {
 	}
 	if status.LastError == "" {
 		t.Fatal("status probe did not retain the stop failure")
+	}
+}
+
+func TestStatusProbeReportsUnexpectedUnmount(t *testing.T) {
+	access := newTestBucketAccess(t)
+	backend := &inactiveStopSuccessMountBackend{}
+	session := &mountSession{
+		bucket:  "bucket",
+		mounted: true,
+		access:  access,
+		backend: backend,
+	}
+	manager := &manager{
+		sessions:   map[string]*mountSession{"bucket": session},
+		lastProbes: map[string]mountProbeSnapshot{},
+	}
+
+	status, err := manager.getBucketMountStatus("bucket")
+	if err != nil {
+		t.Fatalf("get mount status: %v", err)
+	}
+	if status.Mounted || status.LastError == "" {
+		t.Fatalf("unexpected unmount status = %+v", status)
+	}
+	if backend.stopCalls != 1 {
+		t.Fatalf("stop calls = %d, want 1", backend.stopCalls)
+	}
+	if _, found := manager.sessions["bucket"]; found {
+		t.Fatal("unexpectedly unmounted session remained registered")
+	}
+}
+
+func TestStatusProbeErrorKeepsLiveSession(t *testing.T) {
+	access := newTestBucketAccess(t)
+	backend := &probeErrorMountBackend{}
+	session := &mountSession{
+		bucket:  "bucket",
+		mounted: true,
+		access:  access,
+		backend: backend,
+	}
+	manager := &manager{
+		sessions:   map[string]*mountSession{"bucket": session},
+		lastProbes: map[string]mountProbeSnapshot{},
+	}
+
+	status, err := manager.getBucketMountStatus("bucket")
+	if err != nil {
+		t.Fatalf("get mount status: %v", err)
+	}
+	if !status.Mounted || status.LastError == "" {
+		t.Fatalf("probe error status = %+v", status)
+	}
+	if manager.sessions["bucket"] != session || backend.stopCalls != 0 {
+		t.Fatal("probe error stopped or discarded a live mount session")
+	}
+}
+
+func TestStatusProbeClearsRecoveredTransientError(t *testing.T) {
+	access := newTestBucketAccess(t)
+	session := &mountSession{
+		bucket:    "bucket",
+		mounted:   true,
+		access:    access,
+		backend:   stopFailureMountBackend{},
+		lastError: "检查挂载状态失败: injected probe failure",
+	}
+	manager := &manager{
+		sessions:   map[string]*mountSession{"bucket": session},
+		lastProbes: map[string]mountProbeSnapshot{},
+	}
+
+	status, err := manager.getBucketMountStatus("bucket")
+	if err != nil {
+		t.Fatalf("get mount status: %v", err)
+	}
+	if !status.Mounted || status.LastError != "" {
+		t.Fatalf("recovered probe status = %+v", status)
 	}
 }
 
