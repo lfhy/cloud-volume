@@ -313,3 +313,43 @@ func TestDirectoryRenameWaitsForEarlierChildWrite(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkerCreatesRecursiveChildrenAtConfirmedParentBeforeAncestorMove(t *testing.T) {
+	backend := &directoryMarkerMoveBackend{fakeBackend: newFakeBackend()}
+	service := newTestService(t, backend)
+	service.SetQuietPeriod(time.Nanosecond)
+	ctx := context.Background()
+
+	if _, err := service.EnsureDirectoryPath(ctx, "project/core/proxy", WriteOptions{Origin: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	project, err := service.Resolve(rootInode, "project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker := newManualWorker(service)
+	first := worker.claimDue()
+	if len(first) != 1 || first[0].Type != OpMkdir {
+		t.Fatalf("first claim = %+v, want project mkdir", first)
+	}
+	worker.execute(ctx, first[0])
+	if err := service.Rename(project, rootInode, "renamed", WriteOptions{Origin: "test"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := worker.Drain(ctx); err != nil {
+		t.Fatalf("recursive mkdir plus ancestor rename stalled: %v", err)
+	}
+	want := []string{
+		"mkdir:project",
+		"mkdir:project/core",
+		"mkdir:project/core/proxy",
+		"move:project:renamed",
+	}
+	if strings.Join(backend.ops, ",") != strings.Join(want, ",") {
+		t.Fatalf("remote operation order = %+v, want %+v", backend.ops, want)
+	}
+	if status := service.Status(); status.PendingOps != 0 || status.FailedOps != 0 {
+		t.Fatalf("worker left recursive operations unsettled: %+v", status)
+	}
+}

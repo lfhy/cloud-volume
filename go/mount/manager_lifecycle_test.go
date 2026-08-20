@@ -231,6 +231,65 @@ func TestStatusProbeErrorKeepsLiveSession(t *testing.T) {
 	}
 }
 
+func TestStatusProbeErrorKeepsRetainedAttemptSession(t *testing.T) {
+	access := newTestBucketAccess(t)
+	backend := &probeErrorMountBackend{}
+	session := &mountSession{
+		bucket:         "bucket",
+		mountAttempted: true,
+		access:         access,
+		backend:        backend,
+	}
+	manager := &manager{
+		sessions:   map[string]*mountSession{"bucket": session},
+		lastProbes: map[string]mountProbeSnapshot{},
+	}
+
+	status, err := manager.getBucketMountStatus("bucket")
+	if err != nil {
+		t.Fatalf("get mount status: %v", err)
+	}
+	if status.Mounted || status.LastError == "" {
+		t.Fatalf("partial attempt probe status = %+v", status)
+	}
+	if manager.sessions["bucket"] != session || backend.stopCalls != 0 {
+		t.Fatal("probe error discarded a retained partial-start session")
+	}
+}
+
+func TestRetainedAttemptProbeErrorDoesNotReuseOrOpenMount(t *testing.T) {
+	access := newTestBucketAccess(t)
+	backend := &probeErrorMountBackend{}
+	config := storageconfig.RemoteStorageConfig{Endpoint: "https://example.test", Bucket: "bucket"}.Normalized()
+	session := &mountSession{
+		config:         config,
+		bucket:         "bucket",
+		mountAttempted: true,
+		access:         access,
+		backend:        backend,
+	}
+	manager := &manager{
+		sessions:   map[string]*mountSession{"bucket": session},
+		lastProbes: map[string]mountProbeSnapshot{},
+	}
+
+	status, err := manager.mountBucket(config, "bucket", MountOptions{})
+	if err == nil || status.Mounted {
+		t.Fatalf("partial attempt mount reuse = status=%+v err=%v", status, err)
+	}
+	if manager.sessions["bucket"] != session || backend.stopCalls != 0 {
+		t.Fatal("mount retry discarded a retained partial-start session")
+	}
+	manager.lastProbes = map[string]mountProbeSnapshot{}
+	status, err = manager.openBucketMount("bucket")
+	if err == nil || status.Mounted {
+		t.Fatalf("partial attempt open = status=%+v err=%v", status, err)
+	}
+	if manager.sessions["bucket"] != session || backend.stopCalls != 0 {
+		t.Fatal("open discarded a retained partial-start session")
+	}
+}
+
 func TestStatusProbeClearsRecoveredTransientError(t *testing.T) {
 	access := newTestBucketAccess(t)
 	session := &mountSession{

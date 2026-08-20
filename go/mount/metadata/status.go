@@ -12,7 +12,11 @@ import (
 	storageops "remote-storage/go/storage"
 )
 
-func (s *Service) desiredDirTarget(inode uint64) (string, uint64, string, error) {
+// mkdirRemoteTarget preserves a pending directory's current local name while
+// resolving its parent through confirmed Remote edges. A later ancestor move
+// must not redirect an earlier child mkdir into a remote directory that the
+// move is still waiting to create.
+func (s *Service) mkdirRemoteTarget(inode uint64) (string, uint64, string, error) {
 	var record Inode
 	err := s.store.view(func(tx boltTxT) error {
 		value, err := getInode(tx, inode)
@@ -25,11 +29,14 @@ func (s *Service) desiredDirTarget(inode uint64) (string, uint64, string, error)
 	if record.Kind != KindDirectory {
 		return "", 0, "", fmt.Errorf("metadata: inode %d is not a directory", inode)
 	}
-	desired, err := s.Path(inode)
+	if record.DesiredParentID == 0 || strings.TrimSpace(record.DesiredName) == "" {
+		return "", 0, "", fmt.Errorf("metadata: directory inode %d has no desired target", inode)
+	}
+	target, err := s.remotePathLocked(record.DesiredParentID, record.DesiredName)
 	if err != nil {
 		return "", 0, "", err
 	}
-	return desired, record.DesiredParentID, record.DesiredName, nil
+	return target, record.DesiredParentID, record.DesiredName, nil
 }
 
 func (s *Service) desiredPath(inode uint64) (string, error) {

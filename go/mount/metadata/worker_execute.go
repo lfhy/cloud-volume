@@ -105,7 +105,7 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 	backend := s.backendSnapshot()
 	switch op.Type {
 	case OpMkdir:
-		path, parentID, name, err := s.desiredDirTarget(op.InodeID)
+		path, parentID, name, err := s.mkdirRemoteTarget(op.InodeID)
 		if err != nil {
 			return err
 		}

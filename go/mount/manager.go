@@ -91,6 +91,11 @@ func (m *manager) mountBucket(
 	if existing, ok := m.sessions[trimmedBucket]; ok {
 		if m.syncSessionLocked(existing) {
 			if mountSessionMatches(existing, cfg, trimmedBucket, options) {
+				if !existing.mounted {
+					return existing.status(), fmt.Errorf(
+						"previous mount attempt is unresolved; unmount it before mounting again",
+					)
+				}
 				return existing.status(), nil
 			}
 		}
@@ -241,6 +246,11 @@ func (m *manager) openBucketMount(bucket string) (BucketMountStatus, error) {
 		return status, fmt.Errorf("bucket is not mounted")
 	}
 	session := existing
+	if !session.mounted {
+		status := session.status()
+		m.mu.Unlock()
+		return status, fmt.Errorf("bucket mount is not ready; unmount it before opening")
+	}
 	m.mu.Unlock()
 
 	openPath := session.mountPath
@@ -271,7 +281,10 @@ func (m *manager) syncSessionLocked(session *mountSession) bool {
 			session.mountTarget,
 			err,
 		)
-		return session.mounted && !session.stopping
+		// A partial macOS start can leave a mount attempt and its local WebDAV
+		// server alive even before the mount table confirms it. Keep that
+		// session reachable for an explicit retry/cleanup after a probe error.
+		return (session.mounted || session.mountAttempted) && !session.stopping
 	}
 	if active {
 		session.mounted = true
