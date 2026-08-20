@@ -126,11 +126,29 @@ func (a *bucketAccess) stageOverlayFile(oldVirtualPath, newVirtualPath string) e
 	if err != nil {
 		return err
 	}
+	if err := a.ensureMetadataParentDirectories(newVirtualPath); err != nil {
+		return err
+	}
 	cachePath := a.cachePathFor(newVirtualPath)
 	if err := copyFile(cachePath, localPath); err != nil {
 		return err
 	}
 	return a.stageLocalWrite(newVirtualPath, cachePath, info.Size())
+}
+
+// ensureMetadataParentDirectories absorbs Finder's valid deep temporary-file
+// move when it arrives before a separate MKCOL for the destination parent.
+// It only applies to the durable local-first metadata tree; legacy mounts keep
+// their existing provider-backed directory behavior.
+func (a *bucketAccess) ensureMetadataParentDirectories(virtualPath string) error {
+	if a == nil || !a.usesMetadataWritePath() {
+		return nil
+	}
+	parent := parentVirtualPrefix(virtualPath)
+	if parent == "" {
+		return nil
+	}
+	return a.createMetadataDirectory(context.Background(), parent)
 }
 
 func joinVirtualPath(basePath, relativePath string) string {

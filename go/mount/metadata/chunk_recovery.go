@@ -105,7 +105,9 @@ func (s *Service) SweepChunkStore() error {
 	for _, entry := range entries {
 		_ = os.RemoveAll(filepath.Join(s.tmpDir(), entry.Name()))
 	}
-	return s.writeChunkProtection(protection)
+	s.chunkProtectionDirty = false
+	s.stopChunkProtectionTimerLocked()
+	return s.writeChunkProtectionState(protection, false)
 }
 
 func discardUnownedPendingInodes(tx boltTxT, hasOp map[uint64]bool, refs *bolt.Bucket) error {

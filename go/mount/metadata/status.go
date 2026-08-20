@@ -412,6 +412,3 @@ func resetBlocked(status Status, force bool) (ResetResult, bool) {
 	}
 	return ResetResult{Pending: pending, Required: true}, true
 }
-
-// Close releases the backing database.
-func (s *Service) Close() error { return s.store.Close() }

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	storageconfig "remote-storage/go/config"
 )
@@ -112,18 +113,9 @@ func TestStagingProtectsEveryUncommittedChunk(t *testing.T) {
 			t.Fatalf("uncommitted chunk %s unexpectedly has bbolt accounting", hash)
 		}
 	}
-	data, err := os.ReadFile(service.chunkProtectionPath())
-	if err != nil {
-		t.Fatal(err)
-	}
-	var manifest chunkProtection
-	if err := decodeJSON(data, &manifest); err != nil {
-		t.Fatal(err)
-	}
-	for _, hash := range hashes {
-		if _, ok := manifest.Chunks[hash]; !ok {
-			t.Fatalf("uncommitted chunk %s is missing from protection manifest", hash)
-		}
+	manifest := readChunkProtectionForTest(t, service)
+	if !manifest.Conservative {
+		t.Fatalf("uncommitted staging manifest is not conservative: %+v", manifest)
 	}
 	if _, err := storageconfig.CleanCache(
 		storageconfig.RemoteStorageConfig{CacheDirectory: service.store.chunkRoot},
@@ -136,6 +128,51 @@ func TestStagingProtectsEveryUncommittedChunk(t *testing.T) {
 			t.Fatalf("cache cleanup removed protected uncommitted chunk %s: %v", hash, err)
 		}
 	}
+}
+
+func TestConservativeManifestFinalizesAfterCommittedWrite(t *testing.T) {
+	service := newTestService(t, newFakeBackend())
+	if _, err := service.StageWrite(2, 1, strings.NewReader("pending"), 7); err != nil {
+		t.Fatal(err)
+	}
+	if manifest := readChunkProtectionForTest(t, service); !manifest.Conservative {
+		t.Fatalf("active write manifest is not conservative: %+v", manifest)
+	}
+	time.Sleep(2 * chunkProtectionDebounce)
+	manifest := readChunkProtectionForTest(t, service)
+	if manifest.Conservative || len(manifest.Chunks) != 1 {
+		t.Fatalf("idle manifest = %+v, want exact pending chunk", manifest)
+	}
+}
+
+func TestServiceCloseFinalizesConservativeManifest(t *testing.T) {
+	service := newTestService(t, newFakeBackend())
+	if _, err := service.StageWrite(2, 1, strings.NewReader("pending"), 7); err != nil {
+		t.Fatal(err)
+	}
+	if manifest := readChunkProtectionForTest(t, service); !manifest.Conservative {
+		t.Fatalf("active write manifest is not conservative: %+v", manifest)
+	}
+	if err := service.Close(); err != nil {
+		t.Fatal(err)
+	}
+	manifest := readChunkProtectionForTest(t, service)
+	if manifest.Conservative || len(manifest.Chunks) != 1 {
+		t.Fatalf("close manifest = %+v, want exact pending chunk", manifest)
+	}
+}
+
+func readChunkProtectionForTest(t *testing.T, service *Service) chunkProtection {
+	t.Helper()
+	data, err := os.ReadFile(service.chunkProtectionPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest chunkProtection
+	if err := decodeJSON(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	return manifest
 }
 
 func TestCommittedChunksStayProtectedDuringCacheClear(t *testing.T) {

@@ -128,15 +128,7 @@ func (s *Service) writePathLocked(
 	if err != nil {
 		return 0, ContentRef{}, err
 	}
-	reservation, err := s.stageWriteForName(parentInode, name, 0, source, size)
-	if err != nil {
-		return 0, ContentRef{}, err
-	}
-	if _, err := s.Write(parentInode, name, reservation.ref, opts); err != nil {
-		cleanupErr := s.rollbackStagedWrite(reservation)
-		return 0, ContentRef{}, combineStageErrors(err, cleanupErr)
-	}
-	return reservation.inode, reservation.ref, nil
+	return s.writePathInodeLocked(ctx, parentInode, name, source, size, opts)
 }
 
 // RenamePath moves one resolved inode without exposing parent inode IDs.

@@ -27,6 +27,9 @@ func (f *webDAVFS) OpenFile(
 	perm os.FileMode,
 ) (webdav.File, error) {
 	clean := normalizeWebDAVName(name)
+	if webDAVRequestMethod(ctx) == "LOCK" && flag == os.O_RDWR|os.O_CREATE|os.O_TRUNC {
+		return newWebDAVLockNullFile(clean), nil
+	}
 	if f.access.overlay.handles(clean) {
 		file, err := f.access.overlay.openFile(ctx, clean, flag, perm)
 		if err != nil {

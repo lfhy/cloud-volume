@@ -9,20 +9,23 @@ import (
 
 // Service exposes read/write APIs to page and mount adapters.
 type Service struct {
-	store                *Store
-	backendMu            sync.RWMutex
-	backend              Backend
-	policyMu             sync.RWMutex
-	quiet                time.Duration
-	readOnly             bool
-	operationMu          sync.RWMutex
-	remoteQuietMu        sync.Mutex
-	remoteQuietUntilNano int64
-	pathWriteMu          sync.Mutex
-	chunkMu              sync.Mutex
-	chunkTouch           map[string]int64
-	workerMu             sync.RWMutex
-	worker               *Worker
+	store                 *Store
+	backendMu             sync.RWMutex
+	backend               Backend
+	policyMu              sync.RWMutex
+	quiet                 time.Duration
+	readOnly              bool
+	operationMu           sync.RWMutex
+	remoteQuietMu         sync.Mutex
+	remoteQuietUntilNano  int64
+	pathWriteMu           sync.Mutex
+	chunkMu               sync.Mutex
+	chunkTouch            map[string]int64
+	chunkProtectionDirty  bool
+	chunkProtectionTimer  *time.Timer
+	chunkProtectionClosed bool
+	workerMu              sync.RWMutex
+	worker                *Worker
 }
 
 // NewService wires a durable store to one provider backend.
@@ -129,4 +132,22 @@ func (s *Service) taskWorker() *Worker {
 	s.workerMu.RLock()
 	defer s.workerMu.RUnlock()
 	return s.worker
+}
+
+// Close stops deferred manifest work before releasing the backing database.
+func (s *Service) Close() error {
+	s.chunkMu.Lock()
+	if !s.chunkProtectionClosed {
+		if s.chunkProtectionDirty {
+			// A normal shutdown can cheaply shrink the temporary conservative
+			// window. If this fails, retain the marker: overprotection is safe.
+			if err := s.syncChunkProtectionLocked(); err != nil {
+				log.Printf("[metadata/chunks] protection-close namespace=%q err=%v", s.store.namespace.ID, err)
+			}
+		}
+		s.chunkProtectionClosed = true
+		s.stopChunkProtectionTimerLocked()
+	}
+	s.chunkMu.Unlock()
+	return s.store.Close()
 }

@@ -75,12 +75,11 @@ func (s *Service) stageChunksLocked(source io.Reader) ([]string, []int64, int64,
 	if err := os.MkdirAll(s.tmpDir(), 0o755); err != nil {
 		return nil, nil, 0, err
 	}
-	// Keep every already-written prospective block in this staging pass
-	// protected until the ContentRef transaction makes those links durable.
-	protection, err := s.chunkProtectionSnapshot()
-	if err != nil {
+	if err := s.beginChunkProtectionLocked(); err != nil {
 		return nil, nil, 0, err
 	}
+	// A conservative namespace marker protects every block until the
+	// ContentRef transaction makes this staging pass durable.
 	buffer := make([]byte, chunkSize)
 	hashes := make([]string, 0)
 	sizes := make([]int64, 0)
@@ -91,9 +90,6 @@ func (s *Service) stageChunksLocked(source io.Reader) ([]string, []int64, int64,
 			block := buffer[:count]
 			sum := sha256.Sum256(block)
 			hash := hex.EncodeToString(sum[:])
-			if err := s.protectChunkBeforeCommitLocked(protection, hash, int64(count)); err != nil {
-				return nil, nil, 0, err
-			}
 			if err := s.writeChunkLocked(hash, block); err != nil {
 				return nil, nil, 0, err
 			}
@@ -165,8 +161,8 @@ func (s *Service) writeChunkLocked(hash string, block []byte) error {
 }
 
 // replaceContentRefLocked records a new generation and balances references for
-// any generation it replaces. stageChunksLocked has already published every
-// prospective hash in a conservative manifest before this transaction begins.
+// any generation it replaces. stageChunksLocked has already published a
+// conservative namespace manifest before this transaction begins.
 func (s *Service) replaceContentRefLocked(ref ContentRef, sizes []int64) error {
 	if len(ref.Chunks) != len(sizes) {
 		return fmt.Errorf("metadata: chunk hashes and sizes differ")
@@ -206,7 +202,11 @@ func (s *Service) replaceContentRefLocked(ref ContentRef, sizes []int64) error {
 		return err
 	}
 	s.removeChunkFiles(remove)
-	s.syncChunkProtectionBestEffortLocked()
+	if s.chunkProtectionDirty {
+		s.finishChunkProtectionWindowLocked()
+	} else {
+		s.syncChunkProtectionBestEffortLocked()
+	}
 	return nil
 }
 
@@ -264,7 +264,11 @@ func (s *Service) releaseContent(inode uint64, generation *uint64, removeInode b
 		return err
 	}
 	s.removeChunkFiles(remove)
-	s.syncChunkProtectionBestEffortLocked()
+	if s.chunkProtectionDirty {
+		s.finishChunkProtectionWindowLocked()
+	} else {
+		s.syncChunkProtectionBestEffortLocked()
+	}
 	return nil
 }
 

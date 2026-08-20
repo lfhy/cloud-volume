@@ -4,6 +4,7 @@ package metadata
 import (
 	"context"
 	"errors"
+	"io"
 	"strconv"
 	"strings"
 	"testing"
@@ -40,6 +41,49 @@ func TestWritePathReservesOneGenerationPerWrite(t *testing.T) {
 	if status := service.Status(); status.PendingOps != 2 {
 		t.Fatalf("pending ops = %d, want 2", status.PendingOps)
 	}
+}
+
+func TestWritePathRejectsTargetChangedWhileStaging(t *testing.T) {
+	service := newTestService(t, newFakeBackend())
+	service.SetQuietPeriod(time.Hour)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	result := make(chan error, 1)
+	reader := &stagingGateReader{started: started, release: release, data: []byte("payload")}
+	go func() {
+		_, _, err := service.WritePath(
+			context.Background(), "draft.txt", reader, int64(len(reader.data)), WriteOptions{Origin: "test"},
+		)
+		result <- err
+	}()
+	<-started
+	if _, err := service.CreateDirectory(rootInode, "changed", WriteOptions{Origin: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if err := <-result; !errors.Is(err, ErrStaleCursor) {
+		t.Fatalf("WritePath error = %v, want stale target", err)
+	}
+	if _, err := service.StatPath(context.Background(), "draft.txt"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("stale write created target: %v", err)
+	}
+}
+
+type stagingGateReader struct {
+	started chan<- struct{}
+	release <-chan struct{}
+	data    []byte
+	sent    bool
+}
+
+func (r *stagingGateReader) Read(target []byte) (int, error) {
+	if r.sent {
+		return 0, io.EOF
+	}
+	r.sent = true
+	close(r.started)
+	<-r.release
+	return copy(target, r.data), io.EOF
 }
 
 func TestCreateDirectoryPathUpdatesDesiredTree(t *testing.T) {

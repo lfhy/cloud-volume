@@ -85,6 +85,44 @@ func TestRuleCleanupSkipsOldPendingChunk(t *testing.T) {
 	}
 }
 
+func TestConservativeManifestProtectsChunksAndActiveSplice(t *testing.T) {
+	cacheRoot := t.TempDir()
+	pendingPath, manifestPath := writeProtectedChunk(t, cacheRoot, "namespace", []byte("keep"))
+	root := filepath.Dir(filepath.Dir(filepath.Dir(pendingPath)))
+	data, err := json.Marshal(metadataChunkProtectionManifest{
+		Version: 1, Conservative: true, Chunks: map[string]int64{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	splicePath := filepath.Join(root, "tmp", "upload-active")
+	if err := os.MkdirAll(filepath.Dir(splicePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(splicePath, []byte("splice"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := CleanCache(
+		RemoteStorageConfig{CacheDirectory: cacheRoot},
+		CleanCacheRequest{ClearAll: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Removed != 0 || result.SkippedProtected != 1 {
+		t.Fatalf("clear result = %+v", result)
+	}
+	for _, path := range []string{pendingPath, manifestPath, splicePath} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("protected cache file %s was removed: %v", path, err)
+		}
+	}
+}
+
 func TestCorruptChunkManifestProtectsWholeNamespace(t *testing.T) {
 	cacheRoot := t.TempDir()
 	hash := chunkHash([]byte("keep"))

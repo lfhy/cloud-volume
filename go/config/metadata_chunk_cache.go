@@ -13,8 +13,9 @@ import (
 const metadataChunkStoreDir = "metadata-chunks"
 
 type metadataChunkProtectionManifest struct {
-	Version int
-	Chunks  map[string]int64
+	Version      int
+	Conservative bool
+	Chunks       map[string]int64
 }
 
 type metadataChunkProtection struct {
@@ -43,18 +44,23 @@ func loadMetadataChunkProtection(cacheRoot string) metadataChunkProtection {
 		if !ok {
 			protection.protectTree(chunksRoot, true)
 		} else {
-			if len(manifest.Chunks) > 0 {
-				protection.all[filepath.Clean(manifestPath)] = struct{}{}
-			}
-			for hash := range manifest.Chunks {
-				if !validMetadataChunkHash(hash) {
-					protection.protectTree(chunksRoot, true)
-					break
+			// The manifest is part of the protection protocol. Keep it through
+			// ClearAll so a concurrent staging pass cannot lose its conservative
+			// marker between cleanup scans.
+			protection.all[filepath.Clean(manifestPath)] = struct{}{}
+			if manifest.Conservative {
+				protection.protectTree(chunksRoot, true)
+			} else {
+				for hash := range manifest.Chunks {
+					if !validMetadataChunkHash(hash) {
+						protection.protectTree(chunksRoot, true)
+						break
+					}
+					path := filepath.Join(chunksRoot, hash[:2], hash)
+					clean := filepath.Clean(path)
+					protection.all[clean] = struct{}{}
+					protection.pending[clean] = struct{}{}
 				}
-				path := filepath.Join(chunksRoot, hash[:2], hash)
-				clean := filepath.Clean(path)
-				protection.all[clean] = struct{}{}
-				protection.pending[clean] = struct{}{}
 			}
 		}
 		// An upload splice is live data too. It is not counted as pending
