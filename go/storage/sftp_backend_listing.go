@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 )
 
 func (b sftpBackend) ListObjectsPage(
@@ -111,7 +112,7 @@ func sftpEntryFromInfo(prefix string, info os.FileInfo) ObjectInfo {
 	return ObjectInfo{
 		Key:          key,
 		Size:         info.Size(),
-		LastModified: info.ModTime().Format("2006-01-02 15:04:05"),
+		LastModified: info.ModTime().In(time.Local).Format("2006-01-02 15:04:05"),
 		IsDir:        isDir,
 	}
 }
@@ -126,7 +127,7 @@ func sftpEntryFromStat(key string, info os.FileInfo) ObjectInfo {
 	return ObjectInfo{
 		Key:          cleanKey,
 		Size:         info.Size(),
-		LastModified: info.ModTime().Format("2006-01-02 15:04:05"),
+		LastModified: info.ModTime().In(time.Local).Format("2006-01-02 15:04:05"),
 		IsDir:        isDir,
 	}
 }

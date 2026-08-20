@@ -417,7 +417,7 @@ func fileInfoFromObject(info s3ops.ObjectInfo) os.FileInfo {
 		name = baseName(info.Key)
 	}
 	modTime := time.Now()
-	if parsed, err := time.Parse("2006-01-02 15:04:05", info.LastModified); err == nil {
+	if parsed, err := parseObjectLastModified(info.LastModified); err == nil {
 		modTime = parsed
 	} else if info.IsDir {
 		// Directory marker listings often omit LastModified. A moving fallback

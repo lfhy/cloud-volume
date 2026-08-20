@@ -81,7 +81,7 @@ func fillWinFspFileStatFromObjectWithInode(
 
 func fillWinFspFileStatRaw(stat *fuse.Stat_t, size int64, mode uint32, lastModified string) {
 	mtime := time.Now()
-	if parsed, err := time.Parse("2006-01-02 15:04:05", lastModified); err == nil {
+	if parsed, err := parseObjectLastModified(lastModified); err == nil {
 		mtime = parsed
 	}
 	stat.Mode = fuse.S_IFREG | mode

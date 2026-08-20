@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	storageconfig "remote-storage/go/config"
 	bridgelog "remote-storage/go/logging"
@@ -392,7 +393,7 @@ func parseHTTPTime(value string) string {
 	if err != nil {
 		return trimmed
 	}
-	return parsed.Format("2006-01-02 15:04:05")
+	return parsed.In(time.Local).Format("2006-01-02 15:04:05")
 }
 
 // sortWebDAVObjects keeps WebDAV listing order aligned with the S3 browser.

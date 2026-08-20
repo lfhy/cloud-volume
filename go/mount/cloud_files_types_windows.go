@@ -88,7 +88,7 @@ func cloudFilesObjectModTime(info s3ops.ObjectInfo) time.Time {
 	if info.LastModified == "" {
 		return time.Now()
 	}
-	modTime, err := time.ParseInLocation("2006-01-02 15:04:05", info.LastModified, time.Local)
+	modTime, err := parseObjectLastModified(info.LastModified)
 	if err != nil {
 		return time.Now()
 	}

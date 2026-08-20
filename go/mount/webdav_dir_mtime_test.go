@@ -11,7 +11,12 @@ import (
 )
 
 func TestDirectoryHandleMTimeComesFromObject(t *testing.T) {
-	t.Parallel()
+	originalLocal := time.Local
+	localZone := time.FixedZone("UTC+8", 8*60*60)
+	time.Local = localZone
+	t.Cleanup(func() {
+		time.Local = originalLocal
+	})
 
 	handle := newDirectoryHandle(nil, "docs", s3ops.ObjectInfo{
 		Key: "docs", IsDir: true, LastModified: "2026-08-18 10:00:00",
@@ -20,7 +25,7 @@ func TestDirectoryHandleMTimeComesFromObject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stat() error = %v", err)
 	}
-	want := time.Date(2026, 8, 18, 10, 0, 0, 0, time.UTC)
+	want := time.Date(2026, 8, 18, 10, 0, 0, 0, localZone)
 	if !info.ModTime().Equal(want) {
 		t.Fatalf("directory mtime = %v, want %v", info.ModTime(), want)
 	}
@@ -39,7 +44,7 @@ func TestDirectoryInfoFallbackMTimeIsStable(t *testing.T) {
 	}
 
 	fileInfo := fileInfoFromObject(s3ops.ObjectInfo{Key: "a.txt", LastModified: "2026-01-02 03:04:05"})
-	wantFile := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	wantFile := time.Date(2026, 1, 2, 3, 4, 5, 0, time.Local)
 	if !fileInfo.ModTime().Equal(wantFile) {
 		t.Fatalf("file mtime = %v, want %v", fileInfo.ModTime(), wantFile)
 	}
