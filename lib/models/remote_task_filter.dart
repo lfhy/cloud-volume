@@ -30,4 +30,22 @@ class RemoteTaskFilter {
     if (cursor.isNotEmpty) 'cursor': cursor,
     'limit': limit,
   };
+
+  RemoteTaskFilter copyWith({
+    String? profileId,
+    String? bucket,
+    List<RemoteTaskStatus>? statuses,
+    bool? includeHistory,
+    String? cursor,
+    int? limit,
+  }) {
+    return RemoteTaskFilter(
+      profileId: profileId ?? this.profileId,
+      bucket: bucket ?? this.bucket,
+      statuses: statuses ?? this.statuses,
+      includeHistory: includeHistory ?? this.includeHistory,
+      cursor: cursor ?? this.cursor,
+      limit: limit ?? this.limit,
+    );
+  }
 }

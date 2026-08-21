@@ -121,6 +121,13 @@ When the user asks to add a new storage type (e.g. FTP, SFTP, or any new remote 
 
 **Status (2026-08-18):** persistent inode metadata backs page/mount reads and metadata-enabled writes, and the unified `RemoteTask` projection is now the only remote-operation UI source. Mounts and profile-scoped page mutations share one journal-first namespace; callers without a durable `ProfileID` retain legacy execution compatibility only.
 
+#### Task-list ordering & page-one visibility contract (binding)
+
+- Desktop bridge and Web task lists (`bridge/remote_task_ordering.go`, `go/webapi/remote_task_ordering.go`) MUST sort unsettled tasks (pending/waiting/blocked/retry_wait/running/verifying/cancel_requested/reconciling/failed/conflict) before terminal history, newest-first within each group, ID as tiebreaker. Offset pagination is applied after that ordering. This is not cosmetic: the file-manager page refreshes its listing when a metadata task transitions active→terminal, and a first page that drowns active tasks in done history silently breaks page/mount 同源 refresh (observed 2026-08-21 with 558 done groups pushing new tasks past limit=100).
+- `RemoteTaskStore.refresh` polls with `includeHistory: false` so active tasks always fit on the first page; history is only fetched on explicit `loadMore` (which passes `includeHistory: true`). Any new polling caller must preserve this.
+- `TransfersPage` renders a queue-tab row (`_RemoteQueueTab`, dedicated StatefulWidget hover per the binding hover rule) that both displays per-queue counts and switches `_remoteStatusFilter`; tabs are the primary queue navigation, the dropdown remains a secondary control.
+- Regression: `bridge/remote_task_ordering_test.go` pins 118 done + 2 active → page one contains both active tasks, newest active first.
+
 #### Orphan mount startup sweep (macOS)
 
 - `go/mount/orphan_mount_sweep_darwin.go` / `orphan_mount_sweep_other.go` - `SweepOrphanMounts()` enumerates `mount -t webdav`, keeps only managed `云卷-` paths under `/Volumes` or `~/云卷` whose source URL is a loopback `127.0.0.1:<port>` with no live TCP listener, and force-unmounts the rest. Exit-time cleanup (`AppDelegate.applicationWillTerminate` dlopen path and Dart `AppExitCleanup`) is best-effort; this sweep guarantees self-healing after a crash, force-quit, or hung process. `orphan_mount_sweep_test.go` pins the loopback/dead-port/live-listener/unmanaged rules.

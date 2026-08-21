@@ -176,9 +176,14 @@ class RemoteTaskStore extends ChangeNotifier {
     if (_api == null || _polling) return;
     final generation = _bindingGeneration;
     final api = _api!;
+    // History only matters when the caller explicitly pages it in; polling
+    // excludes terminal rows so active tasks always fit on page one.
+    final effective = filter.includeHistory && filter.cursor.isEmpty
+        ? filter.copyWith(includeHistory: false)
+        : filter;
     _polling = true;
     try {
-      final page = await api.listRemoteTasks(filter);
+      final page = await api.listRemoteTasks(effective);
       if (generation != _bindingGeneration || !identical(api, _api)) return;
       _mergeRemoteTasks(
         page.items,
@@ -261,7 +266,7 @@ class RemoteTaskStore extends ChangeNotifier {
 
   Future<void> loadMore() async {
     if (_api == null || _nextCursor.isEmpty || _polling) return;
-    await refresh(RemoteTaskFilter(cursor: _nextCursor));
+    await refresh(RemoteTaskFilter(cursor: _nextCursor, includeHistory: true));
   }
 
   Future<bool> retry(String id) async {

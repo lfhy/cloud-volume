@@ -4,7 +4,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -76,23 +75,9 @@ func listRemoteTasks(args json.RawMessage) (any, error) {
 		}
 		items = append(items, runtimeTaskWire(snapshot))
 	}
-	sort.SliceStable(items, func(i, j int) bool {
-		return fmt.Sprint(items[i].(map[string]any)["id"]) < fmt.Sprint(items[j].(map[string]any)["id"])
-	})
-	start := taskCursorOffset(input.Cursor)
-	if start > len(items) {
-		start = len(items)
-	}
-	items = items[start:]
-	limit := input.Limit
-	if limit <= 0 {
-		limit = 100
-	}
-	var nextCursor string
-	if len(items) > limit {
-		items = items[:limit]
-		nextCursor = strconv.Itoa(start + limit)
-	}
+	// Active tasks always outrank history so page-one polling can observe
+	// every unsettled operation regardless of accumulated done entries.
+	items, nextCursor := remoteTaskPageSlice(items, input.Cursor, input.Limit)
 	return remoteTaskPage{
 		Items:      items,
 		NextCursor: nextCursor,

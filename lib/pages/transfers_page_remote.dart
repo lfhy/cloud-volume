@@ -74,6 +74,8 @@ extension _TransfersPageRemote on _TransfersPageState {
           ],
         ),
         const SizedBox(height: 16),
+        _buildRemoteQueueTabs(theme, store),
+        const SizedBox(height: 12),
         _buildRemoteFilters(),
         const SizedBox(height: 16),
         Expanded(
@@ -197,6 +199,29 @@ extension _TransfersPageRemote on _TransfersPageState {
       ),
     );
   }
+
+  // Queue-tab row switches the list between status queues; each tab is a
+  // dedicated StatefulWidget per the hover binding rule.
+  Widget _buildRemoteQueueTabs(ShadThemeData theme, RemoteTaskStore store) {
+    final tasks = store.tasks;
+    int count(_RemoteTaskStatusFilter filter) => tasks
+        .where((task) =>
+            filter == _RemoteTaskStatusFilter.all || filter.matches(task))
+        .length;
+    return Row(
+      children: [
+        for (final filter in _RemoteTaskStatusFilter.values) ...[
+          _RemoteQueueTab(
+            label: filter.label,
+            count: count(filter),
+            selected: filter == _remoteStatusFilter,
+            onTap: () => _remoteSetState(() => _remoteStatusFilter = filter),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ],
+    );
+  }
 }
 
 class _RemoteTaskSection {
@@ -295,6 +320,77 @@ class _RemoteListHeader extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _RemoteQueueTab extends StatefulWidget {
+  const _RemoteQueueTab({
+    required this.label,
+    required this.count,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final int count;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  State<_RemoteQueueTab> createState() => _RemoteQueueTabState();
+}
+
+class _RemoteQueueTabState extends State<_RemoteQueueTab> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            // Hover is a neutral wash only; selection keeps its stronger
+            // permanent fill so idle/hover rows never look like themes.
+            color: widget.selected
+                ? theme.colorScheme.secondary
+                : _hovered
+                    ? theme.colorScheme.mutedForeground.withValues(alpha: 0.08)
+                    : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                widget.label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: widget.selected ? FontWeight.w600 : FontWeight.w500,
+                  color: widget.selected
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.mutedForeground,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                '${widget.count}',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  color: theme.colorScheme.mutedForeground,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -4,8 +4,6 @@ package webapi
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -67,23 +65,9 @@ func listWebRemoteTasks(input invokeEnvelope) (any, error) {
 		}
 		items = append(items, webRuntimeTaskWire(snapshot))
 	}
-	sort.SliceStable(items, func(i, j int) bool {
-		return fmt.Sprint(items[i].(map[string]any)["id"]) < fmt.Sprint(items[j].(map[string]any)["id"])
-	})
-	start := webTaskCursorOffset(input.Cursor)
-	if start > len(items) {
-		start = len(items)
-	}
-	items = items[start:]
-	limit := input.Limit
-	if limit <= 0 {
-		limit = 100
-	}
-	nextCursor := ""
-	if len(items) > limit {
-		items = items[:limit]
-		nextCursor = strconv.Itoa(start + limit)
-	}
+	// Active tasks first (newest first), then history; shared ordering keeps
+	// page one visible for polling exactly like the desktop bridge.
+	items, nextCursor := webRemoteTaskPageSlice(items, input.Cursor, input.Limit)
 	return webRemoteTaskPage{
 		Items:      items,
 		NextCursor: nextCursor,
@@ -366,14 +350,6 @@ func webMergeTransferProgress(physical map[string]s3ops.TransferSnapshot, ids []
 		return nil, false
 	}
 	return webTransferProgress(merged), true
-}
-
-func webTaskCursorOffset(cursor string) int {
-	value, err := strconv.Atoi(strings.TrimSpace(cursor))
-	if err != nil || value < 0 {
-		return 0
-	}
-	return value
 }
 
 func webRemoteTaskNamespace(taskID string) string {
