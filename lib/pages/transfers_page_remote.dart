@@ -349,6 +349,7 @@ class _RemoteQueueTabState extends State<_RemoteQueueTab> {
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     return MouseRegion(
+      cursor: _hovered ? SystemMouseCursors.click : SystemMouseCursors.basic,
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: GestureDetector(

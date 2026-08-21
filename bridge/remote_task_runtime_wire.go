@@ -23,7 +23,7 @@ func runtimeTaskWire(snapshot s3ops.TransferSnapshot) map[string]any {
 		"phaseDetail": snapshot.StatusDetail, "bucket": snapshot.Bucket,
 		"sourcePath": snapshot.Key, "targetPath": snapshot.TargetPath,
 		"displayPath": snapshot.Key, "localPath": snapshot.LocalPath,
-		"createdAt":  snapshot.CreatedAt,
+		"createdAt":  snapshot.CreatedAt, "updatedAt": snapshot.UpdatedAt,
 		"cancelable": snapshot.Cancelable && (status == "pending" || status == "running"),
 		"retryable":  false, "triggerable": status == "pending" && kind == "upload",
 		"error": snapshot.Error, "progress": transferProgressWire(snapshot),

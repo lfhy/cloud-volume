@@ -73,6 +73,11 @@ void main() {
         );
       RemoteTaskStore.instance.bindApi(api);
       await Future<void>.delayed(Duration.zero);
+      // bindApi fires an unawaited active-only poll; wait it out and then
+      // request the terminal runtime row explicitly from history.
+      await Future<void>.delayed(Duration.zero);
+      await RemoteTaskStore.instance
+          .refresh(const RemoteTaskFilter(includeHistory: true));
       final task = RemoteTaskStore.instance.tasks.single;
       expect(task.source, RemoteTaskSource.runtime);
       expect(task.status, RemoteTaskStatus.done);
@@ -98,6 +103,9 @@ void main() {
       );
     RemoteTaskStore.instance.bindApi(api);
     await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+    await RemoteTaskStore.instance
+        .refresh(const RemoteTaskFilter(includeHistory: true));
     expect(RemoteTaskStore.instance.tasks, hasLength(2));
 
     api.page = const RemoteTaskPage(
@@ -148,7 +156,10 @@ void main() {
           ),
         ],
       );
-      await RemoteTaskStore.instance.refresh();
+      // Complete-snapshot reconciliation only applies to full-history
+      // requests now; ask explicitly for the complete set.
+      await RemoteTaskStore.instance
+          .refresh(const RemoteTaskFilter(includeHistory: true));
       expect(RemoteTaskStore.instance.tasks.map((task) => task.id), [
         'sync:ns:keep',
       ]);
@@ -252,6 +263,21 @@ class _FakeGateway extends Fake implements RemoteStorageGateway {
     RemoteTaskFilter filter = const RemoteTaskFilter(),
   ]) async {
     if (error != null) throw error!;
+    // Mirror the server contract: active-only requests (history excluded)
+    // return only non-terminal rows, so the store's poll/history split can be
+    // exercised without a real backend.
+    if (!filter.includeHistory) {
+      final active = page.items
+          .where((task) => task.status.isActive)
+          .toList(growable: false);
+      return RemoteTaskPage(
+        items: active,
+        nextCursor: page.nextCursor,
+        serverTime: page.serverTime,
+        freshness: page.freshness,
+        capabilities: page.capabilities,
+      );
+    }
     return page;
   }
 }

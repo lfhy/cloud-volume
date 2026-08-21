@@ -151,10 +151,16 @@ class RemoteTaskStore extends ChangeNotifier {
     return true;
   }
 
+  // Active-only poll keeps every unsettled task on page one; history is only
+  // fetched by explicit loadMore requests.
+  Future<void> pollActive() {
+    return refresh(const RemoteTaskFilter(includeHistory: false));
+  }
+
   void bindApi(RemoteStorageGateway api) {
     if (identical(_api, api)) {
       _ensurePolling();
-      if (!_polling) unawaited(refresh());
+      if (!_polling) unawaited(pollActive());
       return;
     }
     _bindingGeneration++;
@@ -166,7 +172,7 @@ class RemoteTaskStore extends ChangeNotifier {
     _tasks.clear();
     _nextCursor = '';
     _hasLoadedMore = false;
-    unawaited(refresh());
+    unawaited(pollActive());
     _ensurePolling();
   }
 
@@ -176,21 +182,21 @@ class RemoteTaskStore extends ChangeNotifier {
     if (_api == null || _polling) return;
     final generation = _bindingGeneration;
     final api = _api!;
-    // History only matters when the caller explicitly pages it in; polling
-    // excludes terminal rows so active tasks always fit on page one.
-    final effective = filter.includeHistory && filter.cursor.isEmpty
-        ? filter.copyWith(includeHistory: false)
-        : filter;
     _polling = true;
     try {
-      final page = await api.listRemoteTasks(effective);
+      final page = await api.listRemoteTasks(filter);
       if (generation != _bindingGeneration || !identical(api, _api)) return;
-      _mergeRemoteTasks(
-        page.items,
-        completeSnapshot: filter.cursor.isEmpty && page.nextCursor.isEmpty,
-      );
+      // A request without history or pagination never describes the full
+      // task set, so it must not purge rows a loadMore call already merged.
+      final completeSnapshot =
+          filter.includeHistory && filter.cursor.isEmpty && page.nextCursor.isEmpty;
+      _mergeRemoteTasks(page.items, completeSnapshot: completeSnapshot);
+      // Keep the history cursor only when the response describes the history
+      // stream; an active-only poll must not clear it to empty.
       if (filter.cursor.isNotEmpty || !_hasLoadedMore) {
-        _nextCursor = page.nextCursor;
+        if (!(filter.includeHistory && page.nextCursor.isEmpty)) {
+          _nextCursor = page.nextCursor;
+        }
       }
       if (filter.cursor.isNotEmpty) _hasLoadedMore = true;
       _freshness = page.freshness;
@@ -265,8 +271,14 @@ class RemoteTaskStore extends ChangeNotifier {
   }
 
   Future<void> loadMore() async {
-    if (_api == null || _nextCursor.isEmpty || _polling) return;
-    await refresh(RemoteTaskFilter(cursor: _nextCursor, includeHistory: true));
+    if (_api == null || _polling) return;
+    // An active-only poll leaves no cursor even when history exists, so the
+    // first history request starts from page one explicitly.
+    if (_nextCursor.isEmpty && _hasLoadedMore) return;
+    await refresh(
+      RemoteTaskFilter(cursor: _nextCursor, includeHistory: true),
+    );
+    _hasLoadedMore = true;
   }
 
   Future<bool> retry(String id) async {
@@ -448,7 +460,7 @@ class RemoteTaskStore extends ChangeNotifier {
     if (_pollTimer != null && _pollInterval == interval) return;
     _pollTimer?.cancel();
     _pollInterval = interval;
-    _pollTimer = Timer.periodic(interval, (_) => unawaited(refresh()));
+    _pollTimer = Timer.periodic(interval, (_) => unawaited(pollActive()));
   }
 
   @visibleForTesting

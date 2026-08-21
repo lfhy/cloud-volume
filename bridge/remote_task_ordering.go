@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"sort"
+	"time"
 )
 
 // activeTaskStates are the wire states that still need work or attention.
@@ -20,26 +21,40 @@ func activeTaskStates() map[string]bool {
 // taskWireSortable extracts the ordering keys one task wire map carries.
 type taskWireSortable struct {
 	Active    bool
-	CreatedAt string
-	UpdatedAt string
+	Timestamp time.Time
 	ID        string
 }
 
-func taskWireSortableFrom(item map[string]any) taskWireSortable {
-	stringify := func(value any) string {
-		if text, ok := value.(string); ok {
-			return text
-		}
-		return ""
+func taskWireString(item map[string]any, key string) string {
+	if text, ok := item[key].(string); ok {
+		return text
 	}
-	status := stringify(item["status"])
-	// Runtime snapshots report pending/running directly; metadata projections
-	// use the same status strings through setWireState.
+	return ""
+}
+
+// taskParseTime parses RFC3339Nano/RFC3339; a zero time sorts oldest so rows
+// with missing stamps cannot leapfrog real activity.
+func taskParseTime(value string) time.Time {
+	if value == "" {
+		return time.Time{}
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed
+		}
+	}
+	return time.Time{}
+}
+
+func taskWireSortableFrom(item map[string]any) taskWireSortable {
+	updated := taskWireString(item, "updatedAt")
+	if updated == "" {
+		updated = taskWireString(item, "createdAt")
+	}
 	return taskWireSortable{
-		Active:    activeTaskStates()[status],
-		CreatedAt: stringify(item["createdAt"]),
-		UpdatedAt: stringify(item["updatedAt"]),
-		ID:        stringify(item["id"]),
+		Active:    activeTaskStates()[taskWireString(item, "status")],
+		Timestamp: taskParseTime(updated),
+		ID:        taskWireString(item, "id"),
 	}
 }
 
@@ -52,20 +67,11 @@ func sortRemoteTaskItems(items []any) {
 		if left.Active != right.Active {
 			return left.Active
 		}
-		leftStamp := taskTimestamp(left)
-		rightStamp := taskTimestamp(right)
-		if leftStamp != rightStamp {
-			return leftStamp > rightStamp
+		if !left.Timestamp.Equal(right.Timestamp) {
+			return left.Timestamp.After(right.Timestamp)
 		}
 		return left.ID > right.ID
 	})
-}
-
-func taskTimestamp(item taskWireSortable) string {
-	if item.UpdatedAt != "" {
-		return item.UpdatedAt
-	}
-	return item.CreatedAt
 }
 
 // remoteTaskPageSlice applies shared ordering then offset pagination.

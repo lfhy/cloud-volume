@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // webActiveTaskStates are wire states that still need work or attention.
@@ -21,31 +22,39 @@ func webActiveTaskStates() map[string]bool {
 
 type webTaskSortable struct {
 	Active    bool
-	CreatedAt string
-	UpdatedAt string
+	Timestamp time.Time
 	ID        string
 }
 
-func webTaskSortableFrom(item map[string]any) webTaskSortable {
-	stringify := func(value any) string {
-		if text, ok := value.(string); ok {
-			return text
-		}
-		return ""
+func webTaskString(item map[string]any, key string) string {
+	if text, ok := item[key].(string); ok {
+		return text
 	}
-	return webTaskSortable{
-		Active:    webActiveTaskStates()[stringify(item["status"])],
-		CreatedAt: stringify(item["createdAt"]),
-		UpdatedAt: stringify(item["updatedAt"]),
-		ID:        stringify(item["id"]),
-	}
+	return ""
 }
 
-func webTaskTimestamp(item webTaskSortable) string {
-	if item.UpdatedAt != "" {
-		return item.UpdatedAt
+func webParseTime(value string) time.Time {
+	if value == "" {
+		return time.Time{}
 	}
-	return item.CreatedAt
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed
+		}
+	}
+	return time.Time{}
+}
+
+func webTaskSortableFrom(item map[string]any) webTaskSortable {
+	updated := webTaskString(item, "updatedAt")
+	if updated == "" {
+		updated = webTaskString(item, "createdAt")
+	}
+	return webTaskSortable{
+		Active:    webActiveTaskStates()[webTaskString(item, "status")],
+		Timestamp: webParseTime(updated),
+		ID:        webTaskString(item, "id"),
+	}
 }
 
 // webRemoteTaskPageSlice orders active tasks first, then applies offset
@@ -57,10 +66,8 @@ func webRemoteTaskPageSlice(items []any, cursor string, limit int) ([]any, strin
 		if left.Active != right.Active {
 			return left.Active
 		}
-		leftStamp := webTaskTimestamp(left)
-		rightStamp := webTaskTimestamp(right)
-		if leftStamp != rightStamp {
-			return leftStamp > rightStamp
+		if !left.Timestamp.Equal(right.Timestamp) {
+			return left.Timestamp.After(right.Timestamp)
 		}
 		return left.ID > right.ID
 	})

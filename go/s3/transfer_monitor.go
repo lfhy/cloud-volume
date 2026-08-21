@@ -12,16 +12,19 @@ import (
 
 // TransferSnapshot is polled by Flutter to render sidebar and transfers UI.
 type TransferSnapshot struct {
-	ID             string `json:"id"`
-	Type           string `json:"type"`
-	ProfileID      string `json:"profileId,omitempty"`
-	Bucket         string `json:"bucket"`
-	Key            string `json:"key"`
-	LocalPath      string `json:"localPath"`
-	TargetPath     string `json:"targetPath,omitempty"`
-	Status         string `json:"status"`
-	StatusDetail   string `json:"statusDetail,omitempty"`
-	CreatedAt      string `json:"createdAt,omitempty"`
+	ID           string `json:"id"`
+	Type         string `json:"type"`
+	ProfileID    string `json:"profileId,omitempty"`
+	Bucket       string `json:"bucket"`
+	Key          string `json:"key"`
+	LocalPath    string `json:"localPath"`
+	TargetPath   string `json:"targetPath,omitempty"`
+	Status       string `json:"status"`
+	StatusDetail string `json:"statusDetail,omitempty"`
+	CreatedAt    string `json:"createdAt,omitempty"`
+	// UpdatedAt (UTC RFC3339Nano) keeps ordering aligned with metadata tasks
+	// even while a runtime snapshot's local-zone createdAt differs.
+	UpdatedAt     string `json:"updatedAt,omitempty"`
 	BytesCompleted int64  `json:"bytesCompleted"`
 	TotalBytes     int64  `json:"totalBytes"`
 	ItemsCompleted int64  `json:"itemsCompleted,omitempty"`
@@ -322,8 +325,10 @@ func ListTransferSnapshots() []TransferSnapshot {
 			delete(globalTransferMonitor.tasks, id)
 			continue
 		}
+		snapshot := task.snapshot
+		snapshot.UpdatedAt = task.updatedAt.UTC().Format(time.RFC3339Nano)
 		result = append(result, item{
-			snapshot:  task.snapshot,
+			snapshot:  snapshot,
 			updatedAt: task.updatedAt,
 		})
 	}
