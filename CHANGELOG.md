@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 新增 macOS 孤儿挂载启动清扫：App 崩溃、强退或进程挂死后残留的 `webdavfs_agent` 挂载会在下次启动时被自动卸载。清扫只针对托管前缀（`/Volumes/云卷-*`、`~/云卷/云卷-*`）且指向本机回环端口、端口已无监听的挂载，正常挂载和其他应用的 WebDAV 卷不受影响；非 macOS 平台为空操作。
+
 - 修复 macOS Finder 大量小文件复制的本地入口放大：WebDAV `LOCK` 的缺失资源探测不再写入零字节 metadata journal，Finder 的 `.BC.T_*` 临时文件保持在本地 overlay，只有最终 `MOVE` 才生成一个最终文件名的写回任务；正常（包括零字节）`PUT` 仍照常落入本地 Desired 树。挂载/page 写入的 inode、内容引用、块 nlink 与 journal 改为单个 bbolt 事务提交，远端上传仍保持异步。
 - 修复 macOS Finder 递归复制的兼容性与可诊断性：深层目录创建会在本地 Desired 树中补齐父目录，避免旧版路径上的 `409 Conflict` 被 Finder 误报为“名称太长或包含无效字符”；祖先目录在复制中重命名时，未同步子目录继续按已确认的远端父路径建立，再执行目录移动，避免任务队列永久互等。系统 WebDAV 卷意外消失时会明确显示断开原因，状态探测瞬态失败不再主动拆掉会话或遗失部分启动会话；状态未确认的部分启动会话也不会被误报成挂载成功。新增真实 `mount_webdav + ditto` 递归复制的 opt-in Go 集成测试。另修复上游 WebDAV 列表把合法文件名中的 `+` 误解为空格的问题。
 - 修复 SFTP、FTP 和 WebDAV 的远端修改时间在非 UTC 客户端发生二次时区偏移：所有 provider 统一输出客户端本地时间，macOS WebDAV / Linux FUSE 与 Windows WinFsp 也按本地时区还原该无时区时间，不再把它误作 UTC。

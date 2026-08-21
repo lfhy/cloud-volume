@@ -307,6 +307,7 @@ abstract class RemoteStorageGateway {
   );
   Future<void> cleanupMounts();
   Future<int> cleanupStaleWindowsProcesses();
+  Future<int> sweepOrphanMounts();
   Future<CacheStats> getCacheStats(RemoteStorageConfig config);
   Future<void> openCacheDirectory(RemoteStorageConfig config);
   Future<CleanCacheResult> cleanCache(

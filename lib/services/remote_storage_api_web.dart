@@ -402,6 +402,9 @@ class RemoteStorageApi
   }
 
   @override
+  Future<int> sweepOrphanMounts() async => 0;
+
+  @override
   Future<CacheStats> getCacheStats(RemoteStorageConfig config) async {
     final result = await _invoke('get_cache_stats');
     return CacheStats.fromJson(result as Map<String, dynamic>);

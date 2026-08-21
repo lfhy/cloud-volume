@@ -121,6 +121,11 @@ When the user asks to add a new storage type (e.g. FTP, SFTP, or any new remote 
 
 **Status (2026-08-18):** persistent inode metadata backs page/mount reads and metadata-enabled writes, and the unified `RemoteTask` projection is now the only remote-operation UI source. Mounts and profile-scoped page mutations share one journal-first namespace; callers without a durable `ProfileID` retain legacy execution compatibility only.
 
+#### Orphan mount startup sweep (macOS)
+
+- `go/mount/orphan_mount_sweep_darwin.go` / `orphan_mount_sweep_other.go` - `SweepOrphanMounts()` enumerates `mount -t webdav`, keeps only managed `云卷-` paths under `/Volumes` or `~/云卷` whose source URL is a loopback `127.0.0.1:<port>` with no live TCP listener, and force-unmounts the rest. Exit-time cleanup (`AppDelegate.applicationWillTerminate` dlopen path and Dart `AppExitCleanup`) is best-effort; this sweep guarantees self-healing after a crash, force-quit, or hung process. `orphan_mount_sweep_test.go` pins the loopback/dead-port/live-listener/unmanaged rules.
+- `bridge/dispatch_mount.go` exposes `sweep_orphan_mounts` (no-op off macOS); `lib/pages/app_bootstrap_page.dart` fires it once per bootstrap session after the API binds. `RemoteStorageGateway.sweepOrphanMounts()` is implemented by desktop (bridge call) and Web (0).
+
 #### New persistent metadata core
 
 - `go/mount/metadata/types.go` - durable contracts: `Inode`, `Dirent`, `Op`, `ListingState`, `ContentRef`, `Object/Page/Cursor`, `Namespace`, and the narrow provider `Backend` interface. `ContentRef` holds ordered SHA-256 chunk hashes, never a local path; a move freezes provider `MoveSource`/`MoveTarget` plus its target edge before the first side effect. `Namespace.CacheRoot` separates chunk data from the runtime metadata DB. Inode identity is local to each namespace; no symlinks/hardlinks.

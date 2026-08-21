@@ -362,10 +362,13 @@ mixin _RemoteStorageDesktopStorageApiMixin
   @override
   Future<int> cleanupStaleWindowsProcesses() async {
     final result = await runBridgeCall('cleanup_stale_windows_processes');
-    if (result is Map<String, dynamic>) {
-      return (result['count'] ?? 0) as int;
-    }
-    return 0;
+    return result is Map ? (result['count'] as num?)?.toInt() ?? 0 : 0;
+  }
+
+  @override
+  Future<int> sweepOrphanMounts() async {
+    final result = await runBridgeCall('sweep_orphan_mounts');
+    return result is Map ? (result['count'] as num?)?.toInt() ?? 0 : 0;
   }
 
   @override

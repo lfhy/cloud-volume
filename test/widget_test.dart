@@ -423,6 +423,9 @@ class _FakeApi implements RemoteStorageGateway {
   Future<int> cleanupStaleWindowsProcesses() async => 0;
 
   @override
+  Future<int> sweepOrphanMounts() async => 0;
+
+  @override
   Future<List<BucketInfo>> listBuckets(
     RemoteStorageConfig config, {
     bool force = false,

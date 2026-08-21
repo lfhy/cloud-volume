@@ -597,7 +597,11 @@ class _TransfersPageFakeApi implements RemoteStorageGateway {
 
   @override
   Future<int> cleanupStaleWindowsProcesses() async =>
-      throw UnimplementedError();
+      // Windows-only helper; tests run on the host without stale processes.
+      0;
+
+  @override
+  Future<int> sweepOrphanMounts() async => 0;
 
   @override
   Future<BucketMountStatus> mountBucket(

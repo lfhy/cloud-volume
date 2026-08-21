@@ -78,6 +78,9 @@ class _AppBootstrapPageState extends State<AppBootstrapPage> {
       }
       if (!mounted) return;
       AppExitCleanup.register(session.api);
+      // Best-effort orphan-mount sweep: a previous crashed run can leave a
+      // managed WebDAV mount pointing at a dead loopback port.
+      unawaited(_sweepOrphanMounts(session.api));
       setState(() {
         _session = session;
         _loading = false;
@@ -98,6 +101,14 @@ class _AppBootstrapPageState extends State<AppBootstrapPage> {
 
   void _reload() {
     unawaited(_loadSession(showLoadingShell: _session == null));
+  }
+
+  Future<void> _sweepOrphanMounts(RemoteStorageGateway api) async {
+    try {
+      await api.sweepOrphanMounts().timeout(const Duration(seconds: 30));
+    } catch (_) {
+      // Startup must proceed even when a stale mount cannot be unmounted.
+    }
   }
 
   @override
