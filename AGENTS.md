@@ -124,7 +124,7 @@ When the user asks to add a new storage type (e.g. FTP, SFTP, or any new remote 
 #### Orphan mount startup sweep (macOS)
 
 - `go/mount/orphan_mount_sweep_darwin.go` / `orphan_mount_sweep_other.go` - `SweepOrphanMounts()` enumerates `mount -t webdav`, keeps only managed `云卷-` paths under `/Volumes` or `~/云卷` whose source URL is a loopback `127.0.0.1:<port>` with no live TCP listener, and force-unmounts the rest. Exit-time cleanup (`AppDelegate.applicationWillTerminate` dlopen path and Dart `AppExitCleanup`) is best-effort; this sweep guarantees self-healing after a crash, force-quit, or hung process. `orphan_mount_sweep_test.go` pins the loopback/dead-port/live-listener/unmanaged rules.
-- `bridge/dispatch_mount.go` exposes `sweep_orphan_mounts` (no-op off macOS); `lib/pages/app_bootstrap_page.dart` fires it once per bootstrap session after the API binds. `RemoteStorageGateway.sweepOrphanMounts()` is implemented by desktop (bridge call) and Web (0).
+- `bridge/dispatch_mount.go` exposes `sweep_orphan_mounts` (no-op off macOS); the sweep runs in a background goroutine so a stubborn busy volume cannot serialize other bridge calls, and completion/errors land in the bridge log. `lib/pages/app_bootstrap_page.dart` fires it exactly once per app run (a one-shot guard skips soft refreshes so a concurrently starting mount is never mistaken for an orphan). `RemoteStorageGateway.sweepOrphanMounts()` is implemented by desktop (bridge call) and Web (0).
 
 #### New persistent metadata core
 

@@ -33,6 +33,7 @@ class _AppBootstrapPageState extends State<AppBootstrapPage> {
   Object? _loadError;
   bool _loading = true;
   bool _showSetupAnyway = false;
+  bool _orphanSweepStarted = false;
   SidebarItem _selectedSidebarItem = SidebarItem.fileManager;
 
   @override
@@ -78,9 +79,14 @@ class _AppBootstrapPageState extends State<AppBootstrapPage> {
       }
       if (!mounted) return;
       AppExitCleanup.register(session.api);
-      // Best-effort orphan-mount sweep: a previous crashed run can leave a
-      // managed WebDAV mount pointing at a dead loopback port.
-      unawaited(_sweepOrphanMounts(session.api));
+      // Best-effort orphan-mount sweep on the first session only: a previous
+      // crashed run can leave a managed WebDAV mount on a dead loopback port.
+      // Later soft refreshes skip it so a concurrent fresh mount is never
+      // mistaken for an orphan while its server is still starting.
+      if (!_orphanSweepStarted) {
+        _orphanSweepStarted = true;
+        unawaited(_sweepOrphanMounts(session.api));
+      }
       setState(() {
         _session = session;
         _loading = false;
@@ -106,8 +112,10 @@ class _AppBootstrapPageState extends State<AppBootstrapPage> {
   Future<void> _sweepOrphanMounts(RemoteStorageGateway api) async {
     try {
       await api.sweepOrphanMounts().timeout(const Duration(seconds: 30));
-    } catch (_) {
-      // Startup must proceed even when a stale mount cannot be unmounted.
+    } catch (error) {
+      // Startup must proceed even when a stale mount cannot be unmounted, but
+      // leave a trace so the bridge log can be correlated with the UI failure.
+      debugPrint('orphan mount sweep failed: $error');
     }
   }
 
