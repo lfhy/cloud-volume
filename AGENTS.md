@@ -97,6 +97,48 @@ When the user asks to add a new storage type (e.g. FTP, SFTP, or any new remote 
 - Every time a new feature is added, update `README.md` in the same change set before committing.
 - Maintain release note drafts in `CHANGELOG.md` under `## Unreleased` as work lands when the change is relevant to an upcoming release.
 
+## Mandatory Review Before Commit
+
+- Every code change must pass a `P0/P1`-grade sub-agent review before it lands on `main`. Treat any P0/P1 finding as blocking; P2/P3 may be deferred but the finding and its resolution link must still be recorded in the relevant Code Map entry.
+- The review agent reads only what `git show` / `git diff` exposes plus the surrounding files it names; it does not need a long context dump. Fork `none` and provide a single concise brief: the commit hash, the motivation / bug it fixes, and the specific risk axes you want examined.
+- Review findings that change scope (new invariants, new files joining a feature) MUST be folded into the matching Code Map entry before the commit that resolves them lands. Historical findings and their resolutions go in the matching ` **Known P2/P3 (review YYYY-MM-DD):** ` block of that feature.
+- A review agent itself may delegate deeper audits (e.g. `post_commit_review`) but the primary session is responsible for triaging the output and pushing the resolution commit.
+
+## Binding Design Principles
+
+These are non-negotiable invariants. Any new code, refactor, or "small change" that violates one of them is a bug — review it as such, even if the change "works".
+
+### 1. Single Source of Truth: Mount and Page Share One Inode View
+
+- The Flutter file manager (`listObjectPage`, `headObjectFromMetadata`) and every mount adapter (`webdav_file`, `linux_fuse_file`, `winfsp_fs_windows`, `cloud_files_hydrator_windows`) MUST resolve their listings, stats, and byte reads through the same bbolt-backed `metadata.Service`. Re-introducing a parallel "mount reads cache, page reads provider" split is a regression even if the visible behavior happens to match.
+- A new entry point that reads or mutates durable state from outside `metadata service` is allowed only with a written justification in the matching Code Map entry and an explicit test that proves both surfaces see the same change.
+- The file-manager page MUST force-refresh its listing when a metadata task affecting the active prefix reaches a terminal state. The mechanism is `RemoteTaskStore` + `_refreshOnMetadataTaskCompletion` (`lib/pages/file_manager_page_restore_sync.dart`); do not reimplement it per call site.
+- `Manager.Acquire` / `Manager.AcquireWithBackend` is the only legal way to obtain a metadata-backed handle. Falling back to provider-direct reads for a profile that has a `ProfileID` is the same regression as the split above.
+- Mount write paths (`createDirectory`, `stageLocalWrite`, `rename`, `delete` in `metadata_write.go`) MUST go through `Service.WritePath` / `EnsureDirectoryPath` / `DeletePath`. Local-only writeback that bypasses the journal is a temporary scaffolding, not a design.
+- `TransferQueue` is the execution / local-producer compatibility facade, never a display source. The unified `RemoteTask` projection from Go is the only display source for the task page, sidebar, sync card, preview, batch dialog, and update progress.
+
+### 2. Metadata Durability Contract
+
+- The metadata journal is the single durable source for all local mutations. No mutation reaches the provider before its journal entry is committed in `ready_ops` (or directly in `journal` for inline writes).
+- A chunk on disk MUST be `fsync`'d and atomically renamed into `chunks/<hash[:2]>/<hash>` before any `ContentRef` that points at it is admitted into bbolt. The reverse is also true: retiring a `ContentRef` MUST decrement each chunk's `nlink` and delete the file only when `nlink == 0`. The bridge between these two directions is `chunk_store.go` / `chunk_protection.go`; do not bypass it from worker, mount, or page code paths.
+- The protection manifest is the only authority for cache cleanup. Cache cleanup (`go/config/metadata_chunk_cache.go`) MUST refuse to delete a chunk or active splice file listed in a valid manifest, and MUST conservatively treat a missing or corrupt manifest as "all chunks in the namespace are protected". The Dart cache model reflects the same rule.
+- Worker claim/execute passes are serialized between the background loop and `Drain`. A pass that has already claimed ops MUST run to completion under one lock; no new claim may interleave inside it. Worker retry deadlines, dependency predicates, and the namespace quiet barrier are durable invariants — do not weaken them to "make a flaky test pass".
+- Verifying / cancel-requested / reconciling states are recovered on startup and probed; a side effect that already reached the provider MUST NOT be replayed against its pre-side-effect fingerprint. This is the rule the post-upload-verification-timeout test pins.
+- Reset/rebuild wipes bbolt in place only when `Status.PendingOps`, `Status.FailedOps`, and `Status.PendingContent` are all zero. Pending content and pending ops are data-class state protected by the reset guard; rebuilding over them is forbidden in this development phase.
+- Schema mismatch returns an error. There is no in-place upgrade; the schema version is bumped and the namespace is rebuilt from the provider listing. `schema.nextOpSeq` keeps sequences monotonic across history compaction; reusing a sequence number is a bug.
+- Crash recovery invariants:
+  - Chunks written without an admitted `ContentRef` are orphan blocks; `chunk_recovery.go` deletes them on startup.
+  - `AwaitingJournal` refs without a write/rename owner are removed on startup, and their new pending inode/dirent is also cleaned up when safe.
+  - `OpStateRunning` is reset to `Pending` on restart; `Verifying` / `CancelRequested` / `Reconciling` are kept and re-probed.
+
+### 3. Task List Page-One Visibility
+
+- The desktop bridge (`bridge/remote_task_ordering.go`) and the Web API (`go/webapi/remote_task_ordering.go`) MUST sort unsettled states (`pending`, `waiting`, `blocked`, `retry_wait`, `running`, `verifying`, `cancel_requested`, `reconciling`, `failed`, `conflict`) before terminal history; within each group, newest first; ID as tiebreaker. Offset pagination is applied AFTER that ordering.
+- The poll loop in `RemoteTaskStore` MUST request `includeHistory: false` so every active task fits on page one regardless of accumulated done history. History is only fetched on explicit `loadMore`, which sets `includeHistory: true`.
+- `completeSnapshot` reconciliation in `refresh` is only allowed when the request actually represents the full task set (`includeHistory && cursor.isEmpty && nextCursor.isEmpty`); otherwise loadMore-merged history rows would be silently purged.
+- Sort key ordering MUST parse timestamps (`time.Parse` on RFC3339Nano / RFC3339) rather than comparing wire strings, so runtime snapshots (local-zone `createdAt`) and metadata tasks (UTC RFC3339Nano `updatedAt`) interleave correctly.
+- The file-manager page refresh and `RemoteTask` ordering are coupled: any change to task-list ordering or pagination must be paired with a regression test that proves active tasks stay on page one (`bridge/remote_task_ordering_test.go`).
+
 ## Validation
 
 - After each meaningful refactor batch, run the narrowest useful validation first.
