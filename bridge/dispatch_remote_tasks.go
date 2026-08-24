@@ -23,12 +23,56 @@ type remoteTaskListArgs struct {
 	Limit          int      `json:"limit"`
 }
 
+type remoteTaskQueueCounts struct {
+	Active  int `json:"active"`
+	Waiting int `json:"waiting"`
+	Failed  int `json:"failed"`
+	History int `json:"history"`
+	Total   int `json:"total"`
+}
+
 type remoteTaskPage struct {
-	Items        []any           `json:"items"`
-	NextCursor   string          `json:"nextCursor,omitempty"`
-	ServerTime   string          `json:"serverTime"`
-	Freshness    string          `json:"freshness"`
-	Capabilities map[string]bool `json:"capabilities"`
+	Items        []any                 `json:"items"`
+	Total        int                   `json:"total"`
+	Queue        remoteTaskQueueCounts `json:"queue"`
+	NextCursor   string                `json:"nextCursor,omitempty"`
+	ServerTime   string                `json:"serverTime"`
+	Freshness    string                `json:"freshness"`
+	Capabilities map[string]bool       `json:"capabilities"`
+}
+
+// remoteTaskQueueFromItems counts real queue sizes from the full filtered
+// (pre-pagination) item list so the UI never guesses from loaded rows.
+func remoteTaskQueueFromItems(items []any) remoteTaskQueueCounts {
+	active := activeTaskStates()
+	counts := remoteTaskQueueCounts{}
+	for _, raw := range items {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		counts.Total++
+		status, _ := item["status"].(string)
+		status = strings.ToLower(strings.TrimSpace(status))
+		switch {
+		case status == "done" || status == "completed" ||
+			status == "canceled" || status == "cancelled":
+			counts.History++
+		case status == "failed" || status == "conflict":
+			counts.Failed++
+		case status == "pending" || status == "waiting" ||
+			status == "blocked" || status == "retry_wait":
+			// The Dart wire parser renders pending as waiting, so these counts
+			// must drive the same queue tab as the rows themselves.
+			counts.Waiting++
+		case active[status]:
+			counts.Active++
+		default:
+			// Unknown wire states deliberately degrade to waiting in Dart.
+			counts.Waiting++
+		}
+	}
+	return counts
 }
 
 func listRemoteTasks(args json.RawMessage) (any, error) {
@@ -45,13 +89,19 @@ func listRemoteTasks(args json.RawMessage) (any, error) {
 		return nil, err
 	}
 	defer releaseTaskNamespaceHandles(manager, handles)
-	if _, err := manager.ClearTaskHistoryFor(input.ProfileID, input.Bucket, time.Now().Add(-30*24*time.Hour)); err != nil {
+	// Retention compaction is throttled: the 30-day scan is O(n²) over the
+	// journal, which starves this same endpoint once history grows large.
+	if _, err := manager.CompactTaskHistoryThrottled(input.ProfileID, input.Bucket); err != nil {
 		return nil, err
 	}
 	groups, err := manager.ListTaskGroups()
 	if err != nil {
 		return nil, err
 	}
+	// Counts always describe the complete profile/bucket scope. includeHistory
+	// controls only the rows sent to a poller; otherwise an active-only refresh
+	// would overwrite a loaded history count with zero ("共 0 项 · 已加载 200").
+	countInput := remoteTaskCountInput(input)
 	items := make([]any, 0)
 	physical := s3ops.ListTransferSnapshots()
 	physicalByID := make(map[string]s3ops.TransferSnapshot, len(physical))
@@ -60,7 +110,7 @@ func listRemoteTasks(args json.RawMessage) (any, error) {
 	}
 	for _, group := range groups {
 		for _, task := range group.Tasks {
-			if !remoteTaskMatches(task, input) {
+			if !remoteTaskMatches(task, countInput) {
 				continue
 			}
 			items = append(items, metadataTaskWire(task, physicalByID))
@@ -70,16 +120,29 @@ func listRemoteTasks(args json.RawMessage) (any, error) {
 		if strings.HasPrefix(snapshot.ID, "metadata-op-") {
 			continue
 		}
-		if !runtimeTaskMatches(snapshot, input) {
+		if !runtimeTaskMatches(snapshot, countInput) {
 			continue
 		}
 		items = append(items, runtimeTaskWire(snapshot))
 	}
 	// Active tasks always outrank history so page-one polling can observe
 	// every unsettled operation regardless of accumulated done entries.
-	items, nextCursor := remoteTaskPageSlice(items, input.Cursor, input.Limit)
+	total := len(items)
+	queue := remoteTaskQueueFromItems(items)
+	items = remoteTaskResponseItems(items, input.IncludeHistory)
+	// Active-only requests must return the full unsettled set so the
+	// waiting/running tabs never cap at the page size; history still pages.
+	limit := input.Limit
+	if !input.IncludeHistory {
+		// Page all active rows. remoteTaskPageSlice treats 0 as the normal
+		// default page size, so use the actual active length as the no-cap limit.
+		limit = len(items)
+	}
+	items, nextCursor := remoteTaskPageSlice(items, input.Cursor, limit)
 	return remoteTaskPage{
 		Items:      items,
+		Total:      total,
+		Queue:      queue,
 		NextCursor: nextCursor,
 		ServerTime: time.Now().UTC().Format(time.RFC3339Nano),
 		Freshness:  "journal+transfer-monitor",

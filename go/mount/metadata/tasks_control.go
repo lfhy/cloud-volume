@@ -84,6 +84,9 @@ func (s *Service) CancelTask(taskID string) (Task, error) {
 	if err != nil {
 		return Task{}, err
 	}
+	// User-initiated control mutations must notify push subscribers even when
+	// the worker has not picked the change up yet.
+	s.NotifyTaskChanged()
 	if worker := s.taskWorker(); worker != nil {
 		for _, seq := range reconcile {
 			worker.cancelOperation(seq)
@@ -124,6 +127,8 @@ func (s *Service) RetryTask(taskID string) (Task, error) {
 	if err != nil {
 		return Task{}, err
 	}
+	// A re-armed task is immediately visible; notify push subscribers.
+	s.NotifyTaskChanged()
 	if worker := s.taskWorker(); worker != nil {
 		worker.Wake()
 	}
@@ -159,17 +164,20 @@ func (s *Service) TriggerTask(taskID string) (Task, error) {
 	if err != nil {
 		return Task{}, err
 	}
+	// Manual trigger changes the next attempt visibly; notify push clients.
+	s.NotifyTaskChanged()
 	if worker := s.taskWorker(); worker != nil {
 		worker.Wake()
 	}
 	return s.GetTask(taskID)
 }
 
-// ClearTaskHistory removes only terminal applied/canceled entries older than
-// before. Pending, failed, running, and reconciling entries are never removed.
+// ClearTaskHistory removes terminal journal entries older than before across
+// all retained namespaces. It reports distinct task groups (matching the
+// UI-selected path) rather than raw journal ops.
 func (s *Service) ClearTaskHistory(before time.Time) (int, error) {
 	s.operationMu.RLock()
-	cleared := 0
+	clearedGroups := make(map[string]struct{})
 	err := s.store.update(func(tx boltTxT) error {
 		journal := tx.Bucket([]byte(bucketJournal))
 		var remove []Op
@@ -199,12 +207,20 @@ func (s *Service) ClearTaskHistory(before time.Time) (int, error) {
 			if err := removeTaskOpIndex(tx, op); err != nil {
 				return err
 			}
-			cleared++
+			if op.TaskGroupID != "" {
+				clearedGroups[op.TaskGroupID] = struct{}{}
+			} else {
+				// Legacy ops without a group id count per op.
+				clearedGroups[fmt.Sprintf("seq-%d", op.Seq)] = struct{}{}
+			}
 		}
 		return nil
 	})
 	s.operationMu.RUnlock()
-	return cleared, err
+	if err == nil && len(clearedGroups) > 0 {
+		s.NotifyTaskChanged()
+	}
+	return len(clearedGroups), err
 }
 
 // canCompactTaskOp preserves the dependency barrier promised by the task API:

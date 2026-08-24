@@ -3,6 +3,8 @@
 FLUTTER ?= $(shell if command -v flutter >/dev/null 2>&1; then command -v flutter; elif [ -x /opt/tools/flutter/bin/flutter ]; then printf '%s\n' /opt/tools/flutter/bin/flutter; fi)
 HOST ?= 0.0.0.0
 PORT ?= 8080
+# Local debug endpoint for live task/transfer state; unset = listener off.
+CV_DEBUG_ADDR ?= 127.0.0.1:8765
 WEB_LISTEN ?= $(HOST):$(PORT)
 
 ifeq ($(OS),Windows_NT)
@@ -121,9 +123,9 @@ run-cli: build-cli
 
 run: bridge
 ifeq ($(HOST_PLATFORM),macos)
-	DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer $(FLUTTER) run -d macos --dart-define=APP_VERSION_LABEL=dev
+	CV_DEBUG_ADDR=$(CV_DEBUG_ADDR) DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer $(FLUTTER) run -d macos --dart-define=APP_VERSION_LABEL=dev --dart-define=CV_DEBUG_ADDR=$(CV_DEBUG_ADDR)
 else ifeq ($(HOST_PLATFORM),linux)
-	$(FLUTTER) run -d linux --dart-define=APP_VERSION_LABEL=dev
+	CV_DEBUG_ADDR=$(CV_DEBUG_ADDR) $(FLUTTER) run -d linux --dart-define=APP_VERSION_LABEL=dev --dart-define=CV_DEBUG_ADDR=$(CV_DEBUG_ADDR)
 else ifeq ($(HOST_PLATFORM),windows)
 	$(FLUTTER) run -d windows --dart-define=APP_VERSION_LABEL=dev
 else

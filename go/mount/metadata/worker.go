@@ -244,6 +244,7 @@ func (w *Worker) claimDueWithOptions(ignoreRemoteQuiet bool) []Op {
 	w.service.remoteQuietMu.Lock()
 	defer w.service.remoteQuietMu.Unlock()
 	var claimed []Op
+	changed := false
 	_ = w.service.store.update(func(tx boltTxT) error {
 		now := time.Now().UnixNano()
 		quietUntil := w.service.remoteQuietUntilNano
@@ -272,6 +273,7 @@ func (w *Worker) claimDueWithOptions(ignoreRemoteQuiet bool) []Op {
 				if err := putOp(tx, op, previous); err != nil {
 					return err
 				}
+				changed = true
 				continue
 			}
 			if opStateNeedsReconciliation(op.State) {
@@ -298,6 +300,7 @@ func (w *Worker) claimDueWithOptions(ignoreRemoteQuiet bool) []Op {
 			if err := putOp(tx, op, previous); err != nil {
 				return err
 			}
+			changed = true
 			claimed = append(claimed, op)
 			// Worker execution is sequential. Claiming just one entry prevents a
 			// later queued provider call from overtaking a new local mutation that
@@ -306,6 +309,9 @@ func (w *Worker) claimDueWithOptions(ignoreRemoteQuiet bool) []Op {
 		}
 		return nil
 	})
+	if changed {
+		w.service.NotifyTaskChanged()
+	}
 	return claimed
 }
 
@@ -313,7 +319,8 @@ func (w *Worker) claimDueWithOptions(ignoreRemoteQuiet bool) []Op {
 // restart. Provider side effects are never replayed from verifying/cancel
 // states; those entries are queued for probe-based reconciliation instead.
 func (w *Worker) recoverDurableStates() error {
-	return w.service.store.update(func(tx boltTxT) error {
+	var changed bool
+	err := w.service.store.update(func(tx boltTxT) error {
 		journal := tx.Bucket([]byte(bucketJournal))
 		var ops []Op
 		if err := journal.ForEach(func(_, value []byte) error {
@@ -343,9 +350,16 @@ func (w *Worker) recoverDurableStates() error {
 			if err := putOp(tx, op, previous); err != nil {
 				return err
 			}
+			changed = true
 		}
 		return nil
 	})
+	if err == nil && changed {
+		// Startup recovery mutates visible task state; notify so push clients
+		// do not display pre-recovery projections.
+		w.service.NotifyTaskChanged()
+	}
+	return err
 }
 
 // blocked reports whether one op must wait on an earlier unfinished journal

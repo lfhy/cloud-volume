@@ -7,6 +7,13 @@ import 'package:flutter/foundation.dart';
 import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/services/remote_storage_gateway.dart';
 
+import 'remote_task_events_web.dart'
+    if (dart.library.io) 'remote_task_events.dart';
+
+part 'remote_task_store_cleanup.dart';
+part 'remote_task_store_local.dart';
+part 'remote_task_store_merge.dart';
+
 typedef LocalRemoteTaskAction = Future<bool> Function(String taskId);
 typedef ClearLocalRemoteTaskHistory = int Function();
 
@@ -36,21 +43,35 @@ class RemoteTaskStore extends ChangeNotifier {
   String _freshness = '';
   Map<String, bool> _capabilities = const <String, bool>{};
   String _nextCursor = '';
+  int _total = 0;
+  bool _hasServerTotal = false;
   bool _hasLoadedMore = false;
   int _bindingGeneration = 0;
+  TaskEventsHandle? _events;
+  RemoteTaskQueueCounts _queue = const RemoteTaskQueueCounts();
 
   List<RemoteTask> get tasks {
     // A live Go snapshot wins; an active local producer wins over an older
     // terminal snapshot that was retained by the runtime monitor.
-    final merged = <String, RemoteTask>{..._localTasks};
+    // Local producers are an execution hand-off only. They may surface while
+    // a live Go/runtime snapshot is being established, but terminal local
+    // history must never resurrect after the authoritative backend is empty.
+    final merged = <String, RemoteTask>{
+      for (final entry in _localTasks.entries)
+        if (entry.value.status.isActive) entry.key: entry.value,
+    };
     for (final entry in _tasks.entries) {
       final local = merged[entry.key];
-      if (local == null || !_preferLocal(local, entry.value)) {
+      if (local == null || !_preferLocalTask(local, entry.value)) {
         merged[entry.key] = entry.value;
       }
     }
+    // Execution projections are transient progress-dialog mirrors; they are
+    // deliberately excluded from the unified list so a finished producer can
+    // never leave a stuck "进行中" row behind after the durable Go projection
+    // no longer reports it.
     final result = merged.values.toList(growable: false)
-      ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
+      ..sort(sortRemoteTasksNewestFirst);
     return result;
   }
 
@@ -77,6 +98,18 @@ class RemoteTaskStore extends ChangeNotifier {
   String get freshness => _freshness;
   Map<String, bool> get capabilities => _capabilities;
   String get nextCursor => _nextCursor;
+  // Total queue size (including retained history) last reported by Go. An
+  // active-only poll returns no history rows, but must retain this full count.
+  int get total => _hasServerTotal ? _total : _tasks.length;
+  // True once the server sent a total explicitly; distinguishes a real 0
+  // from an old binary that omitted the field.
+  bool get hasServerTotal => _hasServerTotal;
+
+  /// Public change notification for part-file helpers that mutate caches.
+  void notifyListenersChanged() => notifyListeners();
+  // Server-reported queue counts; zero-value means the backend has not
+  // reported yet, and callers fall back to counting loaded rows.
+  RemoteTaskQueueCounts get queue => _queue;
   bool get isRefreshing => _polling;
 
   List<RemoteTask> tasksForProfile(String profileId) => tasks
@@ -130,31 +163,56 @@ class RemoteTaskStore extends ChangeNotifier {
     _clearLocalTaskHistory = clearHistory;
   }
 
-  /// Marks a producer-owned task terminal while preserving its latest details.
-  bool completeLocalTask(String id) =>
-      _setLocalTaskStatus(id, RemoteTaskStatus.done);
-
-  bool failLocalTask(String id) =>
-      _setLocalTaskStatus(id, RemoteTaskStatus.failed);
-
-  bool cancelLocalTask(String id) =>
-      _setLocalTaskStatus(id, RemoteTaskStatus.canceled);
-
-  bool _setLocalTaskStatus(String id, RemoteTaskStatus status) {
-    final task = _localTasks[id];
-    if (task == null) return false;
-    _localTasks[id] = task.copyWith(
-      status: status,
-      updatedAt: DateTime.now().toUtc().toIso8601String(),
-    );
-    notifyListeners();
-    return true;
-  }
-
   // Active-only poll keeps every unsettled task on page one; history is only
-  // fetched by explicit loadMore requests.
-  Future<void> pollActive() {
-    return refresh(const RemoteTaskFilter(includeHistory: false));
+  // fetched by explicit loadMore requests. The backend caps one page at 100
+  // rows, so while a copy is in flight the active set itself can exceed the
+  // page — keep requesting the next page of ACTIVE tasks only.
+  Future<void> pollActive() async {
+    if (_api == null || _polling) return;
+    final generation = _bindingGeneration;
+    final api = _api!;
+    _polling = true;
+    try {
+      var cursor = '';
+      do {
+        final filter = RemoteTaskFilter(includeHistory: false, cursor: cursor);
+        final page = await api.listRemoteTasks(filter);
+        if (generation != _bindingGeneration || !identical(api, _api)) return;
+        _mergeRemoteTasks(
+          page.items,
+          purgeMissingActive: cursor.isEmpty,
+          // `total` covers the complete server projection even though this
+          // request returns active rows only. A real zero is therefore a
+          // definitive empty snapshot, not merely an empty active page.
+          purgeAllWhenExplicitlyEmpty:
+              page.hasTotal && page.total == 0 && page.items.isEmpty,
+        );
+        // Queue counts describe the request scope; the last active-only
+        // page carries the authoritative active/waiting breakdown. A real
+        // all-zero report must be applied, not skipped.
+        _queue = page.queue;
+        _total = page.total;
+        _hasServerTotal = page.hasTotal;
+        _freshness = page.freshness;
+        _capabilities = Map<String, bool>.unmodifiable(page.capabilities);
+        cursor = page.nextCursor;
+      } while (cursor.isNotEmpty);
+      if (!_hasLoadedMore) {
+        _nextCursor = '';
+      }
+      _lastError = null;
+      _lastFreshAt = DateTime.now();
+      notifyListeners();
+    } catch (error) {
+      if (generation != _bindingGeneration) return;
+      _lastError = error;
+      notifyListeners();
+    } finally {
+      if (generation == _bindingGeneration) {
+        _polling = false;
+        _ensurePolling();
+      }
+    }
   }
 
   void bindApi(RemoteStorageGateway api) {
@@ -171,9 +229,29 @@ class RemoteTaskStore extends ChangeNotifier {
     _polling = false;
     _tasks.clear();
     _nextCursor = '';
+    _total = 0;
+    _hasServerTotal = false;
+    _queue = const RemoteTaskQueueCounts();
     _hasLoadedMore = false;
+    _connectPushChannel();
     unawaited(pollActive());
     _ensurePolling();
+  }
+
+  // The bridge exposes a localhost websocket (make run sets CV_DEBUG_ADDR)
+  // that ticks once per metadata op state change. Ticks trigger an immediate
+  // poll; polling stays on as the correctness fallback if the socket dies.
+  void _connectPushChannel() {
+    _events?.dispose();
+    _events = null;
+    final debugAddr = const String.fromEnvironment(
+      'CV_DEBUG_ADDR',
+      defaultValue: '127.0.0.1:8765',
+    );
+    if (debugAddr.trim().isEmpty) return;
+    _events = watchTaskEvents('ws://$debugAddr/debug/task-events', () {
+      if (!_polling) unawaited(pollActive());
+    });
   }
 
   Future<void> refresh([
@@ -189,16 +267,43 @@ class RemoteTaskStore extends ChangeNotifier {
       // A request without history or pagination never describes the full
       // task set, so it must not purge rows a loadMore call already merged.
       final completeSnapshot =
-          filter.includeHistory && filter.cursor.isEmpty && page.nextCursor.isEmpty;
-      _mergeRemoteTasks(page.items, completeSnapshot: completeSnapshot);
-      // Keep the history cursor only when the response describes the history
-      // stream; an active-only poll must not clear it to empty.
-      if (filter.cursor.isNotEmpty || !_hasLoadedMore) {
-        if (!(filter.includeHistory && page.nextCursor.isEmpty)) {
-          _nextCursor = page.nextCursor;
-        }
+          filter.includeHistory &&
+          filter.cursor.isEmpty &&
+          page.nextCursor.isEmpty;
+      // An active-only poll describes the FULL active set: any locally cached
+      // row that is still marked active but absent from the response has
+      // actually finished and must be dropped, otherwise the UI keeps showing
+      // "进行中/等待" rows forever after they complete.
+      final purgeMissingActive =
+          !filter.includeHistory && filter.cursor.isEmpty;
+      _mergeRemoteTasks(
+        page.items,
+        completeSnapshot: completeSnapshot,
+        purgeMissingActive: purgeMissingActive,
+        purgeAllWhenExplicitlyEmpty:
+            page.hasTotal && page.total == 0 && page.items.isEmpty,
+      );
+      // Remember the server's unpaged total so the header can show the true
+      // queue size even while only the first 100 rows are cached locally.
+      // The server always returns total (pre-pagination). Treat 0 as
+      // empty; older binaries that omitted total fall back to cache size.
+      _total = page.total;
+      _hasServerTotal = page.hasTotal;
+      _queue = page.queue;
+      if (!_hasServerTotal && _total == 0 && _tasks.isNotEmpty) {
+        _total = _tasks.length;
       }
-      if (filter.cursor.isNotEmpty) _hasLoadedMore = true;
+      // Cursor ownership: a paged history request owns the cursor outright,
+      // so an exhausted stream clears it and hides 加载更多历史. An active-only
+      // poll may refresh the cursor but must never clear one that a previous
+      // loadMore already established.
+      if (filter.cursor.isNotEmpty) {
+        _nextCursor = page.nextCursor;
+        _hasLoadedMore = true;
+      } else if (!_hasLoadedMore &&
+          !(filter.includeHistory && page.nextCursor.isEmpty)) {
+        _nextCursor = page.nextCursor;
+      }
       _freshness = page.freshness;
       _capabilities = Map<String, bool>.unmodifiable(page.capabilities);
       _lastError = null;
@@ -223,7 +328,7 @@ class RemoteTaskStore extends ChangeNotifier {
     final execution = _executionTasks[id];
     final remote = _tasks[id];
     if (local != null &&
-        (remote == null || _preferLocal(local, remote)) &&
+        (remote == null || _preferLocalTask(local, remote)) &&
         local.cancelable) {
       return _cancelLocalTask?.call(id) ?? false;
     }
@@ -256,7 +361,8 @@ class RemoteTaskStore extends ChangeNotifier {
     final execution = _executionTasks[id];
     final remote = _tasks[id];
     if (_api == null ||
-        (local != null && (remote == null || _preferLocal(local, remote))) ||
+        (local != null &&
+            (remote == null || _preferLocalTask(local, remote))) ||
         (execution != null && remote == null)) {
       return local ?? execution ?? remote;
     }
@@ -275,9 +381,7 @@ class RemoteTaskStore extends ChangeNotifier {
     // An active-only poll leaves no cursor even when history exists, so the
     // first history request starts from page one explicitly.
     if (_nextCursor.isEmpty && _hasLoadedMore) return;
-    await refresh(
-      RemoteTaskFilter(cursor: _nextCursor, includeHistory: true),
-    );
+    await refresh(RemoteTaskFilter(cursor: _nextCursor, includeHistory: true));
     _hasLoadedMore = true;
   }
 
@@ -285,7 +389,7 @@ class RemoteTaskStore extends ChangeNotifier {
     final local = _localTasks[id];
     final execution = _executionTasks[id];
     final remote = _tasks[id];
-    if (local != null && (remote == null || _preferLocal(local, remote))) {
+    if (local != null && (remote == null || _preferLocalTask(local, remote))) {
       return _retryLocalTask?.call(id) ?? false;
     }
     if (execution != null && remote == null) {
@@ -301,7 +405,7 @@ class RemoteTaskStore extends ChangeNotifier {
     final local = _localTasks[id];
     final execution = _executionTasks[id];
     final remote = _tasks[id];
-    if (local != null && (remote == null || _preferLocal(local, remote))) {
+    if (local != null && (remote == null || _preferLocalTask(local, remote))) {
       return _triggerLocalTask?.call(id) ?? false;
     }
     if (execution != null && remote == null) {
@@ -317,142 +421,32 @@ class RemoteTaskStore extends ChangeNotifier {
     String profileId = '',
     String bucket = '',
     List<String> taskIds = const <String>[],
-  }) async {
-    var removed = 0;
-    if (_api != null) {
-      removed = await _api!.clearRemoteTaskHistory(
-        profileId: profileId,
-        bucket: bucket,
+  }) => clearRemoteTaskHistory(
+    this,
+    profileId: profileId,
+    bucket: bucket,
+    taskIds: taskIds,
+  );
+
+  int _removeLocalTerminalTasks() =>
+      removeTerminalTasks(tasks: _localTasks, onChanged: notifyListeners);
+
+  int _removeLocalTerminalTasksById(Iterable<String> taskIds) =>
+      removeTerminalTasksById(
+        tasks: _localTasks,
         taskIds: taskIds,
+        onChanged: notifyListeners,
       );
-      if (taskIds.isEmpty) {
-        _tasks.removeWhere(
-          (id, task) =>
-              !task.status.isActive &&
-              (profileId.isEmpty || task.profileId == profileId) &&
-              (bucket.isEmpty || task.bucket == bucket),
-        );
-      } else {
-        final selected = taskIds.toSet();
-        _tasks.removeWhere(
-          (id, task) => selected.contains(id) && !task.status.isActive,
-        );
-      }
-      await refresh();
-    }
-    if (taskIds.isEmpty) {
-      removed += _clearLocalTaskHistory?.call() ?? _removeLocalTerminalTasks();
-      removed += _removeExecutionTerminalTasks();
-    } else {
-      removed += _removeLocalTerminalTasksById(taskIds);
-      removed += _removeExecutionTasksById(taskIds);
-    }
-    return removed;
-  }
 
-  void _mergeRemoteTasks(
-    Iterable<RemoteTask> incoming, {
-    bool completeSnapshot = false,
-  }) {
-    final incomingList = incoming.toList(growable: false);
-    final incomingIds = incomingList.map((task) => task.id).toSet();
-    var changed = false;
-    // Metadata physical snapshots were removed from the bridge projection in
-    // a later protocol revision. Purge them here too so a running app cannot
-    // keep displaying rows fetched by an older bridge binary.
-    final stalePhysicalIds = _tasks.keys
-        .where(
-          (id) =>
-              id.startsWith('transfer:metadata-op-') &&
-              !incomingIds.contains(id),
-        )
-        .toList(growable: false);
-    for (final id in stalePhysicalIds) {
-      _tasks.remove(id);
-      changed = true;
-    }
-    if (completeSnapshot) {
-      final staleIds = _tasks.keys
-          .where((id) => !incomingIds.contains(id))
-          .toList(growable: false);
-      for (final id in staleIds) {
-        _tasks.remove(id);
-        changed = true;
-      }
-    }
-    for (final task in incomingList) {
-      if (_tasks[task.id] != task) changed = true;
-      _tasks[task.id] = task;
-    }
-    if (changed) notifyListeners();
-  }
+  int _removeExecutionTerminalTasks() =>
+      removeTerminalTasks(tasks: _executionTasks, onChanged: notifyListeners);
 
-  int _removeLocalTerminalTasks() {
-    final ids = _localTasks.entries
-        .where((entry) => !entry.value.status.isActive)
-        .map((entry) => entry.key)
-        .toList();
-    for (final id in ids) {
-      _localTasks.remove(id);
-    }
-    if (ids.isNotEmpty) notifyListeners();
-    return ids.length;
-  }
-
-  int _removeLocalTerminalTasksById(Iterable<String> taskIds) {
-    final selected = taskIds.toSet();
-    final ids = _localTasks.entries
-        .where(
-          (entry) =>
-              selected.contains(entry.key) && !entry.value.status.isActive,
-        )
-        .map((entry) => entry.key)
-        .toList(growable: false);
-    for (final id in ids) {
-      _localTasks.remove(id);
-    }
-    if (ids.isNotEmpty) notifyListeners();
-    return ids.length;
-  }
-
-  int _removeExecutionTerminalTasks() {
-    final ids = _executionTasks.entries
-        .where((entry) => !entry.value.status.isActive)
-        .map((entry) => entry.key)
-        .toList(growable: false);
-    for (final id in ids) {
-      _executionTasks.remove(id);
-    }
-    if (ids.isNotEmpty) notifyListeners();
-    return ids.length;
-  }
-
-  int _removeExecutionTasksById(Iterable<String> taskIds) {
-    final selected = taskIds.toSet();
-    final ids = _executionTasks.entries
-        .where(
-          (entry) =>
-              selected.contains(entry.key) && !entry.value.status.isActive,
-        )
-        .map((entry) => entry.key)
-        .toList(growable: false);
-    for (final id in ids) {
-      _executionTasks.remove(id);
-    }
-    if (ids.isNotEmpty) notifyListeners();
-    return ids.length;
-  }
-
-  bool _preferLocal(RemoteTask local, RemoteTask remote) {
-    if (!local.status.isActive || remote.status.isActive) return false;
-    final localAt = DateTime.tryParse(
-      local.updatedAt.isNotEmpty ? local.updatedAt : local.createdAt,
-    );
-    final remoteAt = DateTime.tryParse(
-      remote.updatedAt.isNotEmpty ? remote.updatedAt : remote.createdAt,
-    );
-    return localAt != null && (remoteAt == null || localAt.isAfter(remoteAt));
-  }
+  int _removeExecutionTasksById(Iterable<String> taskIds) =>
+      removeTerminalTasksById(
+        tasks: _executionTasks,
+        taskIds: taskIds,
+        onChanged: notifyListeners,
+      );
 
   void _ensurePolling() {
     if (_api == null) return;
@@ -469,6 +463,8 @@ class RemoteTaskStore extends ChangeNotifier {
     _pollTimer?.cancel();
     _pollTimer = null;
     _pollInterval = null;
+    _events?.dispose();
+    _events = null;
     _api = null;
     _polling = false;
     _lastError = null;
@@ -476,6 +472,9 @@ class RemoteTaskStore extends ChangeNotifier {
     _freshness = '';
     _capabilities = const <String, bool>{};
     _nextCursor = '';
+    _total = 0;
+    _hasServerTotal = false;
+    _queue = const RemoteTaskQueueCounts();
     _hasLoadedMore = false;
     _tasks.clear();
     _localTasks.clear();

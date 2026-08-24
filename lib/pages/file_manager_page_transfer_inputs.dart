@@ -64,6 +64,9 @@ extension _FileManagerPageTransferInputs on _FileManagerPageState {
       bucket: bucket,
       key: key,
       localPath: localPath,
+      // Metadata-backed buckets publish the durable sync:* task from Go;
+      // this local shell must not also appear as a duplicate queue row.
+      publishRemoteTask: !_usesMetadataRemoteTasks,
     );
     unawaited(_runUploadDirectoryTask(task, _activeBucketEntry!, targetPrefix));
     return task;

@@ -12,10 +12,8 @@ extension _TransfersPageRemote on _TransfersPageState {
         .toList(growable: false);
     final cancelable = selected.where((task) => task.cancelable).length;
     final triggerable = selected.where((task) => task.triggerable).length;
-    final clearable = selected.where((task) => !task.status.isActive).length;
-    final historyCount = store.tasks
-        .where((task) => !task.status.isActive)
-        .length;
+    final clearable = selected.where(isRemoteTaskHistory).length;
+    final historyCount = store.tasks.where(isRemoteTaskHistory).length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -126,18 +124,19 @@ extension _TransfersPageRemote on _TransfersPageState {
     List<RemoteTask> visible,
     int selectedVisible,
   ) {
+    final canLoadHistory = store.canLoadMoreHistory;
     if (store.lastError != null && store.tasks.isEmpty) {
       return _buildEmptyState(theme, '任务服务暂不可用', '统一远端任务列表暂时无法刷新，请稍后重试。');
     }
-    if (store.tasks.isEmpty) {
+    if (store.tasks.isEmpty && !canLoadHistory) {
       return _buildEmptyState(theme, '暂无任务', '本地修改和远端操作会在这里显示。');
     }
-    if (visible.isEmpty) {
+    if (visible.isEmpty && !canLoadHistory) {
       return _buildEmptyState(theme, '没有匹配结果', '调整筛选条件后再试。');
     }
-    final allSelected = visible.every(
-      (task) => _selectedTaskIds.contains(task.id),
-    );
+    final allSelected =
+        visible.isNotEmpty &&
+        visible.every((task) => _selectedTaskIds.contains(task.id));
     final partial = selectedVisible > 0 && !allSelected;
     final sections = _groupRemoteTasks(visible);
     return ShadCard(
@@ -145,7 +144,8 @@ extension _TransfersPageRemote on _TransfersPageState {
       child: Column(
         children: [
           _RemoteListHeader(
-            totalCount: visible.length,
+            totalCount: store.total,
+            visibleCount: visible.length,
             speedSummary: remoteTaskSpeedSummary(visible),
             allSelected: allSelected,
             partial: partial,
@@ -181,17 +181,17 @@ extension _TransfersPageRemote on _TransfersPageState {
                       },
                       showDivider: true,
                     ),
-                  if (store.nextCursor.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: ShadButton.outline(
-                        onPressed: store.isRefreshing
-                            ? null
-                            : () => unawaited(store.loadMore()),
-                        child: Text(store.isRefreshing ? '正在加载...' : '加载更多历史'),
-                      ),
-                    ),
                 ],
+                if (store.canLoadMoreHistory)
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: ShadButton.outline(
+                      onPressed: store.isRefreshing
+                          ? null
+                          : () => unawaited(store.loadMore()),
+                      child: Text(store.isRefreshing ? '正在加载...' : '加载更多历史'),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -204,10 +204,28 @@ extension _TransfersPageRemote on _TransfersPageState {
   // dedicated StatefulWidget per the hover binding rule.
   Widget _buildRemoteQueueTabs(ShadThemeData theme, RemoteTaskStore store) {
     final tasks = store.tasks;
-    int count(_RemoteTaskStatusFilter filter) => tasks
-        .where((task) =>
-            filter == _RemoteTaskStatusFilter.all || filter.matches(task))
-        .length;
+    final serverQueue = store.queue;
+    final hasServerCounts = serverQueue.reported;
+    int count(_RemoteTaskStatusFilter filter) {
+      // Prefer server-reported unpaged counts; loaded rows are only a
+      // fallback for older binaries that omit the queue field.
+      if (hasServerCounts) {
+        return switch (filter) {
+          _RemoteTaskStatusFilter.all => serverQueue.total,
+          _RemoteTaskStatusFilter.active => serverQueue.active,
+          _RemoteTaskStatusFilter.waiting => serverQueue.waiting,
+          _RemoteTaskStatusFilter.failed => serverQueue.failed,
+          _RemoteTaskStatusFilter.history => serverQueue.history,
+        };
+      }
+      return tasks
+          .where(
+            (task) =>
+                filter == _RemoteTaskStatusFilter.all || filter.matches(task),
+          )
+          .length;
+    }
+
     return Row(
       children: [
         for (final filter in _RemoteTaskStatusFilter.values) ...[
@@ -265,12 +283,14 @@ List<_RemoteTaskSection> _groupRemoteTasks(List<RemoteTask> tasks) {
 class _RemoteListHeader extends StatelessWidget {
   const _RemoteListHeader({
     required this.totalCount,
+    this.visibleCount = 0,
     required this.speedSummary,
     required this.allSelected,
     required this.partial,
     required this.onToggleAll,
   });
   final int totalCount;
+  final int visibleCount;
   final String speedSummary;
   final bool allSelected;
   final bool partial;
@@ -278,6 +298,9 @@ class _RemoteListHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
+    final label = visibleCount > 0 && visibleCount != totalCount
+        ? '共 $totalCount 项 · 已加载 $visibleCount'
+        : '共 $totalCount 项';
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 7),
       decoration: BoxDecoration(
@@ -303,7 +326,7 @@ class _RemoteListHeader extends StatelessWidget {
             ),
           ),
           Text(
-            '共 $totalCount 项',
+            label,
             style: TextStyle(
               fontSize: 10.5,
               color: theme.colorScheme.mutedForeground,
@@ -364,8 +387,8 @@ class _RemoteQueueTabState extends State<_RemoteQueueTab> {
             color: widget.selected
                 ? theme.colorScheme.secondary
                 : _hovered
-                    ? theme.colorScheme.mutedForeground.withValues(alpha: 0.08)
-                    : Colors.transparent,
+                ? theme.colorScheme.mutedForeground.withValues(alpha: 0.08)
+                : Colors.transparent,
             borderRadius: BorderRadius.circular(8),
           ),
           child: Row(
@@ -375,7 +398,9 @@ class _RemoteQueueTabState extends State<_RemoteQueueTab> {
                 widget.label,
                 style: TextStyle(
                   fontSize: 12,
-                  fontWeight: widget.selected ? FontWeight.w600 : FontWeight.w500,
+                  fontWeight: widget.selected
+                      ? FontWeight.w600
+                      : FontWeight.w500,
                   color: widget.selected
                       ? theme.colorScheme.primary
                       : theme.colorScheme.mutedForeground,

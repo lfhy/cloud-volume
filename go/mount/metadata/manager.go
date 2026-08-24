@@ -20,9 +20,20 @@ import (
 
 // Manager owns one Service/Worker pair per active namespace.
 type Manager struct {
-	mu       sync.Mutex
-	baseDir  string
-	services map[string]*managedService
+	mu           sync.Mutex
+	baseDir      string
+	services     map[string]*managedService
+	groupCacheMu sync.Mutex
+	groupCache   []TaskGroup
+	groupCacheAt time.Time
+	// groupCacheVersion lets readers reject a snapshot built while namespace
+	// topology or durable task state changed underneath it.
+	groupCacheVersion uint64
+	// taskChangeHooks fan newly acquired services into live task-change
+	// subscriptions so late namespaces push ticks too.
+	taskChangeMu     sync.Mutex
+	taskChangeHooks  map[int]func(*Service)
+	taskChangeNextID int
 }
 
 // NamespaceManifest is the non-secret discovery record kept beside a metadata DB.
@@ -83,7 +94,11 @@ type managedService struct {
 
 // NewManager creates the process-wide namespace registry.
 func NewManager(baseDir string) *Manager {
-	return &Manager{baseDir: filepath.Join(baseDir, "v1"), services: map[string]*managedService{}}
+	return &Manager{
+		baseDir:         filepath.Join(baseDir, "v1"),
+		services:        map[string]*managedService{},
+		taskChangeHooks: map[int]func(*Service){},
+	}
 }
 
 // DefaultManager returns the process-wide manager rooted under the app runtime
@@ -199,8 +214,11 @@ func (m *Manager) AcquireWithBackend(
 	}
 	service := NewService(store, backend)
 	service.setPolicy(quietDuration(normalized), normalized.BucketSettingsFor(bucket).ReadOnly)
+	service.groupCacheInvalidate = m.InvalidateTaskGroupCache
 	managed := &managedService{service: service, worker: NewWorker(service), refs: 1}
 	m.services[id] = managed
+	m.InvalidateTaskGroupCache()
+	m.attachNewNamespaces(service)
 	return &AcquireHandle{Service: service, manager: m}, nil
 }
 
@@ -217,8 +235,11 @@ func (m *Manager) openService(id string, normalized storageconfig.RemoteStorageC
 	// RootPrefix wrapper just like page-level object reads do.
 	service := NewService(store, storageops.ForConfig(normalized))
 	service.setPolicy(quietDuration(normalized), normalized.BucketSettingsFor(bucket).ReadOnly)
+	service.groupCacheInvalidate = m.InvalidateTaskGroupCache
 	managed := &managedService{service: service, worker: NewWorker(service), refs: 1}
 	m.services[id] = managed
+	m.InvalidateTaskGroupCache()
+	m.attachNewNamespaces(service)
 	return managed, nil
 }
 
@@ -305,6 +326,7 @@ func (m *Manager) release(handle *AcquireHandle) {
 			return
 		}
 		delete(m.services, id)
+		m.InvalidateTaskGroupCache()
 		managed.worker.Stop()
 		_ = managed.service.Close()
 		return
@@ -337,6 +359,7 @@ func (m *Manager) RemoveNamespace(config storageconfig.RemoteStorageConfig, buck
 	m.mu.Unlock()
 	chunkRoot := filepath.Join(cacheRoot, "metadata-chunks", id)
 	if ok {
+		m.InvalidateTaskGroupCache()
 		chunkRoot = managed.service.chunkStoreRoot()
 		managed.worker.Stop()
 		_ = managed.service.Close()

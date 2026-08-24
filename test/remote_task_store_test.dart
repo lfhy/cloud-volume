@@ -76,8 +76,9 @@ void main() {
       // bindApi fires an unawaited active-only poll; wait it out and then
       // request the terminal runtime row explicitly from history.
       await Future<void>.delayed(Duration.zero);
-      await RemoteTaskStore.instance
-          .refresh(const RemoteTaskFilter(includeHistory: true));
+      await RemoteTaskStore.instance.refresh(
+        const RemoteTaskFilter(includeHistory: true),
+      );
       final task = RemoteTaskStore.instance.tasks.single;
       expect(task.source, RemoteTaskSource.runtime);
       expect(task.status, RemoteTaskStatus.done);
@@ -104,8 +105,9 @@ void main() {
     RemoteTaskStore.instance.bindApi(api);
     await Future<void>.delayed(Duration.zero);
     await Future<void>.delayed(Duration.zero);
-    await RemoteTaskStore.instance
-        .refresh(const RemoteTaskFilter(includeHistory: true));
+    await RemoteTaskStore.instance.refresh(
+      const RemoteTaskFilter(includeHistory: true),
+    );
     expect(RemoteTaskStore.instance.tasks, hasLength(2));
 
     api.page = const RemoteTaskPage(
@@ -158,13 +160,156 @@ void main() {
       );
       // Complete-snapshot reconciliation only applies to full-history
       // requests now; ask explicitly for the complete set.
-      await RemoteTaskStore.instance
-          .refresh(const RemoteTaskFilter(includeHistory: true));
+      await RemoteTaskStore.instance.refresh(
+        const RemoteTaskFilter(includeHistory: true),
+      );
       expect(RemoteTaskStore.instance.tasks.map((task) => task.id), [
         'sync:ns:keep',
       ]);
     },
   );
+
+  test(
+    'active polling keeps the full history total and queue summary',
+    () async {
+      final api = _FakeGateway()
+        ..page = const RemoteTaskPage(
+          items: <RemoteTask>[
+            RemoteTask(
+              id: 'sync:ns:history-1',
+              kind: RemoteTaskKind.download,
+              status: RemoteTaskStatus.done,
+            ),
+            RemoteTask(
+              id: 'sync:ns:history-2',
+              kind: RemoteTaskKind.download,
+              status: RemoteTaskStatus.done,
+            ),
+          ],
+          total: 200,
+          hasTotal: true,
+          queue: RemoteTaskQueueCounts(
+            total: 200,
+            history: 200,
+            reported: true,
+          ),
+        );
+      RemoteTaskStore.instance.bindApi(api);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(RemoteTaskStore.instance.total, 200);
+      expect(RemoteTaskStore.instance.queue.history, 200);
+      expect(RemoteTaskStore.instance.tasks, isEmpty);
+
+      await RemoteTaskStore.instance.refresh(
+        const RemoteTaskFilter(includeHistory: true),
+      );
+      expect(RemoteTaskStore.instance.tasks, hasLength(2));
+
+      await RemoteTaskStore.instance.pollActive();
+      expect(RemoteTaskStore.instance.total, 200);
+      expect(RemoteTaskStore.instance.queue.history, 200);
+      expect(RemoteTaskStore.instance.tasks, hasLength(2));
+    },
+  );
+
+  test('an explicit empty total evicts previously loaded history', () async {
+    final api = _FakeGateway()
+      ..page = const RemoteTaskPage(
+        items: <RemoteTask>[
+          RemoteTask(
+            id: 'sync:ns:old-history',
+            kind: RemoteTaskKind.download,
+            status: RemoteTaskStatus.done,
+          ),
+        ],
+        total: 1,
+        hasTotal: true,
+        queue: RemoteTaskQueueCounts(total: 1, history: 1, reported: true),
+      );
+    RemoteTaskStore.instance.bindApi(api);
+    await Future<void>.delayed(Duration.zero);
+    await RemoteTaskStore.instance.refresh(
+      const RemoteTaskFilter(includeHistory: true),
+    );
+    expect(RemoteTaskStore.instance.tasks, hasLength(1));
+
+    api.page = const RemoteTaskPage(
+      total: 0,
+      hasTotal: true,
+      queue: RemoteTaskQueueCounts(reported: true),
+    );
+    await RemoteTaskStore.instance.pollActive();
+
+    expect(RemoteTaskStore.instance.total, 0);
+    expect(RemoteTaskStore.instance.queue.total, 0);
+    expect(RemoteTaskStore.instance.tasks, isEmpty);
+  });
+
+  test('active-only polling leaves retained history loadable', () async {
+    final api = _FakeGateway()
+      ..page = const RemoteTaskPage(
+        items: <RemoteTask>[
+          RemoteTask(
+            id: 'sync:ns:history',
+            kind: RemoteTaskKind.download,
+            status: RemoteTaskStatus.done,
+          ),
+        ],
+        total: 1,
+        hasTotal: true,
+        queue: RemoteTaskQueueCounts(total: 1, history: 1, reported: true),
+      );
+    RemoteTaskStore.instance.bindApi(api);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(RemoteTaskStore.instance.tasks, isEmpty);
+    expect(RemoteTaskStore.instance.canLoadMoreHistory, isTrue);
+
+    await RemoteTaskStore.instance.loadMore();
+
+    expect(RemoteTaskStore.instance.tasks, hasLength(1));
+    expect(RemoteTaskStore.instance.canLoadMoreHistory, isFalse);
+  });
+
+  test('active polling evicts a vanished failed task', () async {
+    final api = _FakeGateway()
+      ..page = const RemoteTaskPage(
+        items: <RemoteTask>[
+          RemoteTask(
+            id: 'sync:ns:failed',
+            kind: RemoteTaskKind.upload,
+            status: RemoteTaskStatus.failed,
+          ),
+        ],
+        total: 1,
+        hasTotal: true,
+        queue: RemoteTaskQueueCounts(total: 1, failed: 1, reported: true),
+      );
+    RemoteTaskStore.instance.bindApi(api);
+    await Future<void>.delayed(Duration.zero);
+    expect(RemoteTaskStore.instance.tasks, hasLength(1));
+
+    api.page = const RemoteTaskPage(
+      items: <RemoteTask>[
+        RemoteTask(
+          id: 'sync:ns:running',
+          kind: RemoteTaskKind.upload,
+          status: RemoteTaskStatus.running,
+        ),
+      ],
+      total: 1,
+      hasTotal: true,
+      queue: RemoteTaskQueueCounts(total: 1, active: 1, reported: true),
+    );
+    await RemoteTaskStore.instance.pollActive();
+
+    expect(
+      RemoteTaskStore.instance.tasks.map((task) => task.id),
+      orderedEquals(<String>['sync:ns:running']),
+    );
+  });
 
   test('local lifecycle shortcuts update the registered task', () {
     const id = 'transfer:local-lifecycle';
@@ -182,6 +327,47 @@ void main() {
       RemoteTaskStatus.done,
     );
     expect(RemoteTaskStore.instance.cancelLocalTask('missing'), isFalse);
+  });
+
+  test('does not render terminal local producer history without Go rows', () {
+    const id = 'transfer:local-terminal';
+    RemoteTaskStore.instance.publishLocalTask(
+      const RemoteTask(
+        id: id,
+        kind: RemoteTaskKind.download,
+        status: RemoteTaskStatus.done,
+        source: RemoteTaskSource.local,
+      ),
+    );
+
+    expect(RemoteTaskStore.instance.localTask(id), isNotNull);
+    expect(RemoteTaskStore.instance.tasks, isEmpty);
+  });
+
+  test('sorts mixed-zone task timestamps by their instant', () {
+    RemoteTaskStore.instance.publishLocalTask(
+      const RemoteTask(
+        id: 'transfer:earlier',
+        kind: RemoteTaskKind.download,
+        status: RemoteTaskStatus.running,
+        source: RemoteTaskSource.local,
+        updatedAt: '2026-08-24T12:00:00+08:00',
+      ),
+    );
+    RemoteTaskStore.instance.publishLocalTask(
+      const RemoteTask(
+        id: 'transfer:later',
+        kind: RemoteTaskKind.download,
+        status: RemoteTaskStatus.running,
+        source: RemoteTaskSource.local,
+        updatedAt: '2026-08-24T05:00:00Z',
+      ),
+    );
+
+    expect(
+      RemoteTaskStore.instance.tasks.map((task) => task.id),
+      orderedEquals(<String>['transfer:later', 'transfer:earlier']),
+    );
   });
 
   test(
@@ -268,10 +454,13 @@ class _FakeGateway extends Fake implements RemoteStorageGateway {
     // exercised without a real backend.
     if (!filter.includeHistory) {
       final active = page.items
-          .where((task) => task.status.isActive)
+          .where((task) => !isRemoteTaskHistory(task))
           .toList(growable: false);
       return RemoteTaskPage(
         items: active,
+        total: page.total,
+        hasTotal: page.hasTotal,
+        queue: page.queue,
         nextCursor: page.nextCursor,
         serverTime: page.serverTime,
         freshness: page.freshness,

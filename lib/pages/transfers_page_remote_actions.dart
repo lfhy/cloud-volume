@@ -141,7 +141,7 @@ extension _TransfersPageRemoteActions on _TransfersPageState {
   ) async {
     if (_runningBatchAction) return;
     final taskIds = selected
-        .where((task) => !task.status.isActive)
+        .where(isRemoteTaskHistory)
         .map((task) => task.id)
         .toList(growable: false);
     if (taskIds.isEmpty) return;

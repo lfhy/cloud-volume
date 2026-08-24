@@ -169,6 +169,40 @@ func TestPageReleaseDoesNotCloseMountHeldNamespace(t *testing.T) {
 	}
 }
 
+func TestTaskGroupCacheTracksNamespaceAcquireAndRelease(t *testing.T) {
+	manager := NewManager(filepath.Join(t.TempDir(), "metadata"))
+	defer manager.RemoveAllForTest()
+
+	empty, err := manager.ListTaskGroups()
+	if err != nil {
+		t.Fatalf("list empty groups: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("initial groups = %+v, want empty", empty)
+	}
+	config := fakeConfig("task-group-cache-profile")
+	config.CacheDirectory = t.TempDir()
+	handle, err := manager.AcquireWithBackend(config, "bucket", newFakeBackend())
+	if err != nil {
+		t.Fatalf("acquire namespace: %v", err)
+	}
+	opened, err := manager.ListTaskGroups()
+	if err != nil {
+		t.Fatalf("list opened groups: %v", err)
+	}
+	if len(opened) != 1 || opened[0].Namespace != handle.Service.NamespaceID() {
+		t.Fatalf("opened groups = %+v, want acquired namespace", opened)
+	}
+	handle.Release()
+	closed, err := manager.ListTaskGroups()
+	if err != nil {
+		t.Fatalf("list closed groups: %v", err)
+	}
+	if len(closed) != 0 {
+		t.Fatalf("closed groups = %+v, want empty", closed)
+	}
+}
+
 func TestPageReleaseRetainsPendingNamespaceUntilLaterIdleRelease(t *testing.T) {
 	manager := NewManager(filepath.Join(t.TempDir(), "metadata"))
 	defer manager.RemoveAllForTest()

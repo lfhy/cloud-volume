@@ -21,11 +21,13 @@ func (w *Worker) reconcile(ctx context.Context, op Op) {
 	if err == nil {
 		return
 	}
-	_ = w.service.store.update(func(tx boltTxT) error {
+	changed := false
+	updateErr := w.service.store.update(func(tx boltTxT) error {
 		return replaceOp(tx, op.Seq, func(current *Op) {
 			if !opStateNeedsReconciliation(current.State) {
 				return
 			}
+			changed = true
 			if errors.Is(err, errConflict) {
 				current.State = OpStateFailed
 				current.LastError = err.Error()
@@ -42,6 +44,11 @@ func (w *Worker) reconcile(ctx context.Context, op Op) {
 			current.LastError = err.Error()
 		})
 	})
+	if updateErr == nil && changed {
+		// A failed reconciliation attempt changes retry/next-attempt or state;
+		// notify only after the durable transaction committed.
+		w.service.NotifyTaskChanged()
+	}
 }
 
 func (w *Worker) reconcileVerification(ctx context.Context, op Op) error {
@@ -83,15 +90,23 @@ func (w *Worker) reconcileVerification(ctx context.Context, op Op) error {
 	if err != nil {
 		return err
 	}
-	return s.store.update(func(tx boltTxT) error {
+	changed := false
+	updateErr := s.store.update(func(tx boltTxT) error {
 		return replaceOp(tx, op.Seq, func(current *Op) {
 			if current.State == OpStateVerifying {
 				current.State = OpStateApplied
 				current.AppliedAtUnixNano = time.Now().UnixNano()
 				current.LastError = ""
+				changed = true
 			}
 		})
 	})
+	if updateErr == nil && changed {
+		// Reconciliation resolved a terminal transition; push clients should
+		// re-fetch only after its durable state is visible to readers.
+		w.service.NotifyTaskChanged()
+	}
+	return updateErr
 }
 
 func (w *Worker) reconcileDeleteVerification(ctx context.Context, op Op) error {
@@ -260,5 +275,9 @@ func (w *Worker) finalizeCanceled(seq uint64) error {
 		s.syncChunkProtectionBestEffortLocked()
 	}
 	s.chunkMu.Unlock()
+	if err == nil {
+		// Cancellation finalized a task; push clients must re-fetch promptly.
+		s.NotifyTaskChanged()
+	}
 	return err
 }

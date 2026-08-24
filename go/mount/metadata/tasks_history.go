@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -10,7 +11,10 @@ import (
 func (s *Service) ClearTaskHistoryIDs(taskIDs []string) (int, error) {
 	s.operationMu.RLock()
 	defer s.operationMu.RUnlock()
-	removedCount := 0
+	// Report distinct task groups, not raw ops: one visible task can fold
+	// several journal ops (mkdir+rename chains, grouped writes), and the UI
+	// toasts this number against the number of rows the user selected.
+	removedGroups := make(map[string]struct{})
 	err := s.store.update(func(tx boltTxT) error {
 		remove := make(map[uint64]Op)
 		for _, rawID := range taskIDs {
@@ -36,11 +40,19 @@ func (s *Service) ClearTaskHistoryIDs(taskIDs []string) (int, error) {
 			if err := deleteTaskHistoryOp(tx, op); err != nil {
 				return err
 			}
+			if op.TaskGroupID != "" {
+				removedGroups[op.TaskGroupID] = struct{}{}
+			} else {
+				// Legacy ops without a group id count per op.
+				removedGroups[fmt.Sprintf("seq-%d", op.Seq)] = struct{}{}
+			}
 		}
-		removedCount = len(remove)
 		return nil
 	})
-	return removedCount, err
+	if err == nil && len(removedGroups) > 0 {
+		s.NotifyTaskChanged()
+	}
+	return len(removedGroups), err
 }
 
 func deleteTaskHistoryOp(tx boltTxT, op Op) error {

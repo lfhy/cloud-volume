@@ -59,15 +59,19 @@ void main() {
       12,
     );
     queue.markTaskDone(task.id);
+    // Terminal history comes from Go's projection; a local producer must not
+    // leave a stale task-page row after the runtime monitor removes it.
+    expect(RemoteTaskStore.instance.localTask('transfer:${task.id}'), isNull);
     expect(
-      RemoteTaskStore.instance
-          .localTask('transfer:${task.id}')
-          ?.status
-          .wireName,
-      'done',
+      RemoteTaskStore.instance.executionTask('transfer:${task.id}')?.status,
+      RemoteTaskStatus.done,
     );
     expect(queue.removeTask(task.id), isTrue);
     expect(RemoteTaskStore.instance.localTask('transfer:${task.id}'), isNull);
+    expect(
+      RemoteTaskStore.instance.executionTask('transfer:${task.id}'),
+      isNull,
+    );
   });
 
   test('metadata-backed producer does not create a duplicate remote row', () {
@@ -138,8 +142,9 @@ void main() {
         isTrue,
       );
       expect(task.status, TransferStatus.canceled);
+      expect(RemoteTaskStore.instance.localTask('transfer:${task.id}'), isNull);
       expect(
-        RemoteTaskStore.instance.localTask('transfer:${task.id}')?.status,
+        RemoteTaskStore.instance.executionTask('transfer:${task.id}')?.status,
         RemoteTaskStatus.canceled,
       );
     },

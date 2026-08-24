@@ -114,44 +114,50 @@ void main() {
     expect(api.triggeredTaskIds, orderedEquals([pendingUpload.id]));
   });
 
-  test('removeTask only drops finished tasks and persists the change', () async {
-    final queue = TransferQueue.instance;
-    queue.bindApi(_FakeGateway());
+  test(
+    'removeTask only drops finished tasks and persists the change',
+    () async {
+      final queue = TransferQueue.instance;
+      queue.bindApi(_FakeGateway());
 
-    final running = queue.startTask(
-      kind: TransferKind.upload,
-      bucket: 'bucket-c',
-      key: 'running.txt',
-      localPath: '/tmp/running.txt',
-    )..status = TransferStatus.running;
-    final done = queue.startTask(
-      kind: TransferKind.upload,
-      bucket: 'bucket-c',
-      key: 'done.txt',
-      localPath: '/tmp/done.txt',
-    )..status = TransferStatus.done;
-    final failed = queue.startTask(
-      kind: TransferKind.download,
-      bucket: 'bucket-c',
-      key: 'failed.txt',
-      localPath: '/tmp/failed.txt',
-    )..status = TransferStatus.failed;
+      final running = queue.startTask(
+        kind: TransferKind.upload,
+        bucket: 'bucket-c',
+        key: 'running.txt',
+        localPath: '/tmp/running.txt',
+      )..status = TransferStatus.running;
+      final done = queue.startTask(
+        kind: TransferKind.upload,
+        bucket: 'bucket-c',
+        key: 'done.txt',
+        localPath: '/tmp/done.txt',
+      )..status = TransferStatus.done;
+      final failed = queue.startTask(
+        kind: TransferKind.download,
+        bucket: 'bucket-c',
+        key: 'failed.txt',
+        localPath: '/tmp/failed.txt',
+      )..status = TransferStatus.failed;
 
-    expect(queue.canRemoveTask(running.id), isFalse);
-    expect(queue.canRemoveTask(done.id), isTrue);
-    expect(queue.canRemoveTask(failed.id), isTrue);
+      expect(queue.canRemoveTask(running.id), isFalse);
+      expect(queue.canRemoveTask(done.id), isTrue);
+      expect(queue.canRemoveTask(failed.id), isTrue);
 
-    expect(queue.removeTask(running.id), isFalse);
-    expect(queue.tasks.where((t) => t.id == running.id), isNotEmpty);
+      expect(queue.removeTask(running.id), isFalse);
+      expect(queue.tasks.where((t) => t.id == running.id), isNotEmpty);
 
-    expect(queue.removeTask(done.id), isTrue);
-    expect(queue.tasks.where((t) => t.id == done.id), isEmpty);
+      expect(queue.removeTask(done.id), isTrue);
+      expect(queue.tasks.where((t) => t.id == done.id), isEmpty);
 
-    await queue.flushPersistenceForTest();
-    await queue.restorePersistedStateForTest();
-    expect(queue.tasks.where((t) => t.id == done.id), isEmpty);
-    expect(queue.tasks.where((t) => t.id == failed.id), isNotEmpty);
-  });
+      await queue.flushPersistenceForTest();
+      await queue.restorePersistedStateForTest();
+      expect(queue.tasks.where((t) => t.id == done.id), isEmpty);
+      // Local producer closures cannot resume after restart; the backend's
+      // unified task projection, rather than this compatibility queue, owns
+      // any retained terminal history.
+      expect(queue.tasks.where((t) => t.id == failed.id), isEmpty);
+    },
+  );
 
   test('removeTasks batch-removes only removable selection', () {
     final queue = TransferQueue.instance;
@@ -176,10 +182,7 @@ void main() {
       localPath: '/tmp/canceled.txt',
     )..status = TransferStatus.canceled;
 
-    expect(
-      queue.removableTaskCount([running.id, done.id, canceled.id]),
-      2,
-    );
+    expect(queue.removableTaskCount([running.id, done.id, canceled.id]), 2);
 
     final removed = queue.removeTasks([running.id, done.id, canceled.id]);
     expect(removed, 2);
@@ -204,18 +207,24 @@ void main() {
       key: 'pending.txt',
       localPath: '/tmp/pending.txt',
     );
-    queue.startTask(
-      kind: TransferKind.upload,
-      bucket: 'bucket-e',
-      key: 'done.txt',
-      localPath: '/tmp/done.txt',
-    ).status = TransferStatus.done;
-    queue.startTask(
-      kind: TransferKind.download,
-      bucket: 'bucket-e',
-      key: 'failed.txt',
-      localPath: '/tmp/failed.txt',
-    ).status = TransferStatus.failed;
+    queue
+            .startTask(
+              kind: TransferKind.upload,
+              bucket: 'bucket-e',
+              key: 'done.txt',
+              localPath: '/tmp/done.txt',
+            )
+            .status =
+        TransferStatus.done;
+    queue
+            .startTask(
+              kind: TransferKind.download,
+              bucket: 'bucket-e',
+              key: 'failed.txt',
+              localPath: '/tmp/failed.txt',
+            )
+            .status =
+        TransferStatus.failed;
 
     final removed = queue.clearFinished();
     expect(removed, 2);

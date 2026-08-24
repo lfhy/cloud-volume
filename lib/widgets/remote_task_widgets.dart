@@ -120,6 +120,27 @@ class _RemoteTaskRowState extends State<RemoteTaskRow> {
                   const SizedBox(width: 12),
                   Expanded(child: _TaskText(task: task)),
                   const SizedBox(width: 12),
+                  // A compact spinner marks active work; byte-level progress
+                  // lives in the row subtitle instead of a separate bar.
+                  if (task.status == RemoteTaskStatus.running ||
+                      task.status == RemoteTaskStatus.verifying)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 10),
+                      child: SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: Center(
+                          child: SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: theme.colorScheme.primary,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                   _TaskActions(
                     task: task,
                     acting: _acting,
@@ -207,6 +228,7 @@ class _TaskText extends StatelessWidget {
     );
   }
 }
+
 
 class _TaskActions extends StatelessWidget {
   const _TaskActions({

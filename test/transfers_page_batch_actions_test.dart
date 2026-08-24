@@ -172,17 +172,80 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     RemoteTaskStore.instance.resetForTest();
   });
+
+  testWidgets('history-only active poll exposes the first history load', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _TransfersPageFakeApi()..respectActiveOnly = true;
+    api.tasks.add(
+      const RemoteTask(
+        id: 'sync:test:retained-history',
+        kind: RemoteTaskKind.download,
+        status: RemoteTaskStatus.done,
+        bucket: 'bucket-a',
+        sourcePath: 'retained.txt',
+      ),
+    );
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Material(
+          child: TransfersPage(api: api, config: RemoteStorageConfig.empty()),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('加载更多历史'), findsOneWidget);
+    expect(find.text('暂无任务'), findsNothing);
+
+    await tester.tap(find.text('加载更多历史'));
+    await tester.pump();
+
+    expect(RemoteTaskStore.instance.tasks, hasLength(1));
+    expect(find.text('下载 retained.txt'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    RemoteTaskStore.instance.resetForTest();
+  });
 }
 
 class _TransfersPageFakeApi implements RemoteStorageGateway {
   final List<String> canceledTaskIds = <String>[];
   final List<String> clearedTaskIds = <String>[];
   final List<RemoteTask> tasks = <RemoteTask>[];
+  bool respectActiveOnly = false;
 
   @override
   Future<RemoteTaskPage> listRemoteTasks([
     RemoteTaskFilter filter = const RemoteTaskFilter(),
-  ]) async => RemoteTaskPage(items: List<RemoteTask>.from(tasks));
+  ]) async {
+    final items = !respectActiveOnly || filter.includeHistory
+        ? tasks
+        : tasks.where((task) => task.status.isActive).toList(growable: false);
+    final history = tasks
+        .where(
+          (task) =>
+              task.status == RemoteTaskStatus.done ||
+              task.status == RemoteTaskStatus.canceled,
+        )
+        .length;
+    return RemoteTaskPage(
+      items: List<RemoteTask>.from(items),
+      total: tasks.length,
+      hasTotal: true,
+      queue: RemoteTaskQueueCounts(
+        active: tasks.where((task) => task.status.isActive).length,
+        history: history,
+        total: tasks.length,
+        reported: true,
+      ),
+    );
+  }
 
   @override
   Future<RemoteTask> getRemoteTask(String taskId) async =>

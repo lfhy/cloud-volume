@@ -18,6 +18,7 @@ func invokeBridgeMethod(method string, args json.RawMessage) (any, error) {
 	if result, handled, err := invokeWindowsWinFspBridgeMethod(method); handled {
 		return result, err
 	}
+	startTaskDebugListener()
 
 	switch method {
 	case "get_build_info":

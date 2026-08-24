@@ -28,6 +28,7 @@ extension RemoteTaskDisplay on RemoteTask {
 
   String get phaseLabel => switch (phaseDetail.trim().toLowerCase()) {
     'queued' || 'sync_wait' || 'upload_wait' => '等待执行',
+    'quiet_period' => '静默期等待(稍后自动上传)',
     'uploading' => '上传中',
     'downloading' => '下载中',
     'deleting' => '删除中',

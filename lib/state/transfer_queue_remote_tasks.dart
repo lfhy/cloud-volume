@@ -17,6 +17,16 @@ extension TransferQueueRemoteTasks on TransferQueue {
       return;
     }
     _bindRemoteTaskActions();
+    // Terminal producer rows are not durable task history. Go's runtime or
+    // metadata projection owns visible history; retaining this Dart row caused
+    // "history 200" while the backend truth and queue counts were both zero.
+    if (task.isFinished) {
+      // The progress dialog still needs the final snapshot until the user
+      // closes it, but that transient result must not re-enter the task page.
+      RemoteTaskStore.instance.publishExecutionTask(_remoteTaskSnapshot(task));
+      RemoteTaskStore.instance.removeLocalTask('transfer:${task.id}');
+      return;
+    }
     RemoteTaskStore.instance.removeExecutionTask('transfer:${task.id}');
     RemoteTaskStore.instance.updateLocalTask(_remoteTaskSnapshot(task));
   }

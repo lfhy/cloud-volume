@@ -13,12 +13,54 @@ import (
 	s3ops "remote-storage/go/s3"
 )
 
+type webRemoteTaskQueueCounts struct {
+	Active  int `json:"active"`
+	Waiting int `json:"waiting"`
+	Failed  int `json:"failed"`
+	History int `json:"history"`
+	Total   int `json:"total"`
+}
+
 type webRemoteTaskPage struct {
-	Items        []any           `json:"items"`
-	NextCursor   string          `json:"nextCursor,omitempty"`
-	ServerTime   string          `json:"serverTime"`
-	Freshness    string          `json:"freshness"`
-	Capabilities map[string]bool `json:"capabilities"`
+	Items        []any                    `json:"items"`
+	Total        int                      `json:"total"`
+	Queue        webRemoteTaskQueueCounts `json:"queue"`
+	NextCursor   string                   `json:"nextCursor,omitempty"`
+	ServerTime   string                   `json:"serverTime"`
+	Freshness    string                   `json:"freshness"`
+	Capabilities map[string]bool          `json:"capabilities"`
+}
+
+// webRemoteTaskQueueFromItems counts real queue sizes from the full filtered
+// (pre-pagination) item list so the UI never guesses from loaded rows.
+func webRemoteTaskQueueFromItems(items []any) webRemoteTaskQueueCounts {
+	active := webActiveTaskStates()
+	counts := webRemoteTaskQueueCounts{}
+	for _, raw := range items {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		counts.Total++
+		status, _ := item["status"].(string)
+		status = strings.ToLower(strings.TrimSpace(status))
+		switch {
+		case status == "done" || status == "completed" ||
+			status == "canceled" || status == "cancelled":
+			counts.History++
+		case status == "failed" || status == "conflict":
+			counts.Failed++
+		case status == "pending" || status == "waiting" ||
+			status == "blocked" || status == "retry_wait":
+			// Keep browser queue badges consistent with RemoteTaskStatus.fromWire.
+			counts.Waiting++
+		case active[status]:
+			counts.Active++
+		default:
+			counts.Waiting++
+		}
+	}
+	return counts
 }
 
 func listWebRemoteTasks(input invokeEnvelope) (any, error) {
@@ -38,7 +80,9 @@ func listWebRemoteTasks(input invokeEnvelope) (any, error) {
 		return nil, err
 	}
 	defer releaseWebTaskHandles(manager, handles)
-	if _, err := manager.ClearTaskHistoryFor(config.ProfileID, input.Bucket, time.Now().Add(-30*24*time.Hour)); err != nil {
+	// Retention compaction is throttled: the 30-day scan is O(n²) over the
+	// journal, which starves this same endpoint once history grows large.
+	if _, err := manager.CompactTaskHistoryThrottled(config.ProfileID, input.Bucket); err != nil {
 		return nil, err
 	}
 	groups, err := manager.ListTaskGroups()
@@ -50,26 +94,43 @@ func listWebRemoteTasks(input invokeEnvelope) (any, error) {
 	for _, snapshot := range physical {
 		byID[snapshot.ID] = snapshot
 	}
+	// Counts always cover the complete profile/bucket scope. includeHistory
+	// changes response rows only, so active polling cannot erase loaded history
+	// totals in the task page.
+	countInput := webRemoteTaskCountInput(input)
 	items := make([]any, 0)
 	for _, group := range groups {
 		for _, task := range group.Tasks {
-			if !webMetadataTaskMatches(task, input) {
+			if !webMetadataTaskMatches(task, countInput) {
 				continue
 			}
 			items = append(items, webMetadataTaskWire(task, byID))
 		}
 	}
 	for _, snapshot := range physical {
-		if strings.HasPrefix(snapshot.ID, "metadata-op-") || !webRuntimeTaskMatches(snapshot, input) {
+		if strings.HasPrefix(snapshot.ID, "metadata-op-") || !webRuntimeTaskMatches(snapshot, countInput) {
 			continue
 		}
 		items = append(items, webRuntimeTaskWire(snapshot))
 	}
 	// Active tasks first (newest first), then history; shared ordering keeps
 	// page one visible for polling exactly like the desktop bridge.
-	items, nextCursor := webRemoteTaskPageSlice(items, input.Cursor, input.Limit)
+	total := len(items)
+	queue := webRemoteTaskQueueFromItems(items)
+	items = webRemoteTaskResponseItems(items, input.IncludeHistory)
+	// Active-only requests must return the full unsettled set so the
+	// waiting/running tabs never cap at the page size; history still pages.
+	limit := input.Limit
+	if !input.IncludeHistory {
+		// Page all active rows. webRemoteTaskPageSlice treats 0 as the normal
+		// default page size, so use the active length as the no-cap limit.
+		limit = len(items)
+	}
+	items, nextCursor := webRemoteTaskPageSlice(items, input.Cursor, limit)
 	return webRemoteTaskPage{
 		Items:      items,
+		Total:      total,
+		Queue:      queue,
 		NextCursor: nextCursor,
 		ServerTime: time.Now().UTC().Format(time.RFC3339Nano),
 		Freshness:  "journal+transfer-monitor",

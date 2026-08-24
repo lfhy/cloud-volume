@@ -6,7 +6,6 @@ const Duration _persistDebounce = Duration(milliseconds: 400);
 const String _storageKey = 'transfer_queue.tasks.v2';
 const String _legacyStorageKey = 'transfer_queue.tasks.v1';
 const int _persistedTaskLimit = 200;
-const String _interruptedTaskMessage = '应用上次关闭前该任务未完成，请重新发起。';
 
 Future<void> restorePersistedTransferQueueState(TransferQueue queue) {
   return queue._restoreFuture ??= queue._restorePersistedTasks();
@@ -16,8 +15,11 @@ Future<void> persistTransferQueueState(TransferQueue queue) async {
   queue._persistTimer?.cancel();
   queue._persistTimer = null;
   final prefs = await SharedPreferences.getInstance();
+  // Terminal local producer rows belong to Go's remote-task history, not this
+  // execution facade. Persist only a live hand-off; restart will discard it
+  // safely because Dart cannot resume a producer closure after process exit.
   final payload = queue._tasks
-      .where((task) => task.publishRemoteTask)
+      .where((task) => task.publishRemoteTask && !task.isFinished)
       .take(_persistedTaskLimit)
       .map((task) => task.toJson())
       .toList(growable: false);
@@ -46,29 +48,16 @@ Future<void> loadPersistedTransferQueueStateData(TransferQueue queue) async {
   try {
     final decoded = jsonDecode(raw);
     if (decoded is! List) {
+      await prefs.remove(_storageKey);
       return;
     }
+    // A Dart producer cannot survive restart. Its terminal result is either
+    // already represented by Go's unified history or unavailable, so retaining
+    // any old local payload would create task-page rows with no backend peer.
     queue._tasks.clear();
     queue._tasksById.clear();
-    for (final item in decoded) {
-      if (item is! Map) {
-        continue;
-      }
-      final task = TransferTask.fromJson(Map<String, dynamic>.from(item));
-      if (!task.publishRemoteTask) {
-        // Metadata-backed operations are durable in Go; do not resurrect an
-        // obsolete Dart execution row after an app restart.
-        continue;
-      }
-      if (task.status == TransferStatus.pending ||
-          task.status == TransferStatus.running) {
-        task.status = TransferStatus.failed;
-        task.speedBytes = 0;
-        task.error = _interruptedTaskMessage;
-      }
-      queue._tasks.add(task);
-      queue._tasksById[task.id] = task;
-    }
+    // Remove old persisted terminal payloads written by previous versions.
+    await prefs.remove(_storageKey);
   } catch (_) {
     await prefs.remove(_storageKey);
     queue._tasks.clear();

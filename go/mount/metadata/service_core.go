@@ -26,6 +26,67 @@ type Service struct {
 	chunkProtectionClosed bool
 	workerMu              sync.RWMutex
 	worker                *Worker
+	// groupCacheInvalidate is an optional hook the Manager installs so a
+	// journal state transition also drops its memoized task-group snapshot.
+	groupCacheInvalidate func()
+	// changeMu/changeListeners carry op-change notifications to subscribers
+	// (bridge task push channel) without exposing internal worker state.
+	changeMu        sync.Mutex
+	changeListeners map[chan struct{}]bool
+}
+
+// SubscribeTaskChanges registers a listener that receives coalesced state
+// ticks. Unsubscribe closes its channel so fan-in goroutines cannot leak.
+func (s *Service) SubscribeTaskChanges() (func(), chan struct{}) {
+	notify := make(chan struct{}, 1)
+	s.changeMu.Lock()
+	if s.changeListeners == nil {
+		s.changeListeners = map[chan struct{}]bool{}
+	}
+	s.changeListeners[notify] = true
+	s.changeMu.Unlock()
+	var once sync.Once
+	unsubscribe := func() {
+		once.Do(func() {
+			s.changeMu.Lock()
+			if _, exists := s.changeListeners[notify]; exists {
+				delete(s.changeListeners, notify)
+				close(notify)
+			}
+			s.changeMu.Unlock()
+		})
+	}
+	return unsubscribe, notify
+}
+
+// NotifyTaskChanged wakes every subscriber once; dropped signals are safe
+// because subscribers treat this as "re-fetch now", not a payload. It also
+// drops the manager group cache hook when installed, so a push-triggered
+// poll cannot read a stale memoized snapshot.
+func (s *Service) NotifyTaskChanged() {
+	if s.groupCacheInvalidate != nil {
+		s.groupCacheInvalidate()
+	}
+	s.changeMu.Lock()
+	for ch := range s.changeListeners {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+	s.changeMu.Unlock()
+}
+
+// closeTaskChangeListeners releases bridge fan-in subscriptions when this
+// namespace is closed between task-page polls. A closed service cannot emit a
+// useful future event, and leaving its listeners open retains it indefinitely.
+func (s *Service) closeTaskChangeListeners() {
+	s.changeMu.Lock()
+	for notify := range s.changeListeners {
+		close(notify)
+	}
+	s.changeListeners = nil
+	s.changeMu.Unlock()
 }
 
 // NewService wires a durable store to one provider backend.
@@ -136,6 +197,7 @@ func (s *Service) taskWorker() *Worker {
 
 // Close stops deferred manifest work before releasing the backing database.
 func (s *Service) Close() error {
+	s.closeTaskChangeListeners()
 	s.chunkMu.Lock()
 	if !s.chunkProtectionClosed {
 		if s.chunkProtectionDirty {

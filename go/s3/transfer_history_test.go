@@ -2,6 +2,7 @@ package s3
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -12,6 +13,8 @@ func TestForgetTerminalTransfersScopesAndSkipsRunning(t *testing.T) {
 	startTransfer("history-b", "upload", "bucket-b", "b", "", 0, func() {})
 	finishTransfer("history-b", context.Canceled)
 	startTransfer("history-running", "upload", "bucket-a", "running", "", 0, func() {})
+	startTransfer("history-failed", "upload", "bucket-a", "failed", "", 0, func() {})
+	finishTransfer("history-failed", errors.New("provider failed"))
 
 	if removed := ForgetTerminalTransfers(nil, "", "bucket-a"); removed != 1 {
 		t.Fatalf("removed scoped terminal transfers = %d; want 1", removed)
@@ -24,5 +27,8 @@ func TestForgetTerminalTransfersScopesAndSkipsRunning(t *testing.T) {
 	}
 	if _, ok := GetTransferSnapshot("history-running"); !ok {
 		t.Fatal("running snapshot was removed")
+	}
+	if _, ok := GetTransferSnapshot("history-failed"); !ok {
+		t.Fatal("failed snapshot was removed from the retry queue")
 	}
 }

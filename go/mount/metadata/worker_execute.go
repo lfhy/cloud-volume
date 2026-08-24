@@ -68,6 +68,10 @@ func (w *Worker) execute(ctx context.Context, op Op) {
 	w.releaseInode(op.InodeID)
 	if updateErr != nil {
 		log.Printf("[metadata/worker] op=%d state update error=%v", op.Seq, updateErr)
+	} else {
+		// Push-channel tick: the task page can re-fetch immediately instead of
+		// waiting for the next polling interval after a committed transition.
+		w.service.NotifyTaskChanged()
 	}
 	if err != nil && !errors.Is(err, errConflict) {
 		log.Printf("[metadata/worker] op=%d type=%d retry pending error=%v", op.Seq, op.Type, err)
@@ -75,16 +79,22 @@ func (w *Worker) execute(ctx context.Context, op Op) {
 }
 
 func (w *Worker) markReconciliationIfCanceled(seq uint64) error {
-	return w.service.store.update(func(tx boltTxT) error {
+	changed := false
+	err := w.service.store.update(func(tx boltTxT) error {
 		return replaceOp(tx, seq, func(current *Op) {
 			if current.State == OpStateCancelRequested {
 				current.State = OpStateReconciling
+				changed = true
 				if current.ReconcileAtUnixNano == 0 {
 					current.ReconcileAtUnixNano = time.Now().UnixNano()
 				}
 			}
 		})
 	})
+	if err == nil && changed {
+		w.service.NotifyTaskChanged()
+	}
+	return err
 }
 
 // operationMayExecute closes the claim-to-context race: a cancel request that
@@ -203,13 +213,17 @@ func (w *Worker) executeOp(ctx context.Context, op Op) error {
 }
 
 func (w *Worker) markVerifying(seq uint64) error {
-	return w.service.store.update(func(tx boltTxT) error {
+	err := w.service.store.update(func(tx boltTxT) error {
 		return replaceOp(tx, seq, func(current *Op) {
 			if current.State == OpStateRunning {
 				current.State = OpStateVerifying
 			}
 		})
 	})
+	if err == nil {
+		w.service.NotifyTaskChanged()
+	}
+	return err
 }
 
 var errConflict = errors.New("metadata: remote fingerprint conflict")

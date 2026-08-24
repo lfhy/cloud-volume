@@ -24,7 +24,7 @@ type TransferSnapshot struct {
 	CreatedAt    string `json:"createdAt,omitempty"`
 	// UpdatedAt (UTC RFC3339Nano) keeps ordering aligned with metadata tasks
 	// even while a runtime snapshot's local-zone createdAt differs.
-	UpdatedAt     string `json:"updatedAt,omitempty"`
+	UpdatedAt      string `json:"updatedAt,omitempty"`
 	BytesCompleted int64  `json:"bytesCompleted"`
 	TotalBytes     int64  `json:"totalBytes"`
 	ItemsCompleted int64  `json:"itemsCompleted,omitempty"`
@@ -353,5 +353,9 @@ func GetTransferSnapshot(id string) (TransferSnapshot, bool) {
 	if !ok {
 		return TransferSnapshot{}, false
 	}
-	return task.snapshot, true
+	// Mirror the list projection so detail views sort with the same
+	// UTC updatedAt stamp instead of falling back to createdAt.
+	snapshot := task.snapshot
+	snapshot.UpdatedAt = task.updatedAt.UTC().Format(time.RFC3339Nano)
+	return snapshot, true
 }

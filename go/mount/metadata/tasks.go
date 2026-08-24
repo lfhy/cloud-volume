@@ -358,7 +358,15 @@ func (t *Task) setWireState() {
 	}
 	if t.CreatedAtUnixNs != 0 {
 		t.CreatedAt = time.Unix(0, t.CreatedAtUnixNs).UTC().Format(time.RFC3339Nano)
+		// UpdatedAt tracks the latest journal event so terminal history sorts
+		// by when it actually finished, not by creation order.
 		t.UpdatedAt = t.CreatedAt
+		if applied := t.AppliedAtUnixNs; applied != 0 {
+			t.UpdatedAt = time.Unix(0, applied).UTC().Format(time.RFC3339Nano)
+		}
+		if canceled := t.CanceledAtUnixNs; canceled != 0 {
+			t.UpdatedAt = time.Unix(0, canceled).UTC().Format(time.RFC3339Nano)
+		}
 	}
 	t.Cancelable = t.State == TaskStatePending || t.State == TaskStateBlocked || t.State == TaskStateRunning
 	t.Triggerable = t.State == TaskStatePending || t.State == TaskStateBlocked

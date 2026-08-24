@@ -27,9 +27,14 @@ func (m *remoteMutation) nextAttempt() int64 {
 	return m.deadline
 }
 
+// finish releases the quiet gate and, when the transaction committed at least
+// one remote operation, notifies task subscribers so push clients re-fetch.
 func (m *remoteMutation) finish(committed bool) {
-	if committed && m.deadline > m.service.remoteQuietUntilNano {
-		m.service.remoteQuietUntilNano = m.deadline
+	if committed {
+		if m.deadline > m.service.remoteQuietUntilNano {
+			m.service.remoteQuietUntilNano = m.deadline
+		}
+		m.service.NotifyTaskChanged()
 	}
 	m.service.remoteQuietMu.Unlock()
 }

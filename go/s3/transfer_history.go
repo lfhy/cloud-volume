@@ -2,8 +2,9 @@ package s3
 
 import "strings"
 
-// ForgetTerminalTransfers removes selected, or all scoped, terminal runtime
-// snapshots. Durable metadata history is owned by the metadata service.
+// ForgetTerminalTransfers removes selected, or all scoped, completed/canceled
+// runtime history. Failed transfers remain visible in the retry queue just as
+// failed metadata tasks do; they are not clear-history records.
 func ForgetTerminalTransfers(ids []string, profileID, bucket string) int {
 	selected := make(map[string]struct{}, len(ids))
 	for _, rawID := range ids {
@@ -20,7 +21,7 @@ func ForgetTerminalTransfers(ids []string, profileID, bucket string) int {
 			if _, ok := selected[id]; !ok {
 				continue
 			}
-		} else if !isTerminalTransferStatus(task.snapshot.Status) {
+		} else if !isClearableHistoryTransferStatus(task.snapshot.Status) {
 			continue
 		}
 		if profileID != "" && task.snapshot.ProfileID != profileID {
@@ -29,7 +30,7 @@ func ForgetTerminalTransfers(ids []string, profileID, bucket string) int {
 		if bucket != "" && task.snapshot.Bucket != bucket {
 			continue
 		}
-		if !isTerminalTransferStatus(task.snapshot.Status) {
+		if !isClearableHistoryTransferStatus(task.snapshot.Status) {
 			continue
 		}
 		delete(globalTransferMonitor.tasks, id)
@@ -39,9 +40,9 @@ func ForgetTerminalTransfers(ids []string, profileID, bucket string) int {
 	return removed
 }
 
-func isTerminalTransferStatus(status string) bool {
+func isClearableHistoryTransferStatus(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "done", "completed", "failed", "canceled", "cancelled":
+	case "done", "completed", "canceled", "cancelled":
 		return true
 	default:
 		return false
