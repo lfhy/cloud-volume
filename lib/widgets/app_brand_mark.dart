@@ -41,7 +41,7 @@ class AppBrandMark extends StatelessWidget {
         Text(appBrandName, maxLines: 1, overflow: TextOverflow.ellipsis, style: titleStyle),
         const SizedBox(height: 3),
         Text(
-          'Cloud Volume',
+          'cloud-volumn',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: subtitleStyle,

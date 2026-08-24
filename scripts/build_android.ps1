@@ -1,7 +1,8 @@
 # Builds the Android APK after packaging the Go FFI bridge for both ARM64 and x86_64.
 param(
   [string]$FlutterRoot = $(if ($env:FLUTTER_ROOT) { $env:FLUTTER_ROOT } else { Join-Path $HOME 'dev\flutter' }),
-  [switch]$Debug
+  [switch]$Debug,
+  [string]$OutputName = $(if ($Debug) { 'cloud-volumn-debug.apk' } else { 'cloud-volumn-release.apk' })
 )
 
 Set-StrictMode -Version Latest
@@ -38,4 +39,7 @@ $apk = Join-Path $repoRoot $(if ($Debug) { 'build\app\outputs\flutter-apk\app-de
 if (-not (Test-Path -LiteralPath $apk)) {
   throw "Android APK was not produced: $apk"
 }
+$namedApk = Join-Path (Split-Path -Parent $apk) $OutputName
+Copy-Item -LiteralPath $apk -Destination $namedApk -Force
 Write-Host "Built Android APK: $apk" -ForegroundColor Green
+Write-Host "Named APK: $namedApk" -ForegroundColor Green
