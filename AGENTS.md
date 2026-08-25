@@ -237,28 +237,37 @@ Windows release bundles separate the public launcher from the Flutter process so
 - The launcher can diagnose a missing app, loader failure, Flutter engine failure, or later native crash. It cannot diagnose corruption that prevents the launcher itself from loading; its imports therefore stay limited to Windows system libraries and it has no Flutter/Go runtime dependency.
 - Reports may contain local paths from logs. Keep the user review warning and the 64 KiB tail limit when extending diagnostics; do not collect credentials or full configuration files.
 
-### Feature: Desktop Application Icons
+### Feature: Application Icons (Desktop + Android)
 
-Desktop platforms share the same cloud-and-drive brand artwork, while each platform packages it in the format and silhouette expected by its shell.
+All platforms share the same cloud-and-drive brand artwork, while each platform packages it in the format and silhouette expected by its shell.
 
 #### Key files
 
 - `assets/brand/yunjuan_app_icon.svg` - Editable brand artwork shared by the app icon family. It does not contain the platform-specific Windows corner mask.
-- `macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_1024.png` - Opaque 1024px raster used as the input for Windows icon generation; macOS applies its own displayed app-icon silhouette.
+- `macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_1024.png` - Opaque 1024px raster used as the input for Windows and Android icon generation; macOS applies its own displayed app-icon silhouette.
 - `scripts/generate_windows_app_icon.ps1` - Applies a transparent rounded-square mask with a default 22.5% radius, downsamples the masked master with high-quality filtering, and writes PNG-backed ICO layers at 16, 20, 24, 32, 40, 48, 64, 128, and 256px.
 - `windows/runner/resources/app_icon.ico` / `windows/runner/Runner.rc` - Generated Windows icon and the runner resource binding consumed by the launcher, Flutter app, taskbar, Start menu, and Explorer.
+- `scripts/generate_android_app_icon.ps1` - Generates the Android launcher icon family from the same 1024px master: legacy `ic_launcher.png` (square, full master downscaled) and `ic_launcher_round.png` (circular mask) at 48/72/96/144/192px for mdpi-xxxhdpi, plus `ic_launcher_foreground.png` adaptive layers at 108/162/216/324/432px. The foreground locates the non-white artwork bounding box via `LockBits` (channel threshold 245) and fits it inside the 66/108 adaptive safe zone, so the artwork scale matches the desktop composition.
+- `android/app/src/main/res/mipmap-*/` - Generated launcher PNGs (square + round + adaptive foreground per density).
+- `android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml` / `ic_launcher_round.xml` - Adaptive-icon definitions referencing `@color/ic_launcher_background` (white) and `@mipmap/ic_launcher_foreground`.
+- `android/app/src/main/res/values/ic_launcher_background.xml` - Solid-white adaptive background color matching the master's own canvas.
+- `android/app/src/main/AndroidManifest.xml` - `android:icon="@mipmap/ic_launcher"` plus `android:roundIcon="@mipmap/ic_launcher_round"`.
 
 #### Data flow
 
 1. Update the editable brand artwork and regenerate the macOS 1024px raster when the artwork itself changes.
 2. Run `powershell -ExecutionPolicy Bypass -File .\scripts\generate_windows_app_icon.ps1` from the repository root.
 3. Commit the regenerated `windows/runner/resources/app_icon.ico`; Windows resource compilation embeds it through `Runner.rc`.
+4. Run `powershell -ExecutionPolicy Bypass -File .\scripts\generate_android_app_icon.ps1` from the repository root, then commit the regenerated `mipmap-*` PNGs.
 
 #### Gotchas
 
 - The macOS 1024px PNG has opaque white corner pixels. Do not copy it directly into an ICO and expect Windows to apply the macOS silhouette; Windows needs real alpha in the rounded corners.
 - Keep the rounded mask in the generator rather than baking it into `yunjuan_app_icon.svg`, so macOS and other platforms retain control of their own presentation.
 - Keep the small ICO layers. A single 256px PNG forces Windows to rescale at runtime and makes the rounded silhouette and brand details less predictable at taskbar sizes.
+- `TextureBrush` samples images at native pixel scale. The Android round-icon mask must be applied to an already-resized square, never the 1024px master, or only its top-left corner is shown.
+- The adaptive foreground keeps only the inner ~66/108 of the canvas safe across launcher masks. Fitting the detected artwork bounding box into that zone reproduces the desktop composition scale; do not draw the full-bleed master into the foreground.
+- The brand master is a wide composition (artwork ≈667×441 of 1024²). Legacy Android icons intentionally keep the full square with its white margins, matching Windows/macOS presentation.
 
 ### Feature: Desktop Window Close / Tray Exit
 

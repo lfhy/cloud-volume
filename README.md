@@ -124,6 +124,8 @@ Android runner 已包含在仓库中，并把 ARM64 Go FFI bridge 作为 `librem
 
 该脚本先用 Android NDK 构建 bridge，再执行 `flutter build apk --release --target-platform android-arm64`。产物位于 `build\app\outputs\flutter-apk\app-release.apk`。Android Gradle wrapper 与 Maven 仓库已优先使用国内镜像；离线或镜像不可达时需恢复网络后重试。
 
+Android 启动图标同样从现有 macOS 1024px 品牌位图生成，不重新绘制标志。修改品牌图标后运行 `powershell -ExecutionPolicy Bypass -File .\scripts\generate_android_app_icon.ps1`，脚本会写出各密度的方形/圆形传统图标，并生成 API 26+ 自适应图标前景层（品牌图形按官方 66/108 安全区缩放居中）。
+
 `make run` 是本仓库的标准启动方式：
 
 - macOS: 先构建 Go bridge 到 `bin/bridge/libremote_storage_bridge.dylib`，再以正确的 `DEVELOPER_DIR` 启动 Flutter macOS 应用

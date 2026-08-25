@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Android：启动图标从 Flutter 默认蓝色 "F" 替换为云卷品牌图标（蓝云 + 白卡片）。新增 `scripts/generate_android_app_icon.ps1`，从与 Windows/macOS 共用的 1024px 品牌位图生成各密度（mdpi-xxxhdpi）方形与圆形传统图标，以及 API 26+ 自适应图标前景层（图形按官方 66/108 安全区缩放居中，白色纯色背景层）。`AndroidManifest.xml` 增加 `android:roundIcon` 声明。
 - Android：新增 Android runner、ARM64 Go FFI bridge 构建与 `scripts/build_android.ps1` release APK 构建流程。配置、对象浏览、文件选择上传下载、分享和回收站可在移动端使用；本地挂载、目录同步、多窗口、外部应用打开、跨应用拖放及文件剪贴板等桌面专属功能仅在移动端按能力自动禁用，桌面端仍保留拖放、文件 URI 剪贴板与可改名的另存为。Android Gradle 与 Maven 依赖优先使用国内镜像。
 - Android 开发环境：新增 `scripts/setup_android_dev.ps1` 及双击启动器 `scripts/setup_android_dev.bat`。脚本优先使用仓库根目录的 `flutter_windows_3.47.0-stable.zip`（也可通过 `-FlutterArchive` 指定），没有本地归档时才回退到在线 Flutter stable release；随后以当前用户范围安装 JDK 17 与 Android SDK command-line tools，接受许可并安装 API 36、Build Tools、platform-tools 和可选模拟器镜像，并执行工具链与项目依赖/测试验证。`cmdline-tools\latest\bin` 现会写入 PATH，故 `sdkmanager` 可直接调用。
 

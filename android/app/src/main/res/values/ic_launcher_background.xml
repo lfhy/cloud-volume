@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive-icon background: solid white so the brand cloud-and-card artwork
+     (drawn by ic_launcher_foreground) composites exactly like the shared
+     1024px brand raster used on Windows and macOS. -->
+<resources>
+    <color name="ic_launcher_background">#FFFFFF</color>
+</resources>
