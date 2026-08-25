@@ -3,6 +3,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/models/remote_task_display.dart';
 import 'package:remote_storage/state/remote_task_store.dart';
@@ -31,6 +32,7 @@ class _SidebarTransferStatusState extends State<SidebarTransferStatus>
   late final AnimationController _controller;
   Timer? _hideTimer;
   bool _hovered = false;
+  bool _animationSyncScheduled = false;
 
   @override
   void initState() {
@@ -67,9 +69,24 @@ class _SidebarTransferStatusState extends State<SidebarTransferStatus>
   }
 
   void _syncAnimation() {
-    if (!mounted) {
+    if (!mounted) return;
+    // Task-store listeners can fire while an IndexedStack parent is building.
+    // Updating an AnimationController then makes ScaleTransition dirty during
+    // that build, so run exactly one synchronization after the frame instead.
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      if (_animationSyncScheduled) return;
+      _animationSyncScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _animationSyncScheduled = false;
+        if (mounted) _applyAnimationState();
+      });
       return;
     }
+    _applyAnimationState();
+  }
+
+  void _applyAnimationState() {
     if (_hasRunning) {
       _controller.repeat(reverse: true);
     } else {

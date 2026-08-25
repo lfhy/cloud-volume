@@ -13,7 +13,9 @@ extension _TransfersPageRemote on _TransfersPageState {
     final cancelable = selected.where((task) => task.cancelable).length;
     final triggerable = selected.where((task) => task.triggerable).length;
     final clearable = selected.where(isRemoteTaskHistory).length;
-    final historyCount = store.tasks.where(isRemoteTaskHistory).length;
+    final historyTotal = store.queue.reported
+        ? store.queue.history
+        : store.tasks.where(isRemoteTaskHistory).length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -59,14 +61,14 @@ extension _TransfersPageRemote on _TransfersPageState {
                 ),
               ],
             ],
-            if (_selectedTaskIds.isEmpty && historyCount > 0) ...[
+            if (historyTotal > 0) ...[
               const SizedBox(width: 10),
               ShadButton.outline(
                 size: ShadButtonSize.sm,
                 onPressed: _runningBatchAction
                     ? null
                     : () => unawaited(_clearRemoteHistory(store)),
-                child: const Text('清理历史'),
+                child: Text('清理全部历史 $historyTotal'),
               ),
             ],
           ],

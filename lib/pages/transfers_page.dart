@@ -56,7 +56,7 @@ class _TransfersPageState extends State<TransfersPage> {
   void initState() {
     super.initState();
     RemoteTaskStore.instance.bindApi(widget.api);
-    _loadInitialHistoryIfVisible();
+    _scheduleInitialHistoryLoadIfVisible();
     RemoteTaskStore.instance.addListener(_syncSelectionWithTasks);
     _searchController.addListener(_onSearchChanged);
   }
@@ -77,16 +77,19 @@ class _TransfersPageState extends State<TransfersPage> {
       RemoteTaskStore.instance.bindApi(widget.api);
     }
     if (widget.active && (oldWidget.api != widget.api || !oldWidget.active)) {
-      _loadInitialHistoryIfVisible();
+      _scheduleInitialHistoryLoadIfVisible();
     }
   }
 
-  // IndexedStack constructs this page before users select it. Defer retained
-  // history until the page becomes visible, then load it without an extra tap.
-  void _loadInitialHistoryIfVisible() {
-    if (widget.active) {
-      unawaited(RemoteTaskStore.instance.loadInitialHistory());
-    }
+  // IndexedStack updates this child during its parent's build. Loading history
+  // notifies global task listeners, so schedule it after that frame finishes.
+  void _scheduleInitialHistoryLoadIfVisible() {
+    if (!widget.active) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.active) {
+        unawaited(RemoteTaskStore.instance.loadInitialHistory());
+      }
+    });
   }
 
   void _onSearchChanged() {

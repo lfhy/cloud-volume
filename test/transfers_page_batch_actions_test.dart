@@ -22,6 +22,7 @@ import 'package:remote_storage/pages/transfers_page.dart';
 import 'package:remote_storage/services/remote_storage_api.dart';
 import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/widgets/list_selection_controls.dart';
+import 'package:remote_storage/widgets/sidebar_transfer_status.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
@@ -133,6 +134,60 @@ void main() {
     RemoteTaskStore.instance.resetForTest();
   });
 
+  testWidgets('clear-all history is available without selecting loaded rows', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _TransfersPageFakeApi()..respectActiveOnly = true;
+    api.tasks.addAll(const <RemoteTask>[
+      RemoteTask(
+        id: 'sync:test:all-history-1',
+        kind: RemoteTaskKind.download,
+        status: RemoteTaskStatus.done,
+        targetPath: 'first.txt',
+      ),
+      RemoteTask(
+        id: 'sync:test:all-history-2',
+        kind: RemoteTaskKind.upload,
+        status: RemoteTaskStatus.canceled,
+        targetPath: 'second.txt',
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Material(
+          child: TransfersPage(
+            api: api,
+            config: RemoteStorageConfig.empty(),
+            active: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    await tester.tap(find.text('清理全部历史 2'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      api.clearedTaskIds,
+      containsAll(<String>[
+        'sync:test:all-history-1',
+        'sync:test:all-history-2',
+      ]),
+    );
+    expect(RemoteTaskStore.instance.tasks, isEmpty);
+    await tester.pumpWidget(const SizedBox.shrink());
+    RemoteTaskStore.instance.resetForTest();
+  });
+
   testWidgets('mount reads show the file path and byte range', (tester) async {
     tester.view.physicalSize = const Size(1280, 900);
     tester.view.devicePixelRatio = 1;
@@ -220,6 +275,55 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     RemoteTaskStore.instance.resetForTest();
   });
+
+  testWidgets('activating tasks does not animate the sidebar during build', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _TransfersPageFakeApi()..respectActiveOnly = true;
+    api.tasks.add(
+      const RemoteTask(
+        id: 'sync:test:sidebar-history',
+        kind: RemoteTaskKind.download,
+        status: RemoteTaskStatus.done,
+      ),
+    );
+
+    Widget page({required bool active}) => ShadApp(
+      home: Material(
+        child: Column(
+          children: [
+            Expanded(
+              child: TransfersPage(
+                api: api,
+                config: RemoteStorageConfig.empty(),
+                active: active,
+              ),
+            ),
+            SidebarTransferStatus(
+              accent: Colors.blue,
+              muted: Colors.grey,
+              onTap: () {},
+            ),
+          ],
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(page(active: false));
+    await tester.pump();
+    await tester.pumpWidget(page(active: true));
+    await tester.pump();
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    RemoteTaskStore.instance.resetForTest();
+  });
 }
 
 class _TransfersPageFakeApi implements RemoteStorageGateway {
@@ -277,9 +381,15 @@ class _TransfersPageFakeApi implements RemoteStorageGateway {
     String bucket = '',
     List<String> taskIds = const <String>[],
   }) async {
-    clearedTaskIds.addAll(taskIds);
-    tasks.removeWhere((task) => taskIds.contains(task.id));
-    return taskIds.length;
+    final ids = taskIds.isEmpty
+        ? tasks
+              .where(isRemoteTaskHistory)
+              .map((task) => task.id)
+              .toList(growable: false)
+        : taskIds;
+    clearedTaskIds.addAll(ids);
+    tasks.removeWhere((task) => ids.contains(task.id));
+    return ids.length;
   }
 
   @override
