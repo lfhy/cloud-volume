@@ -2,11 +2,19 @@
 param(
   [string]$FlutterRoot = $(if ($env:FLUTTER_ROOT) { $env:FLUTTER_ROOT } else { Join-Path $HOME 'dev\flutter' }),
   [switch]$Debug,
+  [switch]$SplitPerAbi,
   [string]$OutputName = $(if ($Debug) { 'cloud-volumn-debug.apk' } else { 'cloud-volumn-release.apk' })
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# The bridge build requires Go; make the migrated D: toolchain work without
+# requiring callers to edit PATH first.
+$goRoot = 'D:\toolchains\go\bin'
+if ((Test-Path -LiteralPath $goRoot) -and (($env:Path -split ';') -notcontains $goRoot)) {
+  $env:Path = "$goRoot;$env:Path"
+}
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $flutter = Join-Path $FlutterRoot 'bin\flutter.bat'
@@ -27,7 +35,9 @@ if ($LASTEXITCODE -ne 0) {
 Push-Location $repoRoot
 try {
   $mode = if ($Debug) { 'debug' } else { 'release' }
-  & $flutter build apk "--$mode" --dart-define=APP_VERSION_LABEL=dev
+  $buildArgs = @('build', 'apk', "--$mode", '--dart-define=APP_VERSION_LABEL=dev')
+  if ($SplitPerAbi) { $buildArgs += '--split-per-abi' }
+  & $flutter @buildArgs
   if ($LASTEXITCODE -ne 0) {
     throw "Android APK build failed with exit code $LASTEXITCODE."
   }
@@ -36,6 +46,15 @@ try {
 }
 
 $apk = Join-Path $repoRoot $(if ($Debug) { 'build\app\outputs\flutter-apk\app-debug.apk' } else { 'build\app\outputs\flutter-apk\app-release.apk' })
+if ($SplitPerAbi) {
+  $apkDirectory = Split-Path -Parent $apk
+  Get-ChildItem $apkDirectory -Filter '*arm64-v8a*.apk' | ForEach-Object {
+    $named = Join-Path $apkDirectory ($OutputName -replace '\.apk$', '-arm64-v8a.apk')
+    Copy-Item -LiteralPath $_.FullName -Destination $named -Force
+    Write-Host "Named ABI APK: $named" -ForegroundColor Green
+  }
+  exit 0
+}
 if (-not (Test-Path -LiteralPath $apk)) {
   throw "Android APK was not produced: $apk"
 }
