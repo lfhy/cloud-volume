@@ -342,6 +342,12 @@ func (s *Server) invokeMethod(
 	case "trigger_remote_task":
 		result, err := controlWebRemoteTask(input, "trigger")
 		return result, http.StatusOK, err
+	case "trigger_all_remote_tasks":
+		result, err := triggerAllWebRemoteTasks(input)
+		if err != nil {
+			return nil, webTaskSyncErrorStatus(err), err
+		}
+		return result, http.StatusOK, nil
 	case "clear_remote_task_history":
 		result, err := clearWebRemoteTaskHistory(input)
 		return result, http.StatusOK, err

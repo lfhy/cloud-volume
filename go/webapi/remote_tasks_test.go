@@ -2,11 +2,30 @@
 package webapi
 
 import (
+	"errors"
+	"net/http"
 	"testing"
 
 	storageconfig "remote-storage/go/config"
+	bucketmetadata "remote-storage/go/mount/metadata"
 	s3ops "remote-storage/go/s3"
 )
+
+func TestWebTaskSyncRequiresActiveProfileID(t *testing.T) {
+	if _, err := webTaskSyncProfileID(storageconfig.RemoteStorageConfig{}); !errors.Is(err, bucketmetadata.ErrNotFound) {
+		t.Fatalf("empty task-sync profile error = %v, want ErrNotFound", err)
+	}
+	profileID, err := webTaskSyncProfileID(storageconfig.RemoteStorageConfig{ProfileID: " profile-a "})
+	if err != nil || profileID != "profile-a" {
+		t.Fatalf("normalized task-sync profile = %q, %v", profileID, err)
+	}
+	if got := webTaskSyncErrorStatus(bucketmetadata.ErrNotFound); got != http.StatusNotFound {
+		t.Fatalf("missing-profile status = %d, want %d", got, http.StatusNotFound)
+	}
+	if got := webTaskSyncErrorStatus(errors.New("worker failed")); got != http.StatusInternalServerError {
+		t.Fatalf("worker error status = %d, want %d", got, http.StatusInternalServerError)
+	}
+}
 
 func TestWebRemoteTaskNamespaceParsesQualifiedID(t *testing.T) {
 	if got := webRemoteTaskNamespace("sync:profile-hash:gam91cm91cC0x"); got != "profile-hash" {

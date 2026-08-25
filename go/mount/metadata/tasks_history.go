@@ -39,7 +39,7 @@ func (s *Service) ClearTaskHistoryIDs(taskIDs []string) (int, error) {
 			if err := deleteTaskHistoryOp(tx, op); err != nil {
 				return err
 			}
-			removedGroups[taskHistoryGroupKey(op)] = struct{}{}
+			removedGroups[taskGroupKey(op)] = struct{}{}
 		}
 		return nil
 	})

@@ -66,6 +66,14 @@ func removeTaskOpIndex(tx boltTx, op Op) error {
 	return tx.Bucket([]byte(bucketTaskGroups)).Put([]byte(op.TaskGroupID), append([]byte(nil), key[len(prefix):]...))
 }
 
+// taskGroupKey identifies one visible task even for legacy journal records.
+func taskGroupKey(op Op) string {
+	if op.TaskGroupID != "" {
+		return op.TaskGroupID
+	}
+	return fmt.Sprintf("seq-%d", op.Seq)
+}
+
 func taskMemberPrefix(group string) []byte { return append([]byte(group), 0) }
 
 func taskMemberKey(group string, seq uint64) []byte {

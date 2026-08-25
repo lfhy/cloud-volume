@@ -282,6 +282,12 @@ class _FakeApi implements RemoteStorageGateway {
   Future<bool> triggerRemoteTask(String taskId) async => false;
 
   @override
+  Future<int> triggerAllRemoteTasks({
+    String profileId = '',
+    String bucket = '',
+  }) async => 0;
+
+  @override
   Future<int> clearRemoteTaskHistory({
     String profileId = '',
     String bucket = '',

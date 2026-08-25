@@ -292,6 +292,14 @@ abstract class RemoteStorageGateway {
     throw UnsupportedError('统一远端任务队列不可用');
   }
 
+  /// Forces all durable pending tasks in the requested queue scope to run.
+  Future<int> triggerAllRemoteTasks({
+    String profileId = '',
+    String bucket = '',
+  }) async {
+    throw UnsupportedError('统一远端任务队列不可用');
+  }
+
   Future<int> clearRemoteTaskHistory({
     String profileId = '',
     String bucket = '',

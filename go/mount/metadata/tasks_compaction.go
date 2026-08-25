@@ -21,7 +21,7 @@ func (s *Service) ClearTaskHistory(before time.Time) (int, error) {
 			if err := deleteTaskHistoryOp(tx, op); err != nil {
 				return err
 			}
-			clearedGroups[taskHistoryGroupKey(op)] = struct{}{}
+			clearedGroups[taskGroupKey(op)] = struct{}{}
 		}
 		return nil
 	})
@@ -87,14 +87,6 @@ func canCompactTaskOp(tx boltTxT, candidate Op) bool {
 		}
 		return nil
 	}) == nil
-}
-
-func taskHistoryGroupKey(op Op) string {
-	if op.TaskGroupID != "" {
-		return op.TaskGroupID
-	}
-	// Legacy journal entries had no task group, so each remains one visible row.
-	return fmt.Sprintf("seq-%d", op.Seq)
 }
 
 func taskTerminalAt(op Op) (time.Time, bool) {

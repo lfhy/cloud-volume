@@ -118,11 +118,38 @@ extension _TransfersPageRemoteActions on _TransfersPageState {
     }
   }
 
+  Future<void> _triggerAllRemoteTasks(RemoteTaskStore store) async {
+    if (_runningBatchAction) return;
+    _remoteSetState(() {
+      _runningBatchAction = true;
+      _batchAction = _RemoteBatchAction.sync;
+    });
+    try {
+      final triggered = await store.triggerAllRemoteTasks();
+      if (mounted) {
+        showAppToast(
+          context,
+          title: triggered == 0 ? '同步队列已更新' : '已开始同步',
+          message: triggered == 0 ? '没有可立即同步的任务' : '$triggered 个等待任务',
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        showAppErrorToast(context, title: '立即同步失败', message: error.toString());
+      }
+    } finally {
+      _remoteSetState(() {
+        _runningBatchAction = false;
+        _batchAction = null;
+      });
+    }
+  }
+
   Future<void> _clearRemoteHistory(RemoteTaskStore store) async {
     if (_runningBatchAction) return;
     _remoteSetState(() {
       _runningBatchAction = true;
-      _historyCleanupScope = _HistoryCleanupScope.all;
+      _batchAction = _RemoteBatchAction.clearAllHistory;
     });
     try {
       final removed = await store.clearHistory();
@@ -136,7 +163,7 @@ extension _TransfersPageRemoteActions on _TransfersPageState {
     } finally {
       _remoteSetState(() {
         _runningBatchAction = false;
-        _historyCleanupScope = null;
+        _batchAction = null;
       });
     }
   }
@@ -153,7 +180,7 @@ extension _TransfersPageRemoteActions on _TransfersPageState {
     if (taskIds.isEmpty) return;
     _remoteSetState(() {
       _runningBatchAction = true;
-      _historyCleanupScope = _HistoryCleanupScope.selected;
+      _batchAction = _RemoteBatchAction.clearSelectedHistory;
     });
     try {
       final removed = await store.clearHistory(taskIds: taskIds);
@@ -169,7 +196,7 @@ extension _TransfersPageRemoteActions on _TransfersPageState {
     } finally {
       _remoteSetState(() {
         _runningBatchAction = false;
-        _historyCleanupScope = null;
+        _batchAction = null;
       });
     }
   }

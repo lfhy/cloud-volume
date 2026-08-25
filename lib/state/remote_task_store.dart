@@ -11,6 +11,7 @@ import 'remote_task_events_web.dart'
     if (dart.library.io) 'remote_task_events.dart';
 
 part 'remote_task_store_cleanup.dart';
+part 'remote_task_store_actions.dart';
 part 'remote_task_store_local.dart';
 part 'remote_task_store_merge.dart';
 part 'remote_task_store_polling.dart';

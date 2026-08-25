@@ -15,6 +15,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 part 'transfers_page_remote.dart';
 part 'transfers_page_remote_actions.dart';
 part 'transfers_page_remote_filters.dart';
+part 'transfers_page_remote_header.dart';
 
 // A compact spinner makes automatic page-entry loading visible without
 // presenting a manual action that users should not need to click.
@@ -29,10 +30,14 @@ Widget _buildInitialHistoryLoading() => const Padding(
   ),
 );
 
-// Batch history cleanup can touch a large durable journal, so keep its active
-// request visible in the button instead of looking like a disabled no-op.
-Widget _historyCleanupButtonChild(bool clearing, String label) {
-  if (!clearing) return Text(label);
+// Queue actions can process a large durable journal, so keep the active
+// request visible in its button instead of looking like a disabled no-op.
+Widget _batchActionButtonChild(
+  bool loading,
+  String label, {
+  String? loadingLabel,
+}) {
+  if (!loading) return Text(label);
   return Row(
     mainAxisSize: MainAxisSize.min,
     children: [
@@ -42,12 +47,12 @@ Widget _historyCleanupButtonChild(bool clearing, String label) {
         child: CircularProgressIndicator(strokeWidth: 2),
       ),
       const SizedBox(width: 7),
-      Text('正在$label…'),
+      Text(loadingLabel ?? '正在$label…'),
     ],
   );
 }
 
-enum _HistoryCleanupScope { all, selected }
+enum _RemoteBatchAction { sync, clearAllHistory, clearSelectedHistory }
 
 class TransfersPage extends StatefulWidget {
   const TransfersPage({
@@ -72,7 +77,7 @@ class _TransfersPageState extends State<TransfersPage> {
   _RemoteTaskStatusFilter _remoteStatusFilter = _RemoteTaskStatusFilter.all;
   _RemoteTaskKindFilter _remoteKindFilter = _RemoteTaskKindFilter.all;
   bool _runningBatchAction = false;
-  _HistoryCleanupScope? _historyCleanupScope;
+  _RemoteBatchAction? _batchAction;
 
   @override
   void initState() {

@@ -49,6 +49,20 @@ mixin _RemoteStorageWebTasksApiMixin implements RemoteStorageGateway {
   }
 
   @override
+  Future<int> triggerAllRemoteTasks({
+    String profileId = '',
+    String bucket = '',
+  }) async {
+    final result = await _invoke('trigger_all_remote_tasks', <String, dynamic>{
+      if (profileId.trim().isNotEmpty) 'profileId': profileId.trim(),
+      if (bucket.trim().isNotEmpty) 'bucket': bucket.trim(),
+    });
+    return result is Map && result['triggered'] is num
+        ? (result['triggered'] as num).toInt()
+        : 0;
+  }
+
+  @override
   Future<int> clearRemoteTaskHistory({
     String profileId = '',
     String bucket = '',
