@@ -182,7 +182,9 @@ extension _TransfersPageRemote on _TransfersPageState {
                       showDivider: true,
                     ),
                 ],
-                if (store.canLoadMoreHistory)
+                if (store.isLoadingInitialHistory)
+                  _buildInitialHistoryLoading()
+                else if (store.canLoadMoreHistory)
                   Padding(
                     padding: const EdgeInsets.all(12),
                     child: ShadButton.outline(

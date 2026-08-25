@@ -4,6 +4,8 @@
 part of 'remote_task_store.dart';
 
 extension RemoteTaskStoreMergeLifecycle on RemoteTaskStore {
+  static const _initialHistoryRows = 100;
+
   /// True when a first history request or a later cursor can reveal rows that
   /// active-only polling intentionally left out of the list cache.
   bool get canLoadMoreHistory {
@@ -16,6 +18,60 @@ extension RemoteTaskStoreMergeLifecycle on RemoteTaskStore {
     // Older bridge versions omitted both fields. Permit one explicit history
     // request, then let its exhausted cursor close the affordance.
     return true;
+  }
+
+  /// Loads the first useful history page when the task page is opened. Active
+  /// polling remains history-free; this explicit page-entry request walks past
+  /// any active rows that precede history in the shared server ordering.
+  Future<void> loadInitialHistory() {
+    if (_api == null) return Future<void>.value();
+    return _initialHistoryLoad ??= _loadInitialHistory();
+  }
+
+  Future<void> _loadInitialHistory() async {
+    final api = _api;
+    if (api == null) return;
+    final generation = _bindingGeneration;
+    final historyEpoch = _historyEpoch;
+    _loadingInitialHistory = true;
+    notifyListenersChanged();
+    try {
+      // Joining the in-flight active poll is deterministic and avoids showing
+      // a temporary manual-load action while that snapshot is still arriving.
+      await pollActive();
+      if (generation != _bindingGeneration ||
+          !identical(api, _api) ||
+          historyEpoch != _historyEpoch) {
+        return;
+      }
+      if (_lastError != null) return;
+      final target = _queue.reported
+          ? _queue.history.clamp(0, _initialHistoryRows).toInt()
+          : 1;
+      while (canLoadMoreHistory && _loadedRemoteHistoryCount < target) {
+        final cursor = _nextCursor;
+        final loaded = _loadedRemoteHistoryCount;
+        // Before any history is reached, use a normal page to walk past active
+        // rows. Once history starts, cap the combined page to the remaining
+        // history capacity so a mixed page cannot exceed the 100-row preview.
+        final remaining = target - loaded;
+        await loadMore(limit: loaded == 0 ? _initialHistoryRows : remaining);
+        if (generation != _bindingGeneration ||
+            !identical(api, _api) ||
+            historyEpoch != _historyEpoch) {
+          return;
+        }
+        if (_loadedRemoteHistoryCount == loaded && _nextCursor == cursor) {
+          return;
+        }
+      }
+    } finally {
+      if (generation == _bindingGeneration && identical(api, _api)) {
+        _loadingInitialHistory = false;
+        _initialHistoryLoad = null;
+        notifyListenersChanged();
+      }
+    }
   }
 
   /// Reconciles one server page into the cache without exposing raw maps.
@@ -44,6 +100,11 @@ bool isRemoteTaskHistory(RemoteTask task) =>
 // The active-only bridge response includes failures/conflicts so users can
 // retry them. Only done/canceled rows are absent from that response.
 bool isRemoteTaskUnsettled(RemoteTask task) => !isRemoteTaskHistory(task);
+
+extension on RemoteTaskStore {
+  int get _loadedRemoteHistoryCount =>
+      _tasks.values.where(isRemoteTaskHistory).length;
+}
 
 /// Applies one page merge to [tasks]; [onChanged] fires once if anything
 /// actually changed so listeners rebuild without redundant notifications.

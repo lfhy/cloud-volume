@@ -1,4 +1,6 @@
 // RemoteTaskStore tests ensure endpoint failures never resurrect legacy rows.
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/models/remote_task_display.dart';
@@ -273,6 +275,261 @@ void main() {
     expect(RemoteTaskStore.instance.canLoadMoreHistory, isFalse);
   });
 
+  test(
+    'page entry loads the first retained history page automatically',
+    () async {
+      final api = _FakeGateway()
+        ..page = const RemoteTaskPage(
+          items: <RemoteTask>[
+            RemoteTask(
+              id: 'sync:ns:automatic-history',
+              kind: RemoteTaskKind.download,
+              status: RemoteTaskStatus.done,
+            ),
+          ],
+          total: 1,
+          hasTotal: true,
+          queue: RemoteTaskQueueCounts(total: 1, history: 1, reported: true),
+        );
+      RemoteTaskStore.instance.bindApi(api);
+
+      await RemoteTaskStore.instance.loadInitialHistory();
+
+      expect(RemoteTaskStore.instance.tasks, hasLength(1));
+      expect(RemoteTaskStore.instance.canLoadMoreHistory, isFalse);
+    },
+  );
+
+  test('clearing history invalidates an old history cursor', () async {
+    const first = RemoteTask(
+      id: 'sync:ns:old-cursor-first',
+      kind: RemoteTaskKind.download,
+      status: RemoteTaskStatus.done,
+    );
+    const second = RemoteTask(
+      id: 'sync:ns:old-cursor-second',
+      kind: RemoteTaskKind.download,
+      status: RemoteTaskStatus.done,
+    );
+    final api = _FakeGateway()
+      ..page = const RemoteTaskPage(
+        items: <RemoteTask>[first],
+        total: 2,
+        hasTotal: true,
+        queue: RemoteTaskQueueCounts(total: 2, history: 2, reported: true),
+        nextCursor: 'history:next',
+      )
+      ..continuationPage = const RemoteTaskPage(
+        items: <RemoteTask>[second],
+        total: 2,
+        hasTotal: true,
+        queue: RemoteTaskQueueCounts(total: 2, history: 2, reported: true),
+      );
+    RemoteTaskStore.instance.bindApi(api);
+
+    await RemoteTaskStore.instance.loadMore();
+    expect(RemoteTaskStore.instance.canLoadMoreHistory, isTrue);
+
+    await RemoteTaskStore.instance.clearHistory(taskIds: <String>[first.id]);
+
+    expect(RemoteTaskStore.instance.nextCursor, isEmpty);
+    expect(RemoteTaskStore.instance.canLoadMoreHistory, isFalse);
+  });
+
+  test('active polling cannot overlap an in-flight history page', () async {
+    final api = _FakeGateway()
+      ..page = const RemoteTaskPage(
+        total: 2,
+        hasTotal: true,
+        queue: RemoteTaskQueueCounts(total: 2, history: 2, reported: true),
+      );
+    RemoteTaskStore.instance.bindApi(api);
+    await Future<void>.delayed(Duration.zero);
+    api.pendingHistory = Completer<RemoteTaskPage>();
+
+    final firstHistoryPage = RemoteTaskStore.instance.loadMore();
+    await Future<void>.delayed(Duration.zero);
+    expect(api.historyRequests, 1);
+
+    // Joining callers must not start a second request while the first history
+    // page owns the serialized read gate.
+    unawaited(RemoteTaskStore.instance.pollActive());
+    expect(api.activeRequests, 1);
+    expect(api.historyRequests, 1);
+
+    api.pendingHistory!.complete(
+      const RemoteTaskPage(
+        total: 2,
+        hasTotal: true,
+        queue: RemoteTaskQueueCounts(total: 2, history: 2, reported: true),
+        nextCursor: 'history:next',
+      ),
+    );
+    await firstHistoryPage;
+    expect(RemoteTaskStore.instance.nextCursor, 'history:next');
+  });
+
+  test('page entry waits for another refresh before loading history', () async {
+    const retained = RemoteTask(
+      id: 'sync:ns:joined-history',
+      kind: RemoteTaskKind.download,
+      status: RemoteTaskStatus.done,
+    );
+    final api = _FakeGateway()
+      ..page = const RemoteTaskPage(
+        items: <RemoteTask>[retained],
+        total: 1,
+        hasTotal: true,
+        queue: RemoteTaskQueueCounts(total: 1, history: 1, reported: true),
+      );
+    RemoteTaskStore.instance.bindApi(api);
+    await Future<void>.delayed(Duration.zero);
+    api.pendingActive = Completer<RemoteTaskPage>();
+
+    final otherRefresh = RemoteTaskStore.instance.refresh(
+      const RemoteTaskFilter(includeHistory: false),
+    );
+    await Future<void>.delayed(Duration.zero);
+    final pageEntry = RemoteTaskStore.instance.loadInitialHistory();
+    expect(api.historyRequests, 0);
+
+    api.pendingActive!.complete(
+      const RemoteTaskPage(
+        total: 1,
+        hasTotal: true,
+        queue: RemoteTaskQueueCounts(total: 1, history: 1, reported: true),
+      ),
+    );
+    await otherRefresh;
+    await pageEntry;
+
+    expect(api.historyRequests, 1);
+    expect(RemoteTaskStore.instance.tasks.single.id, retained.id);
+  });
+
+  test('initial history preview never exceeds 100 terminal rows', () async {
+    final api = _PagingGateway(activeCount: 1, historyCount: 500);
+    RemoteTaskStore.instance.bindApi(api);
+
+    await RemoteTaskStore.instance.loadInitialHistory();
+
+    expect(
+      RemoteTaskStore.instance.tasks.where(isRemoteTaskHistory),
+      hasLength(100),
+    );
+    expect(api.historyLimits, <int>[100, 1]);
+  });
+
+  test('a failed first history page remains retryable', () async {
+    const retained = RemoteTask(
+      id: 'sync:ns:retry-history',
+      kind: RemoteTaskKind.download,
+      status: RemoteTaskStatus.done,
+    );
+    final api = _FakeGateway()
+      ..page = const RemoteTaskPage(
+        items: <RemoteTask>[retained],
+        total: 1,
+        hasTotal: true,
+        queue: RemoteTaskQueueCounts(total: 1, history: 1, reported: true),
+      );
+    RemoteTaskStore.instance.bindApi(api);
+    await Future<void>.delayed(Duration.zero);
+    api.historyError = StateError('history offline');
+
+    await RemoteTaskStore.instance.loadInitialHistory();
+    expect(RemoteTaskStore.instance.canLoadMoreHistory, isTrue);
+
+    api.historyError = null;
+    await RemoteTaskStore.instance.pollActive();
+    expect(RemoteTaskStore.instance.canLoadMoreHistory, isTrue);
+    await RemoteTaskStore.instance.loadInitialHistory();
+
+    expect(RemoteTaskStore.instance.tasks.single.id, retained.id);
+  });
+
+  test(
+    'clearing history ignores an already in-flight history response',
+    () async {
+      const retained = RemoteTask(
+        id: 'sync:ns:stale-clear-history',
+        kind: RemoteTaskKind.download,
+        status: RemoteTaskStatus.done,
+      );
+      final api = _FakeGateway()
+        ..page = const RemoteTaskPage(
+          items: <RemoteTask>[retained],
+          total: 1,
+          hasTotal: true,
+          queue: RemoteTaskQueueCounts(total: 1, history: 1, reported: true),
+        );
+      RemoteTaskStore.instance.bindApi(api);
+      await Future<void>.delayed(Duration.zero);
+      api.pendingHistory = Completer<RemoteTaskPage>();
+      final historyPage = RemoteTaskStore.instance.loadMore();
+      await Future<void>.delayed(Duration.zero);
+
+      final clear = RemoteTaskStore.instance.clearHistory(
+        taskIds: <String>[retained.id],
+      );
+      api.pendingHistory!.complete(
+        const RemoteTaskPage(
+          items: <RemoteTask>[retained],
+          total: 1,
+          hasTotal: true,
+          queue: RemoteTaskQueueCounts(total: 1, history: 1, reported: true),
+          nextCursor: 'stale-cursor',
+        ),
+      );
+      await historyPage;
+      await clear;
+
+      expect(RemoteTaskStore.instance.tasks, isEmpty);
+      expect(RemoteTaskStore.instance.nextCursor, isEmpty);
+    },
+  );
+
+  test('a late clear from a previous API cannot erase a new binding', () async {
+    const oldTask = RemoteTask(
+      id: 'sync:old:history',
+      kind: RemoteTaskKind.download,
+      status: RemoteTaskStatus.done,
+    );
+    const newTask = RemoteTask(
+      id: 'sync:new:history',
+      kind: RemoteTaskKind.download,
+      status: RemoteTaskStatus.done,
+    );
+    final oldApi = _FakeGateway()
+      ..page = const RemoteTaskPage(
+        items: <RemoteTask>[oldTask],
+        total: 1,
+        hasTotal: true,
+        queue: RemoteTaskQueueCounts(total: 1, history: 1, reported: true),
+      )
+      ..pendingClear = Completer<int>();
+    RemoteTaskStore.instance.bindApi(oldApi);
+    await RemoteTaskStore.instance.loadMore();
+    final clear = RemoteTaskStore.instance.clearHistory(
+      taskIds: <String>[oldTask.id],
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    final newApi = _FakeGateway()
+      ..page = const RemoteTaskPage(
+        items: <RemoteTask>[newTask],
+        total: 1,
+        hasTotal: true,
+        queue: RemoteTaskQueueCounts(total: 1, history: 1, reported: true),
+      );
+    RemoteTaskStore.instance.bindApi(newApi);
+    await RemoteTaskStore.instance.loadInitialHistory();
+    oldApi.pendingClear!.complete(1);
+
+    expect(await clear, 0);
+    expect(RemoteTaskStore.instance.tasks.single.id, newTask.id);
+  });
+
   test('active polling evicts a vanished failed task', () async {
     final api = _FakeGateway()
       ..page = const RemoteTaskPage(
@@ -442,31 +699,126 @@ void main() {
 
 class _FakeGateway extends Fake implements RemoteStorageGateway {
   RemoteTaskPage page = const RemoteTaskPage();
+  RemoteTaskPage? continuationPage;
+  Completer<RemoteTaskPage>? pendingHistory;
+  Completer<RemoteTaskPage>? pendingActive;
+  Completer<int>? pendingClear;
+  int activeRequests = 0;
+  int historyRequests = 0;
   Object? error;
+  Object? historyError;
 
   @override
   Future<RemoteTaskPage> listRemoteTasks([
     RemoteTaskFilter filter = const RemoteTaskFilter(),
   ]) async {
     if (error != null) throw error!;
+    if (filter.includeHistory) {
+      historyRequests++;
+      if (historyError != null) throw historyError!;
+      final pending = pendingHistory;
+      if (pending != null) return pending.future;
+    } else {
+      activeRequests++;
+      final pending = pendingActive;
+      if (pending != null) return pending.future;
+    }
+    final response = filter.includeHistory && filter.cursor.isNotEmpty
+        ? continuationPage ?? page
+        : page;
     // Mirror the server contract: active-only requests (history excluded)
     // return only non-terminal rows, so the store's poll/history split can be
     // exercised without a real backend.
     if (!filter.includeHistory) {
-      final active = page.items
+      final active = response.items
           .where((task) => !isRemoteTaskHistory(task))
           .toList(growable: false);
       return RemoteTaskPage(
         items: active,
-        total: page.total,
-        hasTotal: page.hasTotal,
-        queue: page.queue,
-        nextCursor: page.nextCursor,
-        serverTime: page.serverTime,
-        freshness: page.freshness,
-        capabilities: page.capabilities,
+        total: response.total,
+        hasTotal: response.hasTotal,
+        queue: response.queue,
+        serverTime: response.serverTime,
+        freshness: response.freshness,
+        capabilities: response.capabilities,
       );
     }
-    return page;
+    return response;
+  }
+
+  @override
+  Future<int> clearRemoteTaskHistory({
+    String profileId = '',
+    String bucket = '',
+    List<String> taskIds = const <String>[],
+  }) async {
+    final pending = pendingClear;
+    if (pending != null) return pending.future;
+    final removed = taskIds.isEmpty ? page.items.length : taskIds.length;
+    page = const RemoteTaskPage(
+      total: 0,
+      hasTotal: true,
+      queue: RemoteTaskQueueCounts(reported: true),
+    );
+    continuationPage = null;
+    return removed;
+  }
+}
+
+// Models the shared server ordering: every active row precedes retained
+// history, and cursors/limits apply to that combined ordered stream.
+class _PagingGateway extends Fake implements RemoteStorageGateway {
+  _PagingGateway({required int activeCount, required int historyCount})
+    : _items = <RemoteTask>[
+        for (var index = 0; index < activeCount; index++)
+          RemoteTask(
+            id: 'sync:paging:active-$index',
+            kind: RemoteTaskKind.download,
+            status: RemoteTaskStatus.running,
+          ),
+        for (var index = 0; index < historyCount; index++)
+          RemoteTask(
+            id: 'sync:paging:history-$index',
+            kind: RemoteTaskKind.download,
+            status: RemoteTaskStatus.done,
+          ),
+      ],
+      _activeCount = activeCount,
+      _historyCount = historyCount;
+
+  final List<RemoteTask> _items;
+  final int _activeCount;
+  final int _historyCount;
+  final List<int> historyLimits = <int>[];
+
+  @override
+  Future<RemoteTaskPage> listRemoteTasks([
+    RemoteTaskFilter filter = const RemoteTaskFilter(),
+  ]) async {
+    final queue = RemoteTaskQueueCounts(
+      active: _activeCount,
+      history: _historyCount,
+      total: _items.length,
+      reported: true,
+    );
+    if (!filter.includeHistory) {
+      return RemoteTaskPage(
+        items: _items.take(_activeCount).toList(growable: false),
+        total: _items.length,
+        hasTotal: true,
+        queue: queue,
+      );
+    }
+    historyLimits.add(filter.limit);
+    final offset = int.tryParse(filter.cursor) ?? 0;
+    final page = _items.skip(offset).take(filter.limit).toList(growable: false);
+    final nextOffset = offset + page.length;
+    return RemoteTaskPage(
+      items: page,
+      total: _items.length,
+      hasTotal: true,
+      queue: queue,
+      nextCursor: nextOffset < _items.length ? '$nextOffset' : '',
+    );
   }
 }

@@ -173,7 +173,7 @@ void main() {
     RemoteTaskStore.instance.resetForTest();
   });
 
-  testWidgets('history-only active poll exposes the first history load', (
+  testWidgets('history-only active poll loads history on page entry', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1280, 900);
@@ -192,20 +192,28 @@ void main() {
       ),
     );
 
-    await tester.pumpWidget(
-      ShadApp(
-        home: Material(
-          child: TransfersPage(api: api, config: RemoteStorageConfig.empty()),
+    Widget page({required bool active}) => ShadApp(
+      home: Material(
+        child: TransfersPage(
+          api: api,
+          config: RemoteStorageConfig.empty(),
+          active: active,
         ),
       ),
     );
+
+    // MainLayout keeps this IndexedStack child alive while another page is
+    // selected, so the regression must cover the false -> true transition.
+    await tester.pumpWidget(page(active: false));
+    await tester.pump();
+    expect(RemoteTaskStore.instance.tasks, isEmpty);
+
+    await tester.pumpWidget(page(active: true));
+    await tester.pump();
     await tester.pump();
 
-    expect(find.text('加载更多历史'), findsOneWidget);
+    expect(find.text('加载更多历史'), findsNothing);
     expect(find.text('暂无任务'), findsNothing);
-
-    await tester.tap(find.text('加载更多历史'));
-    await tester.pump();
 
     expect(RemoteTaskStore.instance.tasks, hasLength(1));
     expect(find.text('下载 retained.txt'), findsOneWidget);

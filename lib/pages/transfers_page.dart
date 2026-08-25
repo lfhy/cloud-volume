@@ -15,6 +15,19 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 part 'transfers_page_remote.dart';
 part 'transfers_page_remote_actions.dart';
 
+// A compact spinner makes automatic page-entry loading visible without
+// presenting a manual action that users should not need to click.
+Widget _buildInitialHistoryLoading() => const Padding(
+  padding: EdgeInsets.all(14),
+  child: Center(
+    child: SizedBox(
+      width: 16,
+      height: 16,
+      child: CircularProgressIndicator(strokeWidth: 2),
+    ),
+  ),
+);
+
 class TransfersPage extends StatefulWidget {
   const TransfersPage({
     super.key,
@@ -43,6 +56,7 @@ class _TransfersPageState extends State<TransfersPage> {
   void initState() {
     super.initState();
     RemoteTaskStore.instance.bindApi(widget.api);
+    _loadInitialHistoryIfVisible();
     RemoteTaskStore.instance.addListener(_syncSelectionWithTasks);
     _searchController.addListener(_onSearchChanged);
   }
@@ -61,6 +75,17 @@ class _TransfersPageState extends State<TransfersPage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.api != widget.api) {
       RemoteTaskStore.instance.bindApi(widget.api);
+    }
+    if (widget.active && (oldWidget.api != widget.api || !oldWidget.active)) {
+      _loadInitialHistoryIfVisible();
+    }
+  }
+
+  // IndexedStack constructs this page before users select it. Defer retained
+  // history until the page becomes visible, then load it without an extra tap.
+  void _loadInitialHistoryIfVisible() {
+    if (widget.active) {
+      unawaited(RemoteTaskStore.instance.loadInitialHistory());
     }
   }
 
