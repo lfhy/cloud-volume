@@ -35,6 +35,7 @@ func (b webDAVBackend) UploadFile(ctx context.Context, bucket, key, localPath, t
 		func(uploadCtx context.Context, body io.Reader) error {
 			return b.put(uploadCtx, key, body)
 		},
+		b.cfg.ProfileID,
 	)
 }
 
@@ -62,5 +63,6 @@ func (b webDAVBackend) UploadReader(
 		func(uploadCtx context.Context, tracked io.Reader) error {
 			return b.put(uploadCtx, key, tracked)
 		},
+		b.cfg.ProfileID,
 	)
 }

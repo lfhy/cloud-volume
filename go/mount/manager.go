@@ -91,11 +91,19 @@ func (m *manager) mountBucket(
 	if existing, ok := m.sessions[trimmedBucket]; ok {
 		if m.syncSessionLocked(existing) {
 			if mountSessionMatches(existing, cfg, trimmedBucket, options) {
+				if !existing.mounted {
+					return existing.status(), fmt.Errorf(
+						"previous mount attempt is unresolved; unmount it before mounting again",
+					)
+				}
 				return existing.status(), nil
 			}
 		}
-		// Either no longer active or config changed: unmount and remove.
-		m.unmountSessionLocked(existing)
+		// Do not replace a session that refused to stop: its durable writeback
+		// queue is still attached to the old remote configuration.
+		if err := m.unmountSessionLocked(existing); err != nil {
+			return existing.status(), err
+		}
 		delete(m.sessions, trimmedBucket)
 		delete(m.lastProbes, existing.mountTarget)
 	}
@@ -108,23 +116,73 @@ func (m *manager) mountBucket(
 		return BucketMountStatus{}, err
 	}
 	log.Printf("[mount/manager] mount-session-ready bucket=%q mount_name=%q target=%q", session.bucket, session.mountName, session.mountTarget)
-	if err := session.backend.CleanupStale(session); err != nil {
-		log.Printf("[mount/manager] mount-cleanup-stale-error bucket=%q err=%v", session.bucket, err)
+	if err := startMountSession(session); err != nil {
+		// A platform backend can report Start failure after making a live mount,
+		// then reject its cleanup Stop. Keep that session registered so its
+		// queue, metadata handle, and a later unmount attempt remain reachable.
+		if (session.mounted || session.mountAttempted) && !session.stopping && session.access != nil {
+			m.sessions[trimmedBucket] = session
+			delete(m.lastProbes, session.mountTarget)
+			log.Printf("[mount/manager] mount-start-retained bucket=%q", session.bucket)
+			return session.status(), err
+		}
 		return BucketMountStatus{}, err
 	}
-	log.Printf("[mount/manager] mount-cleanup-stale-done bucket=%q", session.bucket)
-	if err := session.backend.Start(session); err != nil {
-		log.Printf("[mount/manager] mount-start-error bucket=%q err=%v", session.bucket, err)
-		_ = session.backend.Stop(session)
-		return BucketMountStatus{}, err
-	}
-	session.remotePoller = newRemoteDirectoryPoller(session)
-	session.remotePoller.Start()
 
 	m.sessions[trimmedBucket] = session
 	delete(m.lastProbes, session.mountTarget)
 	log.Printf("[mount/manager] mount-done bucket=%q path=%q url=%q", session.bucket, session.mountPath, session.serverURL)
 	return session.status(), nil
+}
+
+// startMountSession closes every session resource when a pre-registration
+// lifecycle phase fails, including its metadata handle and background queues.
+func startMountSession(session *mountSession) (resultErr error) {
+	if session == nil || session.backend == nil {
+		return fmt.Errorf("mount session is not initialized")
+	}
+	startInvoked := false
+	retainAccess := false
+	defer func() {
+		if resultErr == nil {
+			return
+		}
+		if session.remotePoller != nil {
+			session.remotePoller.Stop()
+			session.remotePoller = nil
+		}
+		if startInvoked {
+			if err := session.backend.Stop(session); err != nil {
+				log.Printf("[mount/manager] mount-start-cleanup-error bucket=%q err=%v", session.bucket, err)
+				if (session.mounted || session.mountAttempted) && !session.stopping {
+					retainAccess = true
+					session.lastError = fmt.Sprintf(
+						"启动挂载失败: %v\n停止挂载失败: %v", resultErr, err,
+					)
+					resultErr = fmt.Errorf("%w; cleanup stop failed: %v", resultErr, err)
+				}
+			}
+		}
+		if !retainAccess && session.access != nil {
+			if err := session.access.close(); err != nil {
+				log.Printf("[mount/manager] mount-access-cleanup-error bucket=%q err=%v", session.bucket, err)
+			}
+			session.access = nil
+		}
+	}()
+	if err := session.backend.CleanupStale(session); err != nil {
+		log.Printf("[mount/manager] mount-cleanup-stale-error bucket=%q err=%v", session.bucket, err)
+		return err
+	}
+	log.Printf("[mount/manager] mount-cleanup-stale-done bucket=%q", session.bucket)
+	startInvoked = true
+	if err := session.backend.Start(session); err != nil {
+		log.Printf("[mount/manager] mount-start-error bucket=%q err=%v", session.bucket, err)
+		return err
+	}
+	session.remotePoller = newRemoteDirectoryPoller(session)
+	session.remotePoller.Start()
+	return nil
 }
 
 func (m *manager) unmountBucket(bucket string, options UnmountOptions) (BucketMountStatus, error) {
@@ -159,9 +217,11 @@ func (m *manager) getBucketMountStatus(bucket string) (BucketMountStatus, error)
 		return BucketMountStatus{Bucket: trimmedBucket}, nil
 	}
 	if !m.syncSessionLocked(existing) {
+		status := existing.status()
+		status.Mounted = false
 		delete(m.sessions, trimmedBucket)
 		delete(m.lastProbes, existing.mountTarget)
-		return BucketMountStatus{Bucket: trimmedBucket}, nil
+		return status, nil
 	}
 	return existing.status(), nil
 }
@@ -175,12 +235,22 @@ func (m *manager) openBucketMount(bucket string) (BucketMountStatus, error) {
 		return BucketMountStatus{Bucket: trimmedBucket}, fmt.Errorf("bucket is not mounted")
 	}
 	if !m.syncSessionLocked(existing) {
+		status := existing.status()
+		status.Mounted = false
 		delete(m.sessions, trimmedBucket)
 		delete(m.lastProbes, existing.mountTarget)
 		m.mu.Unlock()
-		return BucketMountStatus{Bucket: trimmedBucket}, fmt.Errorf("bucket is not mounted")
+		if message := strings.TrimSpace(status.LastError); message != "" {
+			return status, fmt.Errorf("bucket is not mounted: %s", message)
+		}
+		return status, fmt.Errorf("bucket is not mounted")
 	}
 	session := existing
+	if !session.mounted {
+		status := session.status()
+		m.mu.Unlock()
+		return status, fmt.Errorf("bucket mount is not ready; unmount it before opening")
+	}
 	m.mu.Unlock()
 
 	openPath := session.mountPath
@@ -193,24 +263,46 @@ func (m *manager) openBucketMount(bucket string) (BucketMountStatus, error) {
 	return session.status(), nil
 }
 
-// syncSessionLocked checks if a session is still active and returns true if it is.
-// If not active, it stops the backend. The caller should remove the session from
-// the map when false is returned.
+// syncSessionLocked checks whether a session is still usable. A failed Stop can
+// deliberately leave a durable mount live, so callers must retain that session.
 func (m *manager) syncSessionLocked(session *mountSession) bool {
 	if session == nil || session.stopping {
 		return false
 	}
 	active, err := m.cachedSessionActiveLocked(session)
 	if err != nil {
-		session.lastError = err.Error()
-		_ = session.backend.Stop(session)
-		return false
+		// A status probe failure is not proof that the volume disappeared.
+		// Keeping the server open avoids tearing down an in-flight Finder copy
+		// because the mount table command had one transient failure.
+		session.lastError = fmt.Sprintf("检查挂载状态失败: %v", err)
+		log.Printf(
+			"[mount/manager] status-probe-error bucket=%q target=%q err=%v",
+			session.bucket,
+			session.mountTarget,
+			err,
+		)
+		// A partial macOS start can leave a mount attempt and its local WebDAV
+		// server alive even before the mount table confirms it. Keep that
+		// session reachable for an explicit retry/cleanup after a probe error.
+		return (session.mounted || session.mountAttempted) && !session.stopping
 	}
 	if active {
 		session.mounted = true
+		if strings.HasPrefix(session.lastError, "检查挂载状态失败: ") {
+			session.lastError = ""
+		}
 		return true
 	}
-	_ = session.backend.Stop(session)
+	session.lastError = "系统 WebDAV 挂载已意外断开；本地待同步内容已保留，请重新挂载。"
+	log.Printf(
+		"[mount/manager] status-probe-inactive bucket=%q target=%q",
+		session.bucket,
+		session.mountTarget,
+	)
+	if stopErr := session.backend.Stop(session); stopErr != nil {
+		session.lastError = fmt.Sprintf("%s\n释放失效挂载失败: %v", session.lastError, stopErr)
+		return session.mounted && !session.stopping
+	}
 	return false
 }
 
@@ -260,13 +352,23 @@ func (m *manager) cleanupMounts() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	log.Printf("[mount/manager] cleanup-start")
+	var firstErr error
 	for bucket, session := range m.sessions {
 		if err := m.unmountSessionLocked(session); err != nil {
 			log.Printf("[mount/manager] cleanup-session-error bucket=%q err=%v", bucket, err)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("cleanup mount %q: %w", bucket, err)
+			}
+			continue
 		}
 		delete(m.lastProbes, session.mountTarget)
+		delete(m.sessions, bucket)
 	}
-	m.sessions = make(map[string]*mountSession)
+	if firstErr != nil {
+		// A backend that deliberately kept its mount alive (for example after a
+		// macOS writeback drain timeout) must remain retriable in this process.
+		return firstErr
+	}
 	m.lastProbes = make(map[string]mountProbeSnapshot)
 	if err := cleanupAllManagedMounts(); err != nil {
 		log.Printf("[mount/manager] cleanup-managed-error err=%v", err)

@@ -3,6 +3,7 @@ package mount
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -20,22 +21,25 @@ type deleteQueue struct {
 
 	mu      sync.Mutex
 	entries map[string]*pendingDelete
+	running map[string]*pendingDelete
 	queue   chan *pendingDelete
 	closed  bool
 	wg      sync.WaitGroup
 }
 
 type pendingDelete struct {
-	taskID      string
-	virtualPath string
-	isDir       bool
-	hardDelete  bool
+	taskID          string
+	virtualPath     string
+	isDir           bool
+	hardDelete      bool
+	providerStarted bool
 }
 
 func newDeleteQueue(access *bucketAccess) *deleteQueue {
 	q := &deleteQueue{
 		access:  access,
 		entries: map[string]*pendingDelete{},
+		running: map[string]*pendingDelete{},
 		queue:   make(chan *pendingDelete, 128),
 	}
 	for i := 0; i < deleteWorkerCount; i++ {
@@ -75,6 +79,7 @@ func (q *deleteQueue) enqueue(virtualPath string, isDir bool, hardDelete bool) {
 	}
 	q.entries[clean] = entry
 	s3ops.QueueTransfer(entry.taskID, "delete", q.access.bucket, clean, "", 0)
+	s3ops.SetTransferProfile(entry.taskID, q.access.config.ProfileID)
 	queue := q.queue
 	q.mu.Unlock()
 
@@ -91,7 +96,9 @@ func (q *deleteQueue) worker() {
 		if !q.claim(entry) {
 			continue
 		}
-		if err := q.flushNow(entry); err != nil {
+		err := q.flushNow(entry)
+		q.finish(entry)
+		if err != nil {
 			log.Printf(
 				"[mount/delete] bucket=%q path=%q isDir=%t hard=%t error=%v",
 				q.access.bucket,
@@ -113,17 +120,27 @@ func (q *deleteQueue) claim(entry *pendingDelete) bool {
 		return false
 	}
 	delete(q.entries, entry.virtualPath)
+	q.running[entry.taskID] = entry
 	return true
 }
 
-func (q *deleteQueue) flushNow(entry *pendingDelete) (err error) {
+func (q *deleteQueue) finish(entry *pendingDelete) {
+	if entry == nil {
+		return
+	}
+	q.mu.Lock()
+	if current := q.running[entry.taskID]; current == entry {
+		delete(q.running, entry.taskID)
+	}
+	q.mu.Unlock()
+}
+
+func (q *deleteQueue) flushNow(entry *pendingDelete) error {
 	ctx, cancel := context.WithTimeout(context.Background(), q.access.transferTimeout)
 	defer cancel()
 
 	ctx, transferCancel := context.WithCancel(ctx)
-	s3ops.StartQueuedTransfer(entry.taskID, "delete", q.access.bucket, entry.virtualPath, "", 0, transferCancel)
-	defer func() { s3ops.FinishQueuedTransfer(entry.taskID, err) }()
-	return q.runDelete(ctx, entry)
+	return q.runDelete(ctx, entry, transferCancel)
 }
 
 func (q *deleteQueue) shutdown() {
@@ -164,14 +181,92 @@ func (q *deleteQueue) cancelDescendantsLocked(clean string) {
 	}
 }
 
-func (q *deleteQueue) runDelete(ctx context.Context, entry *pendingDelete) error {
+// rebase moves delete intent after a successful remote rename. The caller
+// holds access.mutationMu, so a running entry that has not started its provider
+// call can safely inherit the destination path before it starts.
+func (q *deleteQueue) rebase(oldVirtualPath, newVirtualPath string, isDir bool) {
+	if q == nil {
+		return
+	}
+	oldClean := cleanVirtualPath(oldVirtualPath)
+	newClean := cleanVirtualPath(newVirtualPath)
+	if oldClean == "" || newClean == "" || oldClean == newClean {
+		return
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for key, entry := range q.entries {
+		next, ok := rebaseDeletePath(key, oldClean, newClean, isDir)
+		if !ok || entry == nil {
+			continue
+		}
+		if existing := q.entries[next]; existing != nil && existing != entry {
+			s3ops.CancelTransfer(entry.taskID)
+			delete(q.entries, key)
+			continue
+		}
+		delete(q.entries, key)
+		entry.virtualPath = next
+		q.entries[next] = entry
+	}
+	for _, entry := range q.running {
+		if entry == nil || entry.providerStarted {
+			continue
+		}
+		if next, ok := rebaseDeletePath(entry.virtualPath, oldClean, newClean, isDir); ok {
+			entry.virtualPath = next
+		}
+	}
+}
+
+func rebaseDeletePath(path, oldPath, newPath string, isDir bool) (string, bool) {
+	clean := cleanVirtualPath(path)
+	if clean == oldPath {
+		return newPath, true
+	}
+	if !isDir || !strings.HasPrefix(clean, ensureDirSuffix(oldPath)) {
+		return "", false
+	}
+	return newPath + strings.TrimPrefix(clean, oldPath), true
+}
+
+func (q *deleteQueue) runDelete(
+	ctx context.Context,
+	entry *pendingDelete,
+	transferCancel context.CancelFunc,
+) (err error) {
+	if q.access == nil {
+		return fmt.Errorf("missing delete access")
+	}
+	q.access.mutationMu.Lock()
+	defer q.access.mutationMu.Unlock()
+	q.mu.Lock()
+	if entry == nil {
+		q.mu.Unlock()
+		return fmt.Errorf("missing delete entry")
+	}
+	entry.providerStarted = true
+	virtualPath := entry.virtualPath
+	q.mu.Unlock()
+
+	s3ops.StartQueuedTransfer(
+		entry.taskID, "delete", q.access.bucket, virtualPath, "", 0, transferCancel,
+	)
+	s3ops.SetTransferProfile(entry.taskID, q.access.config.ProfileID)
+	defer func() { s3ops.FinishQueuedTransfer(entry.taskID, err) }()
 	deleteFunc := q.access.backend.DeleteObject
 	if entry.hardDelete {
 		deleteFunc = q.access.backend.DeleteObjectHard
 	}
-	err := deleteFunc(ctx, q.access.bucket, q.access.remoteKeyForMutation(entry.virtualPath, entry.isDir), entry.isDir, entry.taskID)
+	err = deleteFunc(
+		ctx,
+		q.access.bucket,
+		q.access.remoteKeyForMutation(virtualPath, entry.isDir),
+		entry.isDir,
+		entry.taskID,
+	)
 	if err == nil {
-		q.notifyPeerDelete(entry)
+		q.notifyPeerDelete(entry, virtualPath)
 		return nil
 	}
 	if entry.isDir || entry.hardDelete || !isRetryableCopySourceError(err) {
@@ -183,9 +278,15 @@ func (q *deleteQueue) runDelete(ctx context.Context, entry *pendingDelete) error
 			return err
 		case <-time.After(750 * time.Millisecond):
 		}
-		retryErr := deleteFunc(ctx, q.access.bucket, q.access.remoteKeyForMutation(entry.virtualPath, entry.isDir), entry.isDir, entry.taskID)
+		retryErr := deleteFunc(
+			ctx,
+			q.access.bucket,
+			q.access.remoteKeyForMutation(virtualPath, entry.isDir),
+			entry.isDir,
+			entry.taskID,
+		)
 		if retryErr == nil {
-			q.notifyPeerDelete(entry)
+			q.notifyPeerDelete(entry, virtualPath)
 			return nil
 		}
 		err = retryErr
@@ -196,10 +297,10 @@ func (q *deleteQueue) runDelete(ctx context.Context, entry *pendingDelete) error
 	return err
 }
 
-func (q *deleteQueue) notifyPeerDelete(entry *pendingDelete) {
-	ForgetPeerContent(q.access.config, q.access.bucket, entry.virtualPath)
+func (q *deleteQueue) notifyPeerDelete(entry *pendingDelete, virtualPath string) {
+	ForgetPeerContent(q.access.config, q.access.bucket, virtualPath)
 	if hook := PeerBroadcastHook(); hook != nil {
-		hook(BroadcastPayload{Config: q.access.config, Bucket: q.access.bucket, VirtualPath: entry.virtualPath, IsDir: entry.isDir, Operation: "delete"})
+		hook(BroadcastPayload{Config: q.access.config, Bucket: q.access.bucket, VirtualPath: virtualPath, IsDir: entry.isDir, Operation: "delete"})
 	}
 }
 

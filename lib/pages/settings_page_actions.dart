@@ -385,12 +385,17 @@ extension _SettingsPageActions on _SettingsPageState {
       if (!mounted) return;
       await refreshCacheStats(config);
       if (!mounted) return;
+      final protected = result.skippedProtected > 0
+          ? ' 已保留 ${result.skippedProtected} 个待同步数据块。'
+          : '';
       showAppToast(
         context,
-        title: clearAll ? '缓存已清空' : '缓存已按规则清理',
+        title: clearAll
+            ? (result.skippedProtected == 0 ? '缓存已清空' : '缓存清理完成')
+            : '缓存已按规则清理',
         message: result.removed == 0
-            ? '当前没有需要清理的缓存。'
-            : '已删除 ${result.removed} 个文件，释放 ${_humanizeBytes(result.freedBytes)}。',
+            ? '当前没有可清理的缓存。$protected'
+            : '已删除 ${result.removed} 个文件，释放 ${_humanizeBytes(result.freedBytes)}。$protected',
       );
     } catch (error) {
       if (!mounted) return;

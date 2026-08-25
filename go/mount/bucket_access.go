@@ -2,6 +2,7 @@
 package mount
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	storageconfig "remote-storage/go/config"
+	"remote-storage/go/mount/metadata"
 	s3ops "remote-storage/go/s3"
 	storageops "remote-storage/go/storage"
 )
@@ -36,11 +38,15 @@ type bucketAccess struct {
 	uploadWorkers   int
 	quotaProvider   storageops.BucketQuotaProvider
 	quotaMu         sync.Mutex
-	quotaCachedAt   time.Time
-	quotaTotal      int64
-	quotaUsed       int64
-	quotaKnown      bool
-	quotaLoading    bool
+	writebackMu     sync.Mutex
+	// mutationMu serializes remote path mutations after writebackMu has fixed
+	// their local ordering, so a queued delete cannot overtake a rename move.
+	mutationMu    sync.Mutex
+	quotaCachedAt time.Time
+	quotaTotal    int64
+	quotaUsed     int64
+	quotaKnown    bool
+	quotaLoading  bool
 
 	group singleflight.Group
 
@@ -51,6 +57,9 @@ type bucketAccess struct {
 	writeback *writebackQueue
 	deletes   *deleteQueue
 	syncState syncStateProjector
+	// metadataHandle keeps the shared namespace alive for the actual mount
+	// lifetime, rather than letting short-lived page reads close its worker/DB.
+	metadataHandle *metadata.AcquireHandle
 
 	// externalDelete projects remote-first deletions into platform mount state.
 	// It is installed by backends that expose a real sync root (Windows Cloud Files).
@@ -60,7 +69,10 @@ type bucketAccess struct {
 	// externalDirectoryRefresh lets a platform projection materialize entries
 	// found by the P0 remote-polling path without treating them as local writes.
 	externalDirectoryRefresh func(virtualPrefix string, items []s3ops.ObjectInfo) error
-	directoryActivity        *directoryActivityTracker
+	// externalMetadataDirectoryRefresh preserves metadata OIDs for platform
+	// projections that can encode a stable object identity (Cloud Files).
+	externalMetadataDirectoryRefresh func(virtualPrefix string, items []metadataMountObject) error
+	directoryActivity                *directoryActivityTracker
 }
 
 func newBucketAccess(
@@ -111,6 +123,17 @@ func newBucketAccess(
 	if err != nil {
 		return nil, fmt.Errorf("create mount overlay dir: %w", err)
 	}
+	var metadataHandle *metadata.AcquireHandle
+	if cfg.ProfileID != "" {
+		manager, err := metadata.DefaultManager()
+		if err != nil {
+			return nil, fmt.Errorf("open mount metadata manager: %w", err)
+		}
+		metadataHandle, err = manager.Acquire(cfg, bucket)
+		if err != nil {
+			return nil, fmt.Errorf("acquire mount metadata: %w", err)
+		}
+	}
 
 	access := &bucketAccess{
 		config:            cfg,
@@ -131,6 +154,7 @@ func newBucketAccess(
 		pageViews:         newMountedDirectoryPageSnapshots(),
 		overlay:           overlay,
 		directoryActivity: newDirectoryActivityTracker(),
+		metadataHandle:    metadataHandle,
 	}
 	if quota, fresh, ok := storageops.CachedBucketQuotaForMount(cfg, bucket); ok {
 		if fresh {
@@ -153,6 +177,7 @@ func newBucketAccess(
 	writeback, err := newWritebackQueue(access)
 	if err != nil {
 		access.dirSync.shutdown()
+		access.releaseMetadata()
 		return nil, err
 	}
 	access.writeback = writeback
@@ -164,6 +189,7 @@ func (a *bucketAccess) close() error {
 	if a == nil {
 		return nil
 	}
+	defer a.releaseMetadata()
 	if a.dirSync != nil {
 		a.dirSync.shutdown()
 	}
@@ -179,20 +205,35 @@ func (a *bucketAccess) close() error {
 }
 
 func (a *bucketAccess) drainWriteback() error {
+	return a.drainWritebackContext(context.Background())
+}
+
+// drainWritebackContext lets lifecycle callers bound their own wait while the
+// durable queue remains available for a later retry.
+func (a *bucketAccess) drainWritebackContext(ctx context.Context) error {
 	if a == nil || a.writeback == nil {
 		return nil
 	}
-	return a.writeback.drain()
+	return a.writeback.drainContext(ctx)
 }
 
 func (a *bucketAccess) release() {
 	if a == nil {
 		return
 	}
+	a.releaseMetadata()
 	a.syncState = nil
 	if a.dirSync != nil {
 		a.dirSync.shutdown()
 		a.dirSync = nil
+	}
+}
+
+// releaseMetadata is safe for every platform stop path because the handle
+// itself balances only its first Release call.
+func (a *bucketAccess) releaseMetadata() {
+	if a != nil && a.metadataHandle != nil {
+		a.metadataHandle.Release()
 	}
 }
 
@@ -202,6 +243,7 @@ type writebackQueue struct {
 	store         *writebackStore
 	mutations     *mutationStore
 	storeKey      string
+	scope         string
 	mu            sync.Mutex
 	entries       map[string]*pendingWriteback
 	running       map[string]*pendingWriteback
@@ -222,6 +264,7 @@ type writebackQueue struct {
 }
 
 type pendingWriteback struct {
+	scope           string
 	taskID          string
 	virtualPath     string
 	localPath       string

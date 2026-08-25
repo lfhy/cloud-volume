@@ -12,6 +12,7 @@ import 'package:remote_storage/models/file_manager_bucket_entry.dart';
 import 'package:remote_storage/models/sync_remote_open_request.dart';
 import 'package:remote_storage/models/file_preview_source.dart';
 import 'package:remote_storage/models/paged_listings.dart';
+import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
 import 'package:remote_storage/models/s3_objects.dart';
 import 'package:remote_storage/models/trash_item.dart';
@@ -25,6 +26,7 @@ import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:remote_storage/widgets/app_toast.dart';
 import 'package:remote_storage/widgets/bucket_settings_dialog.dart';
 import 'package:remote_storage/state/object_listing_notifier.dart';
+import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/state/share_records_notifier.dart';
 import 'package:remote_storage/state/transfer_queue.dart';
 import 'package:remote_storage/utils/default_download_directory.dart';
@@ -154,6 +156,11 @@ class _FileManagerPageState extends State<FileManagerPage> {
       const <BucketSourceLoadFailure>[];
   final Map<String, _PendingUploadRefresh> _pendingUploadRefreshes =
       <String, _PendingUploadRefresh>{};
+  final Map<String, _PendingMetadataTaskRefresh> _pendingMetadataTaskRefreshes =
+      <String, _PendingMetadataTaskRefresh>{};
+  final Map<String, RemoteTaskStatus> _seenMetadataTaskStates =
+      <String, RemoteTaskStatus>{};
+  bool _metadataTaskRefreshInFlight = false;
 
   void _reconfigureUnavailableBucketSource(String profileName) {
     // Jump to the account-management page where the user can edit, disable,
@@ -175,7 +182,7 @@ class _FileManagerPageState extends State<FileManagerPage> {
     });
     _contentScrollController.addListener(_maybeLoadMoreContent);
     ObjectListingNotifier.instance.addListener(_handleObjectListingMutation);
-    TransferQueue.instance.addListener(_handleUploadTaskRefresh);
+    RemoteTaskStore.instance.addListener(_handleUploadTaskRefresh);
     _startMountStatusRefreshTimer();
     _loadBuckets();
     if (ClipboardShortcutChannel.instance.isSupported) {
@@ -195,7 +202,7 @@ class _FileManagerPageState extends State<FileManagerPage> {
     _loadingDetailTimer?.cancel();
     _mountStatusRefreshTimer?.cancel();
     ObjectListingNotifier.instance.removeListener(_handleObjectListingMutation);
-    TransferQueue.instance.removeListener(_handleUploadTaskRefresh);
+    RemoteTaskStore.instance.removeListener(_handleUploadTaskRefresh);
     _contentScrollController.dispose();
     _searchController.dispose();
     super.dispose();
@@ -453,6 +460,7 @@ class _FileManagerPageState extends State<FileManagerPage> {
       listIconSize: _listIconSize,
       mountedToDesktop: _activeMountStatus?.mounted ?? false,
       mountBucketName: _activeBucket,
+      profileId: _activeConfig.profileId,
       showSyncStatus: true,
       onOpenDirectory: (prefix) => unawaited(_navToPrefix(prefix)),
       onOpenFile: (object) => unawaited(_openObject(object)),

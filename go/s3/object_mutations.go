@@ -44,6 +44,7 @@ func DeleteObjectContextWithTask(
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithCancel(ctx)
 	startTransfer(taskID, "delete", bucket, key, "", 0, cancel)
+	SetTransferProfile(taskID, cfg.ProfileID)
 	defer func() { finishTransfer(taskID, err) }()
 	return MoveObjectToTrashContextWithTask(ctx, cfg, bucket, key, isDirectory, taskID)
 }
@@ -117,6 +118,7 @@ func DeleteObjectHardContextWithTask(
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithCancel(ctx)
 	startTransfer(taskID, "delete", bucket, key, "", 0, cancel)
+	SetTransferProfile(taskID, cfg.ProfileID)
 	defer func() { finishTransfer(taskID, err) }()
 	return DeleteObjectHardContextProgress(ctx, cfg, bucket, key, isDirectory, taskID)
 }

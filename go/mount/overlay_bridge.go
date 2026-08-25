@@ -92,7 +92,9 @@ func (a *bucketAccess) moveOverlayPathToRemote(
 
 func (a *bucketAccess) stageOverlayDirectory(oldVirtualPath, newVirtualPath string) error {
 	localRoot := a.overlay.localPath(oldVirtualPath)
-	a.stageLocalDirectory(newVirtualPath, time.Now())
+	if err := a.stageLocalDirectory(newVirtualPath, time.Now()); err != nil {
+		return err
+	}
 	return filepath.WalkDir(localRoot, func(current string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -111,8 +113,7 @@ func (a *bucketAccess) stageOverlayDirectory(oldVirtualPath, newVirtualPath stri
 			if err != nil {
 				return err
 			}
-			a.stageLocalDirectory(targetVirtualPath, info.ModTime())
-			return nil
+			return a.stageLocalDirectory(targetVirtualPath, info.ModTime())
 		}
 		sourceVirtualPath := joinVirtualPath(oldVirtualPath, virtualRelative)
 		return a.stageOverlayFile(sourceVirtualPath, targetVirtualPath)
@@ -125,13 +126,29 @@ func (a *bucketAccess) stageOverlayFile(oldVirtualPath, newVirtualPath string) e
 	if err != nil {
 		return err
 	}
+	if err := a.ensureMetadataParentDirectories(newVirtualPath); err != nil {
+		return err
+	}
 	cachePath := a.cachePathFor(newVirtualPath)
 	if err := copyFile(cachePath, localPath); err != nil {
 		return err
 	}
-	a.registerLocalWrite(newVirtualPath, cachePath, info.Size())
-	a.scheduleUpload(newVirtualPath, cachePath)
-	return nil
+	return a.stageLocalWrite(newVirtualPath, cachePath, info.Size())
+}
+
+// ensureMetadataParentDirectories absorbs Finder's valid deep temporary-file
+// move when it arrives before a separate MKCOL for the destination parent.
+// It only applies to the durable local-first metadata tree; legacy mounts keep
+// their existing provider-backed directory behavior.
+func (a *bucketAccess) ensureMetadataParentDirectories(virtualPath string) error {
+	if a == nil || !a.usesMetadataWritePath() {
+		return nil
+	}
+	parent := parentVirtualPrefix(virtualPath)
+	if parent == "" {
+		return nil
+	}
+	return a.createMetadataDirectory(context.Background(), parent)
 }
 
 func joinVirtualPath(basePath, relativePath string) string {
@@ -147,7 +164,20 @@ func joinVirtualPath(basePath, relativePath string) string {
 	}
 }
 
-func (a *bucketAccess) stageLocalDirectory(virtualPath string, modTime time.Time) {
+func (a *bucketAccess) stageLocalDirectory(virtualPath string, modTime time.Time) error {
+	if a == nil {
+		return nil
+	}
+	if a.usesMetadataWritePath() {
+		return a.createMetadataDirectory(context.Background(), virtualPath)
+	}
+	a.writebackMu.Lock()
+	defer a.writebackMu.Unlock()
+	a.stageLocalDirectoryLocked(virtualPath, modTime)
+	return nil
+}
+
+func (a *bucketAccess) stageLocalDirectoryLocked(virtualPath string, modTime time.Time) {
 	clean := cleanVirtualPath(virtualPath)
 	if clean == "" {
 		return

@@ -9,15 +9,15 @@ func TestStoreSaveAndLoadRoundTrip(t *testing.T) {
 	store := NewStore(filepath.Join(t.TempDir(), "config.toml"))
 	cacheDir := filepath.Join(t.TempDir(), "custom-cache")
 	input := RemoteStorageConfig{
-		Endpoint:       " https://s3.example.com ",
-		Region:         " us-east-1 ",
-		Bucket:         " media-bucket ",
-		AccessKeyID:    " ACCESS ",
-		SecretAccessKey: " SECRET ",
-		RootPrefix:     " /music/archive/ ",
-		CacheDirectory: " " + cacheDir + " ",
-		HideDotFiles:   true,
-		UsePathStyle:   true,
+		Endpoint:         " https://s3.example.com ",
+		Region:           " us-east-1 ",
+		Bucket:           " media-bucket ",
+		AccessKeyID:      " ACCESS ",
+		SecretAccessKey:  " SECRET ",
+		RootPrefix:       " /music/archive/ ",
+		CacheDirectory:   " " + cacheDir + " ",
+		HideDotFiles:     true,
+		UsePathStyle:     true,
 		WindowsMountMode: WindowsMountModeCloudFilesDirect,
 	}
 

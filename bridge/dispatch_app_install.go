@@ -65,7 +65,7 @@ func installApp(args json.RawMessage) (any, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Register with transfer monitor so Flutter can poll progress.
-	s3ops.QueueTransfer(taskID, "app_update", "", "", "", 0)
+	s3ops.QueueTransfer(taskID, "app_update", "", input.AssetName, "", 0)
 
 	go runAppUpdateInstall(ctx, cancel, taskID, input)
 
@@ -79,7 +79,9 @@ func installApp(args json.RawMessage) (any, error) {
 func runAppUpdateInstall(ctx context.Context, cancel context.CancelFunc, taskID string, input appInstallArgs) {
 	defer cancel()
 
-	s3ops.StartQueuedTransfer(taskID, "app_update", "", "", input.AssetName, 0, cancel)
+	// Keep the asset name in the logical key so the unified task projection can
+	// render it; localPath is reserved for the downloaded cache file.
+	s3ops.StartQueuedTransfer(taskID, "app_update", "", input.AssetName, "", 0, cancel)
 	s3ops.SetTransferStatusDetail(taskID, "downloading")
 
 	// Build the download URL with optional mirror prefix.
@@ -125,6 +127,9 @@ func runAppUpdateInstall(ctx context.Context, cancel context.CancelFunc, taskID 
 	}
 
 	s3ops.SetTransferStatusDetail(taskID, "installing")
+	// Installer processes have crossed the reversible boundary. The update
+	// task remains visible, but cancellation must no longer be advertised.
+	s3ops.SetTransferCancelable(taskID, false)
 
 	// Platform-specific install.
 	switch runtime.GOOS {

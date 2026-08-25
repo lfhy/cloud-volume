@@ -2,6 +2,7 @@
 package mount
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,6 +15,10 @@ type webDAVLoggingHandler struct {
 }
 
 func (h webDAVLoggingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// x/net/webdav passes the request context through to FileSystem.OpenFile.
+	// Preserve the method so LOCK's missing-resource probe can be distinguished
+	// from the identical O_RDWR|O_CREATE|O_TRUNC flags used by PUT.
+	r = r.WithContext(context.WithValue(r.Context(), webDAVRequestMethodKey{}, r.Method))
 	recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 	h.next.ServeHTTP(recorder, r)
 	if shouldLogWebDAVRequest(r, recorder.status) {

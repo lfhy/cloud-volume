@@ -36,7 +36,7 @@ S3 账号支持 endpoint、access key、secret key、region 和 path-style URL �
 
 ![远端文件浏览](docs/screenshots/file-page.png)
 
-常用 bucket 可以挂载到本地目录，按系统文件管理器的方式读写远端对象；读写会先使用本地缓存和写回队列，再异步同步到远端。macOS Finder 批量写入新目录时，目标存在性探测也由本地目录视图回答，避免 SFTP 等高握手延迟上游退化为每个小文件一次远端查询。
+常用 bucket 可以挂载到本地目录，按系统文件管理器的方式读写远端对象；读写会先使用本地缓存和写回队列，再异步同步到远端。已通过远端确认前，挂载中尚未上传的内容直接由本地分块暂存提供字节读取。一个 namespace 内最近的本地 mkdir/write/rename/delete 会共享 quiet barrier，Finder 递归拷贝持续产生新操作时不会让早到的目录先单独同步；退出 drain 和人工立即执行仍会按依赖收尾，drain 与后台同步也会串行执行 provider 操作以保持覆盖式重命名的删除/移动顺序，且可在后台请求进行时响应取消。macOS Finder 批量写入新目录时，目标存在性探测也由本地目录视图回答，避免 SFTP 等高握手延迟上游退化为每个小文件一次远端查询。macOS 上 App 异常退出残留的挂载会在下次启动时自动清扫，不会留下指向已死本地服务的僵尸卷。挂载写入与文件管理页共享同一份元数据视图，文件列表会随同步任务完成自动刷新；任务页支持按队列（进行中/等待中/失败/历史）切换浏览。
 
 ![挂载存储桶](docs/screenshots/mount.png)
 
@@ -50,9 +50,15 @@ S3 账号支持 endpoint、access key、secret key、region 和 path-style URL �
 - 配置备份：桌面端可在「设置 → 配置备份」把账号、代理和显示排序加密保存到指定远端存储；顶部开关控制功能启停，关闭时隐藏目标设置。加密采用用户自设的备份密码（不依赖连接凭证，换机器、换网络地址都不影响解密），新机器首次启动可从备份存储还原。目标可选已有账号，或点击「独立备份存储」后走简化配置流程（只选协议+填连接凭证，无需名称和桶映射），不显示在账号列表。保存位置改为单个远程目录选择器一次选定 bucket 与目录。开启后配置变更会自动备份，也可手动立即备份；备份历史通过可点击摘要打开拟态框查看并一键还原。新机器首次启动的「从备份存储还原」入口会先引导用户连接一个备份存储（如本地无已配置目标），再列出远端快照；加密的快照会显示锁标识并在还原前提示输入备份密码；还原成功后该备份目标（含备份密码）会自动保存到系统设置并开启自动备份，后续配置变更继续自动备份到同一位置。
 - 文件管理：聚合 bucket / 根目录、目录浏览、列表/网格视图、搜索、多选、右键菜单、拖拽上传、粘贴上传、复制、移动、重命名、新建目录、下载和批量删除。
 - 预览与缓存：桌面端支持图片预览、外部应用打开、另存为和下载；已下载文件会复用本地缓存，本地拖拽或粘贴上传成功后也会把本地副本登记为预览缓存，刚上传的文件双击即可打开。
-- 桌面挂载：macOS 通过系统 WebDAV 卷挂载，Linux 通过 FUSE 挂载，Windows 支持 WebDAV、Cloud Files 与可选的 WinFsp 虚拟文件系统卷；文件管理列表在活动挂载时复用同一份 local-first 目录视图，长目录分页固定在短时目录快照上，避免待写回文件与挂载盘显示不一致，也避免翻页时重复或漏项。活动目录会以退避间隔轮询远端，作为多客户端变更发现的基础，活跃轮询间隔可在「设置 → 同步设置」配置。Windows 严格只读会自动使用 WinFsp，避免 Explorer 产生仅本地的伪成功写入。Cloud Files 使用同步目录路径，不再提供会错误显示宿主磁盘容量的 `subst` 盘符；需要资源管理器显示桶级容量时选择 WinFsp。卸载 Cloud Files 时可选择保留或删除默认同步目录的本地缓存，并会提示先关闭占用文件；占用导致缓存删除失败时，挂载已安全解除，下一次会复用该根目录。桶级自定义配额会作为 Linux FUSE / Windows WinFsp 的文件系统总容量返回；WinFsp 未设置桶配额时回退到 Windows 高级设置中的全局虚拟容量。驱动缺失时支持应用内一键静默安装（内嵌 MSI）。
+- 桌面挂载：macOS 通过系统 WebDAV 卷挂载，Linux 通过 FUSE 挂载，Windows 支持 WebDAV、Cloud Files 与可选的 WinFsp 虚拟文件系统卷；带持久 profile identity 的文件管理页面与挂载的目录/对象信息读取总是使用同一持久 metadata namespace，不再因 mount session 是否存活切换到另一套视图。无身份的 legacy 配置仍保留活动挂载 local-first 快照与直连 fallback。活动目录会以退避间隔轮询远端，作为多客户端变更发现的基础，活跃轮询间隔可在「设置 → 同步设置」配置。Windows 严格只读会自动使用 WinFsp，避免 Explorer 产生仅本地的伪成功写入。Cloud Files 使用同步目录路径，不再提供会错误显示宿主磁盘容量的 `subst` 盘符；需要资源管理器显示桶级容量时选择 WinFsp。卸载 Cloud Files 时可选择保留或删除默认同步目录的本地缓存，并会提示先关闭占用文件；占用导致缓存删除失败时，挂载已安全解除，下一次会复用该根目录。目录 marker 的远端创建失败会在桶挂载操作旁显示错误详情，成功重试后自动清除；该状态不跨重启保留。桶级自定义配额会作为 Linux FUSE / Windows WinFsp 的文件系统总容量返回；WinFsp 未设置桶配额时回退到 Windows 高级设置中的全局虚拟容量。驱动缺失时支持应用内一键静默安装（内嵌 MSI）。
+- 修改时间：对象列表和挂载统一按客户端本地时区展示远端时间。SFTP 只传 Unix 时间戳、不会携带服务器时区；挂载层会将已规范化的本地时间按本地时区还原，避免 Finder、FUSE 或 WinFsp 再次偏移。
+- macOS 挂载诊断：Finder 复制目录时会先对目标发送不存在探测，挂载会在本地递归建立尚未同步的父目录而不等待远端；复制中重命名祖先目录时，子目录仍先写入已确认的远端父路径，再由目录移动带到最终名称，避免后台队列互等。若系统 `webdavfs_agent` 自身异常退出并移除卷，应用会保留待同步内容并明确报告意外断开，而不是静默显示成普通未挂载状态；探测瞬时失败也不会遗失部分启动的挂载会话，且这类未确认会话不会被误报为挂载成功。
 - 文件同步：本地目录可定期同步到远端桶目录，支持上传、下载、双向同步、冲突策略、静默期、删除传播、重命名识别和空目录处理。跨客户端变更发现的 P2P 分期设计见 [docs/P2PSyncDesign.md](docs/P2PSyncDesign.md)。
-- 任务队列：上传、下载、复制、移动、删除、挂载懒加载读取、挂载写回和文件同步任务都进入统一队列，支持进度展示、筛选、取消、重试、前台弹框与后台执行。
+- 统一远端任务队列：上传、下载、复制、移动、删除、挂载写回、文件同步和应用更新都投影为 `RemoteTask`，主列表展示有效远端操作，原始 journal/物理传输阶段可展开查看；支持依赖原因、进度、取消、重试、立即执行、队列级「立即同步」、按选择清理历史和 30 天自动保留。少量历史会在首次进入时完整显示；历史超过 100 条时，固定在列表底部的分页条会显示已展示/总数与下一页，不会把加载入口埋在完成任务行之后。「立即同步」只跳过静默/重试等待，仍严格保持同 inode、父目录和重命名等 journal 依赖顺序。任务 ID 与物理快照都按 namespace 隔离，取消/验证状态可在重启后继续对账；Dart-only 预览、批量进度、挂载徽标和应用更新也走 `RemoteTaskStore` local adapter。旧 `TransferQueue` 只保留执行兼容，不作为任务 UI 真源。物理任务同时保留 profile 归属、下载本地目标、当前文件/分块范围与操作阶段；FTP、SFTP、WebDAV 和百度网盘的复制/移动/删除也会投影为同一物理任务，页面重命名复用带任务 ID 的移动路径，断点续传的历史字节不计入当前速度。
+- metadata-backed 页面写操作的 Dart 队列只作为执行兼容层：主任务列表仅显示 Go journal 的有效 `sync:` 任务，上传/删除进度弹窗使用隔离的临时执行快照，避免同一远端操作出现两行。
+- 这类临时执行快照只用于进度和后台运行提示，不提供取消；旧版本地兼容队列在升级时主动失效，未完成 metadata 操作由 Go journal 恢复。
+- 任务队列会清除旧版本遗留的 metadata 物理快照；远端确认请求有明确超时，上传后确认失败会进入对账而不是重复覆盖写，并保留 SFTP 连接/权限错误，避免已同步文件长期显示为“验证远端”。
+- 持久 inode 元数据核心：`go/mount/metadata` 使用 bbolt 为每个账号/桶视图维护本地 inode 与目录项 B+Tree、操作日志和可重建的元数据缓存；目录改名只更新两个目录项树和 inode 父边，不再依赖路径前缀重写。待同步文件内容采用固定 4 MiB、SHA-256 内容寻址分块，相同数据块只保留一份并按引用计数释放；块位于缓存目录，但未同步块会被缓存清理保护。挂载/page 的 `WritePath` 会先持久化并保护块，再在一个 bbolt 事务中提交 inode、generation、ContentRef、块 nlink 和 journal，避免大量小文件为一次写入重复 fdatasync；WebDAV LOCK 的协议占位不会制造零字节 metadata 写入，Finder 的 `.BC.T_*` 拷贝临时文件也只在最终改名时入队一次。已挂载桶会持有同一 metadata namespace 到实际卸载，避免页面读取与挂载读取争抢其生命周期；WebDAV、FUSE、WinFsp、Cloud Files 与带持久 profile identity 的页面 list/stat/create/upload/rename/move/delete 都通过这个持久树，metadata worker 是其唯一远端写回者，旧队列仅服务没有持久 profile identity 的执行兼容。metadata-backed 项在 Linux/WinFsp/Cloud Files 上还投影为稳定内部 OID；复制与递归目录上传会在有持久 identity 时明确拒绝，直到具备可原子提交的批量 journal 操作。
 - 回收站与分享：提供应用级软删除、全局/桶级回收站、恢复、彻底删除、清空回收站，以及预签名分享链接的创建、续期、复制和删除。删除确认拟态框可在软删除时切换「永久删除」直接绕过回收站；目录删除按对象数实时显示确定进度条。移动/重命名/软删除/硬删除的源清理使用枚举时固定的 key 列表，并始终显式包含目录自身的 `dir/` 占位 key，避免某些 S3 兼容服务在递归列举时返回子文件却省略目录占位、导致源清理后留下空目录、重启后又重新出现的问题。软删除/移动/重命名的逐对象服务端复制与源删除自带容错重试，单个对象的临时性网关错误（502/超时等）不会直接中止整个目录操作。
 - Web 与 CLI：Web 端通过 Go HTTP 服务提供对象管理 API、浏览器上传下载和 bucket WebDAV 入口；Linux 服务器可用 `cloud-volume-cli` 初始化配置并前台挂载 bucket。
 
@@ -85,7 +91,7 @@ S3 账号支持 endpoint、access key、secret key、region 和 path-style URL �
 
 - 应用通过 Go FFI bridge 读取默认配置：macOS / Linux / Windows 统一使用用户主目录下的 `~/.cloud-volume/config.toml`，不再写到安装目录，避免在 `C:\Program Files\Cloud Volume` 这类需要管理员权限的目录下首次启动时写不进配置文件。
 - 默认缓存目录跟随同一个工作路径：所有平台均为 `~/.cloud-volume/cache`；也可以在设置页改到其他目录。
-- 设置页“缓存设置”卡片按“缓存目录设置 / 缓存占用 / 缓存清理”分区：目录区可选择、恢复默认或打开缓存目录（仅桌面端），占用区显示人类可读大小与文件数并可刷新统计，清理区支持按规则清理、清空缓存，以及“自动清理缓存 + 最大占用 MB + 最大保留天数”规则；桌面端开启自动清理后会在启动时和每小时后台巡检一次。
+- 设置页“缓存设置”卡片按“缓存目录设置 / 缓存占用 / 缓存清理”分区：目录区可选择、恢复默认或打开缓存目录（仅桌面端），占用区显示人类可读大小、文件数及受保护的待同步数据并可刷新统计，清理区支持按规则清理、清空缓存，以及“自动清理缓存 + 最大占用 MB + 最大保留天数”规则；待同步数据块不会被任何缓存清理操作删除。桌面端开启自动清理后会在启动时和每小时后台巡检一次。
 - 升级启动时如果新位置还没有配置，会自动从旧的 `~/.remote-storage/config.toml`、`~/.remote-storage/profiles/*.toml` 迁移到新位置；旧版 Windows 安装目录下与 `cloud-volume.exe` 同级的 `config.toml` 也会一并迁移；迁移成功后会删除旧配置源，避免账号删除后又被旧配置恢复。
 - 如果配置缺失或不完整，会先进入初始化配置页；初始化流程会先选择账号类型，目前支持 S3 对象存储、WebDAV、百度网盘和 FTP/SFTP，再进入对应账号表单。第一步仍是左右分栏（左侧品牌宣传 + 右侧协议选择）；进入第二步连接表单后会隐藏左侧宣传，改为全屏表单（宽屏下 S3 / WebDAV / FTP 字段两列排布），减少单页滚动。步骤切换时左侧品牌面板会平滑收起、右侧内容淡入，不再硬切或额外转圈。连接页左上角可点「返回」回到类型选择。
 - S3 对象存储初始化默认网关为 `https://fgws3-ocloud.ihep.ac.cn`，仍需填写 `access_key_id/secret_access_key`，高级设置里可调整 `region` 与 path-style URL；WebDAV 初始化默认网关为 `https://webdav-ocloud.ihep.ac.cn`，并需填写用户名和密码；百度网盘初始化会通过桌面端 `oob` OAuth 流程打开授权页，用户需要把网页返回的授权码手动粘贴回应用完成登录。
@@ -129,7 +135,8 @@ Android 启动图标同样从现有 macOS 1024px 品牌位图生成，不重新�
 `make run` 是本仓库的标准启动方式：
 
 - macOS: 先构建 Go bridge 到 `bin/bridge/libremote_storage_bridge.dylib`，再以正确的 `DEVELOPER_DIR` 启动 Flutter macOS 应用
-- macOS 调试挂载卡住时，可直接查看 `~/.cloud-volume/runtime/logs/bridge.log`；当前版本会额外记录 `cleanup-stale`、`mount-volume`、`unmount`、`open-mount-path`、`[storage/quota-cache]` 与 `[mount/quota]` 等阶段日志。`osascript` / `mount_webdav` 运行时会并行确认系统 mount 表，卷出现即完成挂载；Finder 打开请求异步且按路径合并，卸载则保持本地 WebDAV 到系统卷成功断开之后。排查 WebDAV 目录可写/只读误判时，可搜索 `[webdav/access]`；排查新建目录失败时，可搜索 `[webdav/mkdir]`。
+- macOS 调试挂载卡住时，可直接查看 `~/.cloud-volume/runtime/logs/bridge.log`；当前版本会记录 `mount-webdav-path`、`mount-webdav-registered`、`cleanup-stale`、`unmount`、`open-mount-path`、`[storage/quota-cache]` 与 `[mount/quota]` 等阶段。挂载使用非交互的 `mount_webdav -S`，命令成功后还必须等本次随机 loopback URL 的系统 mount 表项登记；命令超时或登记失败会清理半挂载并报错，绝不把普通目录当成成功卷。Finder 打开请求仍异步且按路径合并，卸载成功后才关闭本地 WebDAV。排查 WebDAV 目录可写/只读误判时，可搜索 `[webdav/access]`；排查新建目录失败时，可搜索 `[webdav/mkdir]`。
+- 任务队列调试：`make run` 默认传入 `CV_DEBUG_ADDR=127.0.0.1:8765`。桥接首次调用后可用 `GET /debug/tasks` 查看每个 namespace 的任务状态、错误与重试信息，`GET /debug/transfers` 查看运行时传输快照，`WS /debug/task-events` 接收任务状态变化通知。该监听器严格只允许数值 loopback 地址；不需要时用 `CV_DEBUG_ADDR= make run` 关闭。
 - macOS WebDAV 挂载的内容写入会先落到本地缓存，再按 quiet period 异步推送上游。Finder 为文件时间等属性发送的 `PROPPATCH` 元数据探测不会触发文件内容下载或重复上传；新建目录和新鲜目录快照中的缺失目标直接由本地视图返回，不会为每个待写小文件同步查询 SFTP。FTP、SFTP 和 WebDAV 上游的上传进度、成功和失败会及时反映到传输队列，不会在实际同步完成后继续停留在“等待同步”。挂载根目录通过 RFC 4331 向 `webdavfs` 返回容量：桶自定义容量优先，上游支持配额时同时返回实际已用量，因此 macOS `df` 可显示非零的总量、已用和可用空间；上游与配置均没有容量信息时仍保持未知。桶列表获取的配额会在 Go 后端缓存 5 分钟；挂载即使在 TTL 到期后也会先使用同一账号/桶最后一次已知容量并异步刷新，缓存目录、RootPrefix、挂载参数或显示设置不同不会造成缓存 miss。macOS `webdavfs_agent` 偶尔会延迟发布首次 `statfs`，此时第一次 `df` 可能暂时为 `0/0`，而后续查询显示服务端已在首次 `PROPFIND` 返回的容量。SFTP 挂载不推测预取子目录，也不后台重复轮询 Finder/Spotlight 递归扫到的深层目录；用户打开目录仍按需读取，SSH 建连与握手也服从请求超时。
 - Linux: 先构建 Go bridge 到 `bin/bridge/libremote_storage_bridge.so`，并把它随 Linux bundle 一起安装后再启动 Flutter Linux 应用
 

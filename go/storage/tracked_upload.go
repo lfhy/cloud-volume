@@ -33,6 +33,7 @@ func runTrackedUpload(
 	size int64,
 	taskID string,
 	upload func(context.Context, io.Reader) error,
+	profileIDs ...string,
 ) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -42,6 +43,9 @@ func runTrackedUpload(
 	}
 	trackedCtx, cancel := context.WithCancel(ctx)
 	s3ops.StartQueuedTransfer(taskID, "upload", bucket, key, localPath, size, cancel)
+	if len(profileIDs) > 0 {
+		s3ops.SetTransferProfile(taskID, profileIDs[0])
+	}
 	err := upload(trackedCtx, &trackedUploadReader{
 		ctx:    trackedCtx,
 		reader: body,

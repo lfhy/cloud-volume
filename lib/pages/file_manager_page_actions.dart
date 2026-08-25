@@ -45,6 +45,7 @@ extension _FileManagerPageActions on _FileManagerPageState {
       bucket: bucket,
       key: key,
       localPath: localPath,
+      publishRemoteTask: !_usesMetadataRemoteTasks,
     );
     unawaited(_runUploadTask(task, _activeBucketEntry!));
     return task;
@@ -60,6 +61,7 @@ extension _FileManagerPageActions on _FileManagerPageState {
       bucket: bucket,
       key: key,
       localPath: fileName,
+      publishRemoteTask: !_usesMetadataRemoteTasks,
     );
     unawaited(
       _runBrowserUploadTask(task, _activeBucketEntry!, bytes, fileName),
@@ -95,6 +97,7 @@ extension _FileManagerPageActions on _FileManagerPageState {
                   errorText = null;
                 });
                 try {
+                  final taskStartedAt = DateTime.now().toUtc();
                   await widget.api.createDirectory(
                     _activeConfig,
                     _activeBucket!,
@@ -102,6 +105,16 @@ extension _FileManagerPageActions on _FileManagerPageState {
                     name,
                   );
                   if (!mounted || !dialogContext.mounted) return;
+                  if (_usesMetadataRemoteTasks) {
+                    _trackMetadataTaskForRefresh(
+                      bucketId: _activeBucketEntry!.id,
+                      bucket: _activeBucket!,
+                      profileId: _activeConfig.profileId,
+                      prefix: _prefix,
+                      path: _prefix + name,
+                      startedAt: taskStartedAt,
+                    );
+                  }
                   Navigator.of(dialogContext).pop();
                   await _reloadObjectsAfterBucketMutation(
                     _activeBucketEntry!,
@@ -301,6 +314,8 @@ extension _FileManagerPageActions on _FileManagerPageState {
           key: object.key,
           localPath: '',
           targetPath: targetPath,
+          publishRemoteTask:
+              action != FileObjectAction.move || !_usesMetadataRemoteTasks,
         );
         try {
           if (action == FileObjectAction.move) {
@@ -342,13 +357,33 @@ extension _FileManagerPageActions on _FileManagerPageState {
             newName == object.displayName) {
           return;
         }
-        await widget.api.renameObject(
-          _activeConfig,
-          _activeBucket!,
-          object.key,
-          object.isDir,
-          newName,
+        final trimmedKey = object.key.replaceFirst(RegExp(r'/+$'), '');
+        final slash = trimmedKey.lastIndexOf('/');
+        final targetPath = slash < 0
+            ? newName
+            : '${trimmedKey.substring(0, slash + 1)}$newName';
+        final task = TransferQueue.instance.startTask(
+          kind: TransferKind.move,
+          bucket: _activeBucket!,
+          key: object.key,
+          localPath: '',
+          targetPath: targetPath,
+          publishRemoteTask: !_usesMetadataRemoteTasks,
         );
+        try {
+          await widget.api.renameObject(
+            _activeConfig,
+            _activeBucket!,
+            object.key,
+            object.isDir,
+            newName,
+            taskId: task.id,
+          );
+          TransferQueue.instance.markTaskDone(task.id);
+        } catch (error) {
+          TransferQueue.instance.markTaskFailed(task.id, error);
+          rethrow;
+        }
         await FileAccessService.instance.evictCacheForObject(
           api: widget.api,
           config: _activeConfig,

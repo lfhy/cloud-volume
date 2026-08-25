@@ -8,6 +8,7 @@ extension TransferQueueLocalProgress on TransferQueue {
     task.status = TransferStatus.pending;
     task.statusDetail = 'selecting_path';
     task.error = null;
+    _publishRemoteTask(task);
     scheduleTransferQueuePersist(this);
     _scheduleNotifyListeners();
     _ensurePolling();
@@ -19,6 +20,7 @@ extension TransferQueueLocalProgress on TransferQueue {
     task.status = TransferStatus.running;
     task.statusDetail = 'scanning';
     task.error = null;
+    _publishRemoteTask(task);
     scheduleTransferQueuePersist(this);
     _scheduleNotifyListeners();
     _ensurePolling();
@@ -46,6 +48,7 @@ extension TransferQueueLocalProgress on TransferQueue {
     if (totalBytes != null) {
       task.totalBytes = totalBytes;
     }
+    _publishRemoteTask(task);
     scheduleTransferQueuePersist(this);
     _scheduleNotifyListeners();
     _ensurePolling();
@@ -55,6 +58,7 @@ extension TransferQueueLocalProgress on TransferQueue {
     final task = _taskById(id);
     if (task == null || task.isFinished) return;
     task.localPath = localPath;
+    _publishRemoteTask(task);
     scheduleTransferQueuePersist(this);
     _scheduleNotifyListeners();
   }
@@ -71,6 +75,7 @@ extension TransferQueueLocalProgress on TransferQueue {
     task.totalItems = totalItems;
     task.totalBytes = totalBytes;
     task.error = null;
+    _publishRemoteTask(task);
     scheduleTransferQueuePersist(this);
     _scheduleNotifyListeners();
     _ensurePolling();
@@ -86,6 +91,7 @@ extension TransferQueueLocalProgress on TransferQueue {
     task.currentFileKey = key;
     task.currentFileBytesCompleted = 0;
     task.currentFileTotalBytes = totalBytes;
+    _publishRemoteTask(task);
     _scheduleNotifyListeners();
   }
 
@@ -97,6 +103,7 @@ extension TransferQueueLocalProgress on TransferQueue {
     task.currentFileKey = '';
     task.currentFileBytesCompleted = 0;
     task.currentFileTotalBytes = 0;
+    _publishRemoteTask(task);
     scheduleTransferQueuePersist(this);
     _scheduleNotifyListeners();
   }

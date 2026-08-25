@@ -19,6 +19,7 @@ type linuxFuseNode struct {
 	gofusefs.Inode
 	access *bucketAccess
 	dir    bool
+	oid    uint64
 }
 
 var _ gofusefs.NodeLookuper = (*linuxFuseNode)(nil)
@@ -37,6 +38,10 @@ func newLinuxFuseNode(access *bucketAccess, dir bool) *linuxFuseNode {
 	return &linuxFuseNode{access: access, dir: dir}
 }
 
+func newLinuxFuseNodeWithOID(access *bucketAccess, dir bool, oid uint64) *linuxFuseNode {
+	return &linuxFuseNode{access: access, dir: dir, oid: oid}
+}
+
 func (n *linuxFuseNode) Lookup(
 	ctx context.Context,
 	name string,
@@ -47,9 +52,10 @@ func (n *linuxFuseNode) Lookup(
 	if err != nil {
 		return nil, gofusefs.ToErrno(err)
 	}
-	node := newLinuxFuseNode(n.access, info.IsDir)
+	oid, _ := n.access.metadataOIDForVisiblePath(ctx, virtualPath)
+	node := newLinuxFuseNodeWithOID(n.access, info.IsDir, oid)
 	fillLinuxFuseEntry(out, fileInfoFromObject(info))
-	return n.NewInode(ctx, node, linuxFuseStableAttr(virtualPath, info.IsDir)), 0
+	return n.NewInode(ctx, node, linuxFuseStableAttrWithOID(virtualPath, info.IsDir, oid)), 0
 }
 
 func (n *linuxFuseNode) Readdir(ctx context.Context) (gofusefs.DirStream, syscall.Errno) {
@@ -58,13 +64,16 @@ func (n *linuxFuseNode) Readdir(ctx context.Context) (gofusefs.DirStream, syscal
 		return nil, gofusefs.ToErrno(err)
 	}
 	sortObjectInfos(items)
+	oids := n.access.metadataOIDMap(ctx, n.virtualPath())
 
 	entries := make([]fuse.DirEntry, 0, len(items))
 	for _, item := range items {
+		oid := oids[cleanVirtualPath(item.Key)]
+		stable := linuxFuseStableAttrWithOID(item.Key, item.IsDir, oid)
 		entries = append(entries, fuse.DirEntry{
 			Name: baseName(item.Key),
-			Ino:  linuxFuseStableAttr(item.Key, item.IsDir).Ino,
-			Mode: linuxFuseStableAttr(item.Key, item.IsDir).Mode,
+			Ino:  stable.Ino,
+			Mode: stable.Mode,
 		})
 	}
 	return gofusefs.NewListDirStream(entries), 0
@@ -80,6 +89,7 @@ func (n *linuxFuseNode) Getattr(
 	}
 	if n.IsRoot() {
 		fillLinuxFuseRootAttr(out)
+		out.Attr.Ino = rootLinuxFuseInode(n.access)
 		return 0
 	}
 
@@ -87,6 +97,7 @@ func (n *linuxFuseNode) Getattr(
 	if item, ok := n.access.cache.localFile(virtualPath); ok {
 		if info, err := os.Stat(item.localPath); err == nil {
 			fillLinuxFuseLocalAttr(&out.Attr, info, false)
+			out.Attr.Ino = n.stableInode(virtualPath, false)
 			return 0
 		}
 	}
@@ -96,6 +107,7 @@ func (n *linuxFuseNode) Getattr(
 		return gofusefs.ToErrno(err)
 	}
 	fillLinuxFuseLocalAttr(&out.Attr, fileInfoFromObject(info), info.IsDir)
+	out.Attr.Ino = n.stableInode(virtualPath, info.IsDir)
 	return 0
 }
 
@@ -149,8 +161,9 @@ func (n *linuxFuseNode) Setattr(
 		return errno
 	}
 	if !overlayOnly {
-		n.access.registerLocalWrite(virtualPath, localPath, fileSize(localPath))
-		n.access.scheduleUpload(virtualPath, localPath)
+		if err := n.access.stageLocalWrite(virtualPath, localPath, fileSize(localPath)); err != nil {
+			return gofusefs.ToErrno(err)
+		}
 	}
 	info, err := os.Stat(localPath)
 	if err != nil {
@@ -248,14 +261,38 @@ func (n *linuxFuseNode) childVirtualPath(name string) string {
 }
 
 func linuxFuseStableAttr(virtualPath string, isDir bool) gofusefs.StableAttr {
+	return linuxFuseStableAttrWithOID(virtualPath, isDir, 0)
+}
+
+func linuxFuseStableAttrWithOID(virtualPath string, isDir bool, oid uint64) gofusefs.StableAttr {
 	mode := uint32(syscall.S_IFREG)
 	if isDir {
 		mode = syscall.S_IFDIR
 	}
+	if oid == 0 {
+		oid = linuxFuseInodeNumber(virtualPath, isDir)
+	}
 	return gofusefs.StableAttr{
 		Mode: mode,
-		Ino:  linuxFuseInodeNumber(virtualPath, isDir),
+		Ino:  oid,
 	}
+}
+
+func (n *linuxFuseNode) stableInode(virtualPath string, isDir bool) uint64 {
+	if n != nil && n.oid != 0 {
+		return n.oid
+	}
+	if oid, ok := n.access.metadataOIDForVisiblePath(context.Background(), virtualPath); ok {
+		return oid
+	}
+	return linuxFuseInodeNumber(virtualPath, isDir)
+}
+
+func rootLinuxFuseInode(access *bucketAccess) uint64 {
+	if oid, ok := access.metadataOIDForVisiblePath(context.Background(), ""); ok {
+		return oid
+	}
+	return linuxFuseInodeNumber("", true)
 }
 
 func linuxFuseInodeNumber(virtualPath string, isDir bool) uint64 {

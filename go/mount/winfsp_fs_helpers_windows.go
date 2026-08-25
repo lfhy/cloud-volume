@@ -34,6 +34,11 @@ func fillWinFspDirStat(stat *fuse.Stat_t, mode uint32) {
 	stat.Ctim = stat.Birthtim
 }
 
+func fillWinFspDirStatWithInode(stat *fuse.Stat_t, mode uint32, inode uint64) {
+	fillWinFspDirStat(stat, mode)
+	stat.Ino = inode
+}
+
 func fillWinFspFileStat(stat *fuse.Stat_t, info os.FileInfo, mode uint32) {
 	now := time.Now()
 	stat.Mode = fuse.S_IFREG | mode
@@ -50,14 +55,33 @@ func fillWinFspFileStat(stat *fuse.Stat_t, info os.FileInfo, mode uint32) {
 	stat.Ctim = stat.Atim
 }
 
+func fillWinFspFileStatWithInode(
+	stat *fuse.Stat_t,
+	info os.FileInfo,
+	mode uint32,
+	inode uint64,
+) {
+	fillWinFspFileStat(stat, info, mode)
+	stat.Ino = inode
+}
+
 func fillWinFspFileStatFromObject(stat *fuse.Stat_t, info s3ops.ObjectInfo) {
 	mode := uint32(0o644)
 	fillWinFspFileStatRaw(stat, info.Size, mode, info.LastModified)
 }
 
+func fillWinFspFileStatFromObjectWithInode(
+	stat *fuse.Stat_t,
+	info s3ops.ObjectInfo,
+	inode uint64,
+) {
+	fillWinFspFileStatFromObject(stat, info)
+	stat.Ino = inode
+}
+
 func fillWinFspFileStatRaw(stat *fuse.Stat_t, size int64, mode uint32, lastModified string) {
 	mtime := time.Now()
-	if parsed, err := time.Parse("2006-01-02 15:04:05", lastModified); err == nil {
+	if parsed, err := parseObjectLastModified(lastModified); err == nil {
 		mtime = parsed
 	}
 	stat.Mode = fuse.S_IFREG | mode

@@ -87,6 +87,7 @@ func runLoggedCommandUntilSuccess(
 	args ...string,
 ) ([]byte, string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 	startedAt := time.Now()
 	log.Printf(
 		"[mount/macos] %s start cmd=%q args=%q timeout=%s",

@@ -38,6 +38,7 @@ type linuxFuseFileHandle struct {
 var _ gofusefs.FileReader = (*linuxFuseFileHandle)(nil)
 var _ gofusefs.FileWriter = (*linuxFuseFileHandle)(nil)
 var _ gofusefs.FileFlusher = (*linuxFuseFileHandle)(nil)
+var _ gofusefs.FileFsyncer = (*linuxFuseFileHandle)(nil)
 var _ gofusefs.FileReleaser = (*linuxFuseFileHandle)(nil)
 var _ gofusefs.FileGetattrer = (*linuxFuseFileHandle)(nil)
 var _ gofusefs.FileSetattrer = (*linuxFuseFileHandle)(nil)
@@ -141,7 +142,22 @@ func (h *linuxFuseFileHandle) Flush(_ context.Context) syscall.Errno {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	log.Printf("[mount/linux-file] flush path=%q dirty=%t overlay_only=%t", h.virtualPath, h.dirty, h.overlayOnly)
-	return 0
+	if h.file == nil {
+		return syscall.EBADF
+	}
+	return gofusefs.ToErrno(h.file.Sync())
+}
+
+// Fsync makes the local cache durable without waiting for remote journal work.
+// Release remains the single content-admission point, so frequent rsync fsync
+// calls do not create one remote operation per write boundary.
+func (h *linuxFuseFileHandle) Fsync(_ context.Context, _ uint32) syscall.Errno {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.file == nil {
+		return syscall.EBADF
+	}
+	return gofusefs.ToErrno(h.file.Sync())
 }
 
 func (h *linuxFuseFileHandle) Release(_ context.Context) syscall.Errno {
@@ -209,8 +225,9 @@ func (h *linuxFuseFileHandle) publishLocked() syscall.Errno {
 		fileSize(h.localPath),
 	)
 	h.autoSyncQueued = false
-	h.access.registerLocalWrite(h.virtualPath, h.localPath, fileSize(h.localPath))
-	h.access.scheduleUpload(h.virtualPath, h.localPath)
+	if err := h.access.stageLocalWrite(h.virtualPath, h.localPath, fileSize(h.localPath)); err != nil {
+		return gofusefs.ToErrno(err)
+	}
 	h.dirty = false
 	return 0
 }

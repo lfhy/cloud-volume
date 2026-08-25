@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	s3ops "remote-storage/go/s3"
 )
 
 func (q *writebackQueue) restorePersistedEntries() error {
@@ -16,17 +18,25 @@ func (q *writebackQueue) restorePersistedEntries() error {
 	if err != nil {
 		return err
 	}
-	records = q.filterRestorableRecords(records)
-	if err := q.store.replaceWithMerged(records); err != nil {
+	restoredRecords, dormantRecords := q.filterRestorableRecords(records)
+	persistedRecords := append(dormantRecords, restoredRecords...)
+	if err := q.store.replaceWithMerged(persistedRecords); err != nil {
 		return err
 	}
 	now := time.Now()
-	for _, record := range records {
+	for _, record := range restoredRecords {
 		entry := record.toPendingWriteback()
 		if entry.virtualPath == "" || entry.taskID == "" {
 			continue
 		}
 		q.entries[entry.virtualPath] = entry
+		if access := q.currentAccess(); access != nil {
+			access.cache.storeLocalFile(entry.virtualPath, entry.localPath, s3ops.ObjectInfo{
+				Key:          entry.virtualPath,
+				Size:         entry.size,
+				LastModified: time.Unix(0, entry.modTimeUnixNano).Format("2006-01-02 15:04:05"),
+			})
+		}
 		s3opsQueueTransferForEntry(q.currentAccess(), entry)
 		delay := time.Until(entry.dueAt)
 		if entry.dueAt.IsZero() || delay < 0 {
@@ -40,19 +50,29 @@ func (q *writebackQueue) restorePersistedEntries() error {
 
 func (q *writebackQueue) filterRestorableRecords(
 	records []writebackRecord,
-) []writebackRecord {
+) ([]writebackRecord, []writebackRecord) {
 	access := q.currentAccess()
 	if access == nil {
-		return records
+		return records, nil
 	}
-	filtered := make([]writebackRecord, 0, len(records))
+	restored := make([]writebackRecord, 0, len(records))
+	dormant := make([]writebackRecord, 0, len(records))
 	for _, record := range records {
+		if record.Scope != q.scope {
+			log.Printf(
+				"[mount/writeback] restore-defer-scope bucket=%q path=%q",
+				q.bucketName(),
+				record.VirtualPath,
+			)
+			dormant = append(dormant, record)
+			continue
+		}
 		if !q.canRestoreRecord(access, record) {
 			continue
 		}
-		filtered = append(filtered, record)
+		restored = append(restored, record)
 	}
-	return filtered
+	return restored, dormant
 }
 
 func (q *writebackQueue) canRestoreRecord(
@@ -64,7 +84,8 @@ func (q *writebackQueue) canRestoreRecord(
 		return false
 	}
 	sessionRoot := filepath.Clean(access.sessionRoot)
-	if !isPathWithin(localPath, sessionRoot) {
+	cacheRoot := filepath.Clean(access.cacheRoot)
+	if !isPathWithin(localPath, sessionRoot) && !isPathWithin(localPath, cacheRoot) {
 		return false
 	}
 	info, err := os.Stat(localPath)
@@ -115,7 +136,15 @@ func (q *writebackQueue) restorePersistedMutations() error {
 	restoredOps := make([]*queuedWritebackRename, 0, len(live))
 	maxGeneration := q.generation
 	ids := make([]string, 0, len(live))
-	for id := range live {
+	for id, record := range live {
+		if record.Scope != q.scope {
+			log.Printf(
+				"[mount/writeback] rename-restore-skip-scope bucket=%q id=%s",
+				q.bucketName(),
+				id,
+			)
+			continue
+		}
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
@@ -138,7 +167,7 @@ func (q *writebackQueue) restorePersistedMutations() error {
 		// reconciled rename executes, matching the live-queue semantics.
 		q.rebasePendingSourcesLocked(q.sourceRebases[len(q.sourceRebases)-1])
 		if access != nil {
-			beginMutationTransferTask(record, access.bucket, record.NewLocalPath)
+			beginMutationTransferTask(record, access.bucket, record.NewLocalPath, access.config.ProfileID)
 		}
 		live[id] = record
 		// Restored records carry no closure: the reconciler alone converges

@@ -31,13 +31,15 @@ void main() {
       bucket: 'bucket-a',
       key: 'docs/a.txt',
       localPath: '',
-    )..status = TransferStatus.running;
+    );
     final second = TransferQueue.instance.startTask(
       kind: TransferKind.delete,
       bucket: 'bucket-a',
       key: 'docs/b.txt',
       localPath: '',
-    )..status = TransferStatus.running;
+    );
+    TransferQueue.instance.markTaskRunning(first.id);
+    TransferQueue.instance.markTaskRunning(second.id);
     var backgroundRequested = false;
 
     await tester.pumpWidget(
@@ -81,13 +83,15 @@ void main() {
       bucket: 'bucket-a',
       key: 'docs/a.txt',
       localPath: '',
-    )..status = TransferStatus.done;
+    );
     final second = TransferQueue.instance.startTask(
       kind: TransferKind.delete,
       bucket: 'bucket-a',
       key: 'docs/b.txt',
       localPath: '',
-    )..status = TransferStatus.done;
+    );
+    TransferQueue.instance.markTaskDone(first.id);
+    TransferQueue.instance.markTaskDone(second.id);
 
     await tester.pumpWidget(
       ShadApp(
@@ -113,5 +117,40 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     TransferQueue.instance.resetForTest();
     await tester.pump();
+  });
+
+  testWidgets('metadata upload uses an execution-only progress snapshot', (
+    tester,
+  ) async {
+    final task = TransferQueue.instance.startTask(
+      id: 'metadata-page-upload',
+      kind: TransferKind.upload,
+      bucket: 'bucket-a',
+      key: 'docs/draft.txt',
+      localPath: '/tmp/draft.txt',
+      publishRemoteTask: false,
+    );
+    TransferQueue.instance.markTaskRunning(task.id, totalBytes: 7);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Material(
+          child: BatchTaskProgressDialog(
+            taskIds: <String>[task.id],
+            currentPathLabel: 'bucket-a / docs',
+            mode: BatchTaskProgressMode.upload,
+            onRunInBackground: () {},
+            onClose: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('draft.txt'), findsOneWidget);
+    expect(find.text('取消上传'), findsNothing);
+    expect(find.text('后台运行'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 }

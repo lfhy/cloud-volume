@@ -3,10 +3,13 @@ package mount
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -33,6 +36,19 @@ func startWebDAVServer(
 		Prefix:     scope,
 		FileSystem: fs,
 		LockSystem: webdav.NewMemLS(),
+		Logger: func(request *http.Request, err error) {
+			// x/net/webdav reports ordinary Finder existence probes as an
+			// os.ErrNotExist callback. The response logger already records the
+			// meaningful 404s, so avoid doubling those for every copied path.
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				log.Printf(
+					"[mount/webdav] handler-error method=%s path=%q err=%v",
+					request.Method,
+					request.URL.Path,
+					err,
+				)
+			}
+		},
 	}
 	server := &http.Server{
 		Handler:           webDAVLoggingHandler{next: handler},

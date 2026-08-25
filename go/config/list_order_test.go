@@ -107,4 +107,3 @@ func TestReorderBucketsPersistsIds(t *testing.T) {
 		t.Fatalf("expected empty bucket order after reset, got %v", got)
 	}
 }
-

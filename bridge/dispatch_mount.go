@@ -87,3 +87,20 @@ func cleanupStaleWindowsProcesses() (any, error) {
 	}
 	return map[string]any{"ok": true, "count": count}, nil
 }
+
+// sweepOrphanMounts removes leftover managed WebDAV mounts from a previous
+// crashed run. The sweep runs in the background because each stubborn volume
+// can take tens of seconds to unmount; the bridge call returns immediately so
+// app startup and other bridge traffic are never serialized behind it.
+func sweepOrphanMounts() (any, error) {
+	log.Printf("[bridge/mount] sweep orphan mounts")
+	go func() {
+		count, err := bucketmount.SweepOrphanMounts()
+		if err != nil {
+			log.Printf("[bridge/mount] sweep orphan mounts finished count=%d err=%v", count, err)
+			return
+		}
+		log.Printf("[bridge/mount] sweep orphan mounts finished count=%d", count)
+	}()
+	return map[string]any{"ok": true, "started": true}, nil
+}

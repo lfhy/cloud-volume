@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	storageconfig "remote-storage/go/config"
 	bridgelog "remote-storage/go/logging"
@@ -136,38 +137,48 @@ func (b webDAVBackend) ReadObjectRange(
 	return b.readObjectRange(ctx, key, offset, length)
 }
 
-func (b webDAVBackend) DeleteObject(ctx context.Context, bucket, key string, isDirectory bool, _ string) error {
-	if err := b.ensureBucketWritable(bucket); err != nil {
-		return err
-	}
-	if b.cfg.BucketSettingsFor(bucket).IsTrashEnabled() {
-		return b.moveObjectToTrash(ctx, bucket, key, isDirectory)
-	}
-	req, err := b.request(ctx, "DELETE", key, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := b.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound || resp.StatusCode < 300 {
-		return nil
-	}
-	return fmt.Errorf("webdav delete: %s", resp.Status)
+func (b webDAVBackend) DeleteObject(ctx context.Context, bucket, key string, isDirectory bool, taskID string) error {
+	return runTrackedMutation(
+		ctx, "delete", bucket, key, "", taskID, b.cfg.ProfileID,
+		func(operationCtx context.Context) error {
+			if err := b.ensureBucketWritable(bucket); err != nil {
+				return err
+			}
+			if b.cfg.BucketSettingsFor(bucket).IsTrashEnabled() {
+				return b.moveObjectToTrash(operationCtx, bucket, key, isDirectory)
+			}
+			req, err := b.request(operationCtx, "DELETE", key, nil)
+			if err != nil {
+				return err
+			}
+			resp, err := b.client.Do(req)
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusNotFound || resp.StatusCode < 300 {
+				return nil
+			}
+			return fmt.Errorf("webdav delete: %s", resp.Status)
+		},
+	)
 }
 
 func (b webDAVBackend) DeleteObjectHard(
 	ctx context.Context,
 	bucket, key string,
 	_ bool,
-	_ string,
+	taskID string,
 ) error {
-	if err := b.ensureBucketWritable(bucket); err != nil {
-		return err
-	}
-	return b.deletePath(ctx, key)
+	return runTrackedMutation(
+		ctx, "delete", bucket, key, "", taskID, b.cfg.ProfileID,
+		func(operationCtx context.Context) error {
+			if err := b.ensureBucketWritable(bucket); err != nil {
+				return err
+			}
+			return b.deletePath(operationCtx, key)
+		},
+	)
 }
 
 func (b webDAVBackend) RenameObject(ctx context.Context, bucket, key string, isDirectory bool, newName string) error {
@@ -181,18 +192,28 @@ func (b webDAVBackend) RenameObject(ctx context.Context, bucket, key string, isD
 	return b.MoveObject(ctx, bucket, key, target, isDirectory, "")
 }
 
-func (b webDAVBackend) CopyObject(ctx context.Context, bucket, sourceKey, targetKey string, _ bool, _ string) error {
-	if err := b.ensureBucketWritable(bucket); err != nil {
-		return err
-	}
-	return b.copyMove(ctx, "COPY", sourceKey, targetKey)
+func (b webDAVBackend) CopyObject(ctx context.Context, bucket, sourceKey, targetKey string, _ bool, taskID string) error {
+	return runTrackedMutation(
+		ctx, "copy", bucket, sourceKey, targetKey, taskID, b.cfg.ProfileID,
+		func(operationCtx context.Context) error {
+			if err := b.ensureBucketWritable(bucket); err != nil {
+				return err
+			}
+			return b.copyMove(operationCtx, "COPY", sourceKey, targetKey)
+		},
+	)
 }
 
-func (b webDAVBackend) MoveObject(ctx context.Context, bucket, sourceKey, targetKey string, _ bool, _ string) error {
-	if err := b.ensureBucketWritable(bucket); err != nil {
-		return err
-	}
-	return b.copyMove(ctx, "MOVE", sourceKey, targetKey)
+func (b webDAVBackend) MoveObject(ctx context.Context, bucket, sourceKey, targetKey string, _ bool, taskID string) error {
+	return runTrackedMutation(
+		ctx, "move", bucket, sourceKey, targetKey, taskID, b.cfg.ProfileID,
+		func(operationCtx context.Context) error {
+			if err := b.ensureBucketWritable(bucket); err != nil {
+				return err
+			}
+			return b.copyMove(operationCtx, "MOVE", sourceKey, targetKey)
+		},
+	)
 }
 
 func (b webDAVBackend) propfind(ctx context.Context, key, depth string) ([]webDAVResponse, error) {
@@ -207,6 +228,11 @@ func (b webDAVBackend) propfind(ctx context.Context, key, depth string) ([]webDA
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		// Keep HeadObject aligned with the other provider backends: callers use
+		// os.ErrNotExist to distinguish a missing remote edge from a transport error.
+		return nil, os.ErrNotExist
+	}
 	if resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("webdav propfind: %s", resp.Status)
 	}
@@ -316,10 +342,7 @@ func objectInfoFromWebDAVKey(key string, resp webDAVResponse) ObjectInfo {
 }
 
 func (b webDAVBackend) keyFromHref(href string) (string, bool) {
-	value, err := url.QueryUnescape(strings.TrimSpace(href))
-	if err != nil {
-		value = strings.TrimSpace(href)
-	}
+	value := strings.TrimSpace(href)
 	base, err := url.Parse(b.cfg.Endpoint)
 	if err != nil {
 		return "", false
@@ -367,7 +390,7 @@ func parseHTTPTime(value string) string {
 	if err != nil {
 		return trimmed
 	}
-	return parsed.Format("2006-01-02 15:04:05")
+	return parsed.In(time.Local).Format("2006-01-02 15:04:05")
 }
 
 // sortWebDAVObjects keeps WebDAV listing order aligned with the S3 browser.

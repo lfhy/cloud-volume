@@ -97,6 +97,7 @@ func MoveObjectContextWithTask(
 		ctx,
 		taskID,
 		"move",
+		cfg.ProfileID,
 		bucket,
 		sourceKey,
 		targetKey,

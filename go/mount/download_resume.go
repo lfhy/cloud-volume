@@ -10,9 +10,11 @@ import (
 )
 
 type downloadStamp struct {
-	Size         int64  `json:"size"`
-	LastModified string `json:"lastModified"`
-	ETag         string `json:"etag,omitempty"`
+	Size               int64  `json:"size"`
+	LastModified       string `json:"lastModified"`
+	ETag               string `json:"etag,omitempty"`
+	MetadataInode      uint64 `json:"metadataInode,omitempty"`
+	MetadataGeneration uint64 `json:"metadataGeneration,omitempty"`
 }
 
 func partialDownloadPath(localPath string) string {
@@ -32,7 +34,14 @@ func matchesDownloadStamp(localPath string, info s3ops.ObjectInfo) bool {
 	if !ok {
 		return false
 	}
-	return stamp.Size == info.Size && stamp.LastModified == info.LastModified && stamp.ETag == info.ETag
+	return stamp.Size == info.Size && stamp.LastModified == info.LastModified && stamp.ETag == info.ETag &&
+		stamp.MetadataInode == 0 && stamp.MetadataGeneration == 0
+}
+
+func matchesPendingDownloadStamp(localPath string, info s3ops.ObjectInfo, inode, generation uint64) bool {
+	stamp, ok := loadDownloadStamp(localPath)
+	return ok && stamp.Size == info.Size && stamp.LastModified == info.LastModified &&
+		stamp.ETag == info.ETag && stamp.MetadataInode == inode && stamp.MetadataGeneration == generation
 }
 
 func loadDownloadStamp(localPath string) (downloadStamp, bool) {
@@ -60,6 +69,38 @@ func writeDownloadStamp(localPath string, info s3ops.ObjectInfo) error {
 		return err
 	}
 	return os.WriteFile(stampPath(localPath), data, 0o644)
+}
+
+func writePendingDownloadStamp(localPath string, info s3ops.ObjectInfo, inode, generation uint64) error {
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		return err
+	}
+	data, err := json.Marshal(downloadStamp{
+		Size: info.Size, LastModified: info.LastModified, ETag: info.ETag,
+		MetadataInode: inode, MetadataGeneration: generation,
+	})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(stampPath(localPath), data, 0o644)
+}
+
+// promoteConfirmedPendingStamp converts a chunk-materialized cache stamp into
+// a normal confirmed-remote stamp once the worker confirmed that generation.
+// Without this, the first post-confirmation read would evict the identical
+// cache file and re-download it from the provider.
+func promoteConfirmedPendingStamp(localPath string, info s3ops.ObjectInfo, inode, generation uint64) {
+	if inode == 0 || generation == 0 {
+		return
+	}
+	stamp, ok := loadDownloadStamp(localPath)
+	if !ok || stamp.MetadataInode != inode || stamp.MetadataGeneration != generation {
+		return
+	}
+	if stamp.Size != info.Size {
+		return
+	}
+	_ = writeDownloadStamp(localPath, info)
 }
 
 func renameDownloadStamp(oldPath, newPath string) error {

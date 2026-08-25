@@ -237,37 +237,6 @@ func (b baiduPanBackend) CreateDirectory(
 	return err
 }
 
-func (b baiduPanBackend) DeleteObject(
-	_ context.Context,
-	bucket string,
-	key string,
-	_ bool,
-	_ string,
-) error {
-	if err := b.ensureBucketWritable(bucket); err != nil {
-		return err
-	}
-	_, err := withBaiduPanClient(b.bucketConfig(bucket), func(client *xpanclient.Client) (struct{}, error) {
-		_, err := client.DeleteObject(baiduPanObjectPath(key))
-		if err == nil {
-			forgetBaiduPanFsid(b.bucketConfig(bucket), bucket, key)
-			forgetBaiduPanKnownDir(baiduPanObjectPath(key))
-		}
-		return struct{}{}, err
-	})
-	return err
-}
-
-func (b baiduPanBackend) DeleteObjectHard(
-	ctx context.Context,
-	bucket string,
-	key string,
-	isDirectory bool,
-	taskID string,
-) error {
-	return b.DeleteObject(ctx, bucket, key, isDirectory, taskID)
-}
-
 func (b baiduPanBackend) ListTrashPage(
 	_ context.Context,
 	_ string,
@@ -287,70 +256,6 @@ func (b baiduPanBackend) DeleteTrashItem(_ context.Context, _, _ string) error {
 
 func (b baiduPanBackend) ClearTrash(_ context.Context, _ string) error {
 	return fmt.Errorf("百度网盘账号暂不支持应用级回收站清空")
-}
-
-func (b baiduPanBackend) RenameObject(
-	_ context.Context,
-	bucket string,
-	key string,
-	_ bool,
-	newName string,
-) error {
-	if err := b.ensureBucketWritable(bucket); err != nil {
-		return err
-	}
-	_, err := withBaiduPanClient(b.bucketConfig(bucket), func(client *xpanclient.Client) (struct{}, error) {
-		_, err := client.RenameObject(
-			baiduPanObjectPath(key),
-			strings.Trim(strings.TrimSpace(newName), "/"),
-		)
-		return struct{}{}, err
-	})
-	return err
-}
-
-func (b baiduPanBackend) CopyObject(
-	_ context.Context,
-	bucket string,
-	sourceKey string,
-	targetKey string,
-	_ bool,
-	_ string,
-) error {
-	if err := b.ensureBucketWritable(bucket); err != nil {
-		return err
-	}
-	destDir, newName := baiduPanMoveTarget(targetKey)
-	_, err := withBaiduPanClient(b.bucketConfig(bucket), func(client *xpanclient.Client) (struct{}, error) {
-		if err := ensureBaiduPanDir(client, destDir); err != nil {
-			return struct{}{}, err
-		}
-		_, err := client.CopyObject(baiduPanObjectPath(sourceKey), destDir, newName)
-		return struct{}{}, err
-	})
-	return err
-}
-
-func (b baiduPanBackend) MoveObject(
-	_ context.Context,
-	bucket string,
-	sourceKey string,
-	targetKey string,
-	_ bool,
-	_ string,
-) error {
-	if err := b.ensureBucketWritable(bucket); err != nil {
-		return err
-	}
-	destDir, newName := baiduPanMoveTarget(targetKey)
-	_, err := withBaiduPanClient(b.bucketConfig(bucket), func(client *xpanclient.Client) (struct{}, error) {
-		if err := ensureBaiduPanDir(client, destDir); err != nil {
-			return struct{}{}, err
-		}
-		_, err := client.MoveObject(baiduPanObjectPath(sourceKey), destDir, newName)
-		return struct{}{}, err
-	})
-	return err
 }
 
 func (b baiduPanBackend) ensureBucketWritable(bucket string) error {

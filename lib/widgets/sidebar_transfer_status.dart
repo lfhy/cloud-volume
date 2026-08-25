@@ -3,9 +3,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:remote_storage/state/transfer_queue.dart';
-import 'package:remote_storage/utils/transfer_format.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:remote_storage/models/remote_task.dart';
+import 'package:remote_storage/models/remote_task_display.dart';
+import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/widgets/app_tooltip.dart';
+import 'package:remote_storage/widgets/remote_task_widgets.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 class SidebarTransferStatus extends StatefulWidget {
@@ -29,6 +32,7 @@ class _SidebarTransferStatusState extends State<SidebarTransferStatus>
   late final AnimationController _controller;
   Timer? _hideTimer;
   bool _hovered = false;
+  bool _animationSyncScheduled = false;
 
   @override
   void initState() {
@@ -37,14 +41,14 @@ class _SidebarTransferStatusState extends State<SidebarTransferStatus>
       vsync: this,
       duration: const Duration(milliseconds: 1100),
     );
-    TransferQueue.instance.addListener(_syncAnimation);
+    RemoteTaskStore.instance.addListener(_syncAnimation);
     _syncAnimation();
   }
 
   @override
   void dispose() {
     _hideTimer?.cancel();
-    TransferQueue.instance.removeListener(_syncAnimation);
+    RemoteTaskStore.instance.removeListener(_syncAnimation);
     _controller.dispose();
     super.dispose();
   }
@@ -65,10 +69,25 @@ class _SidebarTransferStatusState extends State<SidebarTransferStatus>
   }
 
   void _syncAnimation() {
-    if (!mounted) {
+    if (!mounted) return;
+    // Task-store listeners can fire while an IndexedStack parent is building.
+    // Updating an AnimationController then makes ScaleTransition dirty during
+    // that build, so run exactly one synchronization after the frame instead.
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      if (_animationSyncScheduled) return;
+      _animationSyncScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _animationSyncScheduled = false;
+        if (mounted) _applyAnimationState();
+      });
       return;
     }
-    if (TransferQueue.instance.hasSidebarRunning) {
+    _applyAnimationState();
+  }
+
+  void _applyAnimationState() {
+    if (_hasRunning) {
       _controller.repeat(reverse: true);
     } else {
       _controller.stop();
@@ -79,8 +98,7 @@ class _SidebarTransferStatusState extends State<SidebarTransferStatus>
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    final queue = TransferQueue.instance;
-    final foreground = queue.hasSidebarRunning ? widget.accent : widget.muted;
+    final foreground = _hasRunning ? widget.accent : widget.muted;
     return MouseRegion(
       onEnter: (_) => _showHoverCard(),
       onExit: (_) => _scheduleHideHoverCard(),
@@ -103,8 +121,9 @@ class _SidebarTransferStatusState extends State<SidebarTransferStatus>
             ),
           ],
           AnimatedBuilder(
-            animation: queue,
+            animation: Listenable.merge([RemoteTaskStore.instance]),
             builder: (context, _) {
+              final running = _hasRunning;
               return GestureDetector(
                 onTap: widget.onTap,
                 child: Container(
@@ -114,12 +133,12 @@ class _SidebarTransferStatusState extends State<SidebarTransferStatus>
                     vertical: 10,
                   ),
                   decoration: BoxDecoration(
-                    color: queue.hasSidebarRunning
+                    color: running
                         ? widget.accent.withValues(alpha: 0.08)
                         : Colors.white.withValues(alpha: 0.34),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                      color: queue.hasSidebarRunning
+                      color: running
                           ? widget.accent.withValues(alpha: 0.18)
                           : theme.colorScheme.border.withValues(alpha: 0.45),
                     ),
@@ -134,7 +153,7 @@ class _SidebarTransferStatusState extends State<SidebarTransferStatus>
                           ),
                         ),
                         child: Opacity(
-                          opacity: queue.hasSidebarRunning ? 1 : 0.9,
+                          opacity: running ? 1 : 0.9,
                           child: Icon(
                             LucideIcons.arrowLeftRight,
                             size: 16,
@@ -148,7 +167,7 @@ class _SidebarTransferStatusState extends State<SidebarTransferStatus>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              '对象传输',
+                              '远端操作',
                               style: TextStyle(
                                 fontSize: 12.5,
                                 fontWeight: FontWeight.w600,
@@ -157,7 +176,7 @@ class _SidebarTransferStatusState extends State<SidebarTransferStatus>
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              queue.sidebarSpeedSummary,
+                              _speedSummary,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -180,6 +199,15 @@ class _SidebarTransferStatusState extends State<SidebarTransferStatus>
   }
 }
 
+extension on _SidebarTransferStatusState {
+  bool get _hasRunning => RemoteTaskStore.instance.hasActive;
+
+  String get _speedSummary =>
+      remoteTaskSpeedSummary(RemoteTaskStore.instance.tasks).isEmpty
+      ? (_hasRunning ? '同步中' : '暂无任务')
+      : remoteTaskSpeedSummary(RemoteTaskStore.instance.tasks);
+}
+
 class _TransferHoverCard extends StatelessWidget {
   const _TransferHoverCard({required this.theme});
 
@@ -187,7 +215,8 @@ class _TransferHoverCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tasks = TransferQueue.instance.recentSidebarTasks();
+    final remoteTasks = RemoteTaskStore.instance.tasks.take(6).toList();
+    final isEmpty = remoteTasks.isEmpty;
     return Container(
       constraints: const BoxConstraints(maxHeight: 300),
       padding: const EdgeInsets.all(10),
@@ -205,7 +234,7 @@ class _TransferHoverCard extends StatelessWidget {
           ),
         ],
       ),
-      child: tasks.isEmpty
+      child: isEmpty
           ? Text(
               '暂无对象操作任务',
               style: TextStyle(
@@ -216,12 +245,93 @@ class _TransferHoverCard extends StatelessWidget {
           : Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                for (final task in tasks) _TransferHoverRow(task: task),
+                for (final task in remoteTasks) _RemoteHoverRow(task: task),
               ],
             ),
     );
   }
 }
+
+class _RemoteHoverRow extends StatelessWidget {
+  const _RemoteHoverRow({required this.task});
+
+  final RemoteTask task;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final path = task.operationPath;
+    final active = task.status.isActive;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Icon(
+            _remoteIcon(task.kind),
+            size: 15,
+            color: theme.colorScheme.mutedForeground,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              path.isEmpty ? task.name : path,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          if (task.cancelable) ...[
+            const SizedBox(width: 6),
+            _TransferTaskAction(
+              message: '取消任务',
+              icon: LucideIcons.circleX,
+              color: theme.colorScheme.mutedForeground,
+              onPressed: () =>
+                  unawaited(RemoteTaskStore.instance.cancel(task.id)),
+            ),
+          ],
+          const SizedBox(width: 6),
+          Text(
+            active
+                ? (task.isMountRead && task.mountReadRange.isNotEmpty
+                      ? '读取中'
+                      : task.phaseLabel.isNotEmpty
+                      ? task.phaseLabel
+                      : '进行中')
+                : _remoteStatus(task.status),
+            style: TextStyle(
+              fontSize: 10.5,
+              color: active
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.mutedForeground,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+IconData _remoteIcon(RemoteTaskKind kind) => switch (kind) {
+  RemoteTaskKind.mkdir => LucideIcons.folderPlus,
+  RemoteTaskKind.write || RemoteTaskKind.upload => LucideIcons.upload,
+  RemoteTaskKind.download => LucideIcons.download,
+  RemoteTaskKind.rename || RemoteTaskKind.move => LucideIcons.moveRight,
+  RemoteTaskKind.copy => LucideIcons.copy,
+  RemoteTaskKind.delete => LucideIcons.trash2,
+  RemoteTaskKind.appUpdate => LucideIcons.refreshCw,
+  RemoteTaskKind.unknown => LucideIcons.arrowLeftRight,
+};
+
+String _remoteStatus(RemoteTaskStatus status) => switch (status) {
+  RemoteTaskStatus.failed || RemoteTaskStatus.conflict => '失败',
+  RemoteTaskStatus.done => '完成',
+  RemoteTaskStatus.canceled => '已取消',
+  _ => '等待中',
+};
 
 class _TransferTaskAction extends StatelessWidget {
   const _TransferTaskAction({
@@ -249,144 +359,4 @@ class _TransferTaskAction extends StatelessWidget {
       ),
     );
   }
-}
-
-class _TransferHoverRow extends StatelessWidget {
-  const _TransferHoverRow({required this.task});
-
-  final TransferTask task;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-    final color = _colorFor(task);
-    final detail = _detailFor(task);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          Icon(_iconFor(task), size: 15, color: color),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  task.displayName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w600,
-                    color: theme.colorScheme.foreground,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  detail,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    color: theme.colorScheme.mutedForeground,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                _statusLabelFor(task),
-                style: TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w600,
-                  color: task.status == TransferStatus.failed
-                      ? theme.colorScheme.destructive
-                      : task.status == TransferStatus.done
-                      ? const Color(0xff15803d)
-                      : task.status == TransferStatus.canceled
-                      ? theme.colorScheme.mutedForeground
-                      : theme.colorScheme.primary,
-                ),
-              ),
-              if (task.isCancelable) ...[
-                const SizedBox(width: 6),
-                _TransferTaskAction(
-                  message: '取消任务',
-                  icon: LucideIcons.circleX,
-                  color: theme.colorScheme.mutedForeground,
-                  onPressed: () =>
-                      unawaited(TransferQueue.instance.cancelTask(task.id)),
-                ),
-              ],
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _detailFor(TransferTask task) {
-    final createdAtLabel = formatTransferCreatedAt(task.createdAt);
-    if (task.status == TransferStatus.failed) {
-      return _joinHoverParts([
-        task.error ?? '${task.typeLabel}失败',
-        createdAtLabel,
-      ]);
-    }
-    if (task.status == TransferStatus.canceled) {
-      return _joinHoverParts(['${task.typeLabel}已取消', createdAtLabel]);
-    }
-    if ((task.isCopy || task.isMove) && task.targetPath.isNotEmpty) {
-      return _joinHoverParts([
-        '${task.typeLabel}到 ${task.targetPath}',
-        createdAtLabel,
-      ]);
-    }
-    if (task.totalBytes > 0) {
-      return _joinHoverParts([
-        '${formatBytes(task.bytesCompleted)} / ${formatBytes(task.totalBytes)}',
-        task.progressTargetLabel,
-        createdAtLabel,
-      ]);
-    }
-    return _joinHoverParts([task.typeLabel, createdAtLabel]);
-  }
-
-  String _statusLabelFor(TransferTask task) {
-    return switch (task.status) {
-      TransferStatus.pending =>
-        task.isUpload ? (task.isUploadWaiting ? '等待上传' : '等待同步') : '等待中',
-      TransferStatus.running =>
-        task.speedBytes > 0
-            ? formatBytesPerSecond(task.speedBytes)
-            : '${task.typeLabel}中',
-      TransferStatus.done => '完成',
-      TransferStatus.failed => '失败',
-      TransferStatus.canceled => '已取消',
-    };
-  }
-
-  IconData _iconFor(TransferTask task) {
-    if (task.isUpload) return LucideIcons.upload;
-    if (task.isDownload) return LucideIcons.download;
-    if (task.isCopy) return LucideIcons.copy;
-    if (task.isDelete) return LucideIcons.trash2;
-    return LucideIcons.moveRight;
-  }
-
-  Color _colorFor(TransferTask task) {
-    if (task.isUpload) return const Color(0xff2563eb);
-    if (task.isDownload) return const Color(0xff0f766e);
-    if (task.isCopy) return const Color(0xff7c3aed);
-    if (task.isDelete) return const Color(0xffdc2626);
-    return const Color(0xffc2410c);
-  }
-}
-
-String _joinHoverParts(List<String> parts) {
-  return parts.where((part) => part.trim().isNotEmpty).join('  ·  ');
 }

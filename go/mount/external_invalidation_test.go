@@ -5,9 +5,13 @@ package mount
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
+	"time"
 
 	storageconfig "remote-storage/go/config"
+	"remote-storage/go/mount/metadata"
 	s3ops "remote-storage/go/s3"
 )
 
@@ -71,8 +75,7 @@ func TestNotifyExternalDeleteClearsCachedEntry(t *testing.T) {
 func TestMarkExternalDeleteCancelsWritebackAndProjects(t *testing.T) {
 	access := newTestBucketAccess(t)
 	stagedPath := createTempFile(t, access.cacheRoot, "pending.txt", "hello")
-	access.registerLocalWrite("pending.txt", stagedPath, 5)
-	access.scheduleUpload("pending.txt", stagedPath)
+	access.stageLocalWrite("pending.txt", stagedPath, 5)
 	if !access.writeback.hasPendingAtOrBelow("pending.txt", false) {
 		t.Fatal("expected pending writeback before external delete")
 	}
@@ -108,6 +111,41 @@ func TestInvalidateExternalUploadProjectsCreatedPath(t *testing.T) {
 
 	if projectedPath != "docs/new-folder" || !projectedDir {
 		t.Fatalf("unexpected platform projection path=%q isDir=%t", projectedPath, projectedDir)
+	}
+}
+
+func TestInvalidateExternalUploadPreservesPendingLocalFile(t *testing.T) {
+	access := newTestBucketAccess(t)
+	stagedPath := createTempFile(t, access.cacheRoot, "pending.txt", "hello")
+	access.stageLocalWrite("pending.txt", stagedPath, 5)
+
+	access.InvalidateExternalUpload("pending.txt", false)
+
+	if _, err := os.Stat(stagedPath); err != nil {
+		t.Fatalf("pending content was removed: %v", err)
+	}
+	if _, ok := access.cache.localFile("pending.txt"); !ok {
+		t.Fatal("pending local cache marker was removed")
+	}
+	if !access.writeback.hasPendingAtOrBelow("pending.txt", false) {
+		t.Fatal("pending writeback was removed")
+	}
+}
+
+func TestInvalidateExternalUploadPreservesUnqueuedLocalMarker(t *testing.T) {
+	access := newTestBucketAccess(t)
+	stagedPath := createTempFile(t, access.cacheRoot, "opened.txt", "hello")
+	// FUSE/WebDAV can register a writable local handle before Close schedules
+	// its upload. That marker is pending data too and must survive invalidation.
+	access.registerLocalWrite("opened.txt", stagedPath, 5)
+
+	access.InvalidateExternalUpload("opened.txt", false)
+
+	if _, err := os.Stat(stagedPath); err != nil {
+		t.Fatalf("unqueued local content was removed: %v", err)
+	}
+	if _, ok := access.cache.localFile("opened.txt"); !ok {
+		t.Fatal("unqueued local cache marker was removed")
 	}
 }
 
@@ -247,5 +285,143 @@ func TestNotifyExternalUploadAllowsImmediateReList(t *testing.T) {
 	// Sanity: the TTL-backed cache should have been repopulated empty.
 	if refreshed, ok := access.cache.cachedList(""); !ok || len(refreshed) != 0 {
 		t.Fatalf("expected empty refreshed root listing, got ok=%t items=%+v", ok, refreshed)
+	}
+}
+
+func TestMetadataProjectionClearsStaleLocalMarkers(t *testing.T) {
+	access := newTestBucketAccess(t)
+	backend := newMetadataMountWriteBackend()
+	_, handle := attachMetadataWriteService(t, access, backend)
+	service := handle.Service
+	ctx := context.Background()
+	if _, _, _, err := service.WritePathWithProjection(
+		ctx, "source.txt", strings.NewReader("new"), 3, metadata.WriteOptions{Origin: "page"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	target, err := service.RenamePathWithProjection(
+		ctx, "source.txt", "destination.txt", metadata.WriteOptions{Origin: "page"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := createTempFile(t, access.cacheRoot, "source.txt", "old")
+	access.cache.storeLocalFile("source.txt", source, s3ops.ObjectInfo{Size: 3})
+	var deleted, uploaded string
+	access.externalDelete = func(virtualPath string, _ bool) error {
+		deleted = virtualPath
+		return nil
+	}
+	access.externalUpload = func(virtualPath string, _ bool) error {
+		uploaded = virtualPath
+		return nil
+	}
+
+	access.projectMetadataRename("source.txt", target, false)
+
+	if _, err := os.Stat(source); err != nil {
+		t.Fatalf("metadata projection removed recoverable source data: %v", err)
+	}
+	if _, ok := access.cache.localFile("source.txt"); ok {
+		t.Fatal("stale source marker survived metadata rename")
+	}
+	if !access.cache.isMarkedDeleted("source.txt") {
+		t.Fatal("metadata rename did not tombstone the source projection")
+	}
+	if deleted != "" || uploaded != "" {
+		t.Fatalf("metadata projection invoked remote-confirmation callbacks delete=%q upload=%q", deleted, uploaded)
+	}
+}
+
+func TestMetadataProjectionUploadReplacesMatchingLocalDraft(t *testing.T) {
+	access := newTestBucketAccess(t)
+	backend := newMetadataMountWriteBackend()
+	_, handle := attachMetadataWriteService(t, access, backend)
+	projectionInode, _, projection, err := handle.Service.WritePathWithProjection(
+		context.Background(), "draft.txt", strings.NewReader("new"), 3, metadata.WriteOptions{Origin: "page"},
+	)
+	if err != nil || projectionInode == 0 {
+		t.Fatalf("page write projection inode=%d err=%v", projectionInode, err)
+	}
+	stale := createTempFile(t, access.cacheRoot, "draft.txt", "old")
+	access.cache.storeLocalFile("draft.txt", stale, s3ops.ObjectInfo{Size: 3})
+
+	access.projectMetadataUpload(projection, false)
+
+	if _, err := os.Stat(stale); err != nil {
+		t.Fatalf("metadata projection removed recoverable local data: %v", err)
+	}
+	if _, ok := access.cache.localFile("draft.txt"); ok {
+		t.Fatal("metadata upload left a local marker that would override Desired")
+	}
+}
+
+func TestMetadataProjectionSkipsSupersededMountWrites(t *testing.T) {
+	access := newTestBucketAccess(t)
+	backend := newMetadataMountWriteBackend()
+	_, handle := attachMetadataWriteService(t, access, backend)
+	service := handle.Service
+	service.SetQuietPeriod(24 * time.Hour)
+	ctx := context.Background()
+
+	_, _, pageUpload, err := service.WritePathWithProjection(
+		ctx, "draft.txt", strings.NewReader("page"), 4, metadata.WriteOptions{Origin: "page"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mountWrite := createTempFile(t, access.cacheRoot, "mount-write.txt", "mount")
+	if err := access.stageLocalWrite("draft.txt", mountWrite, int64(len("mount"))); err != nil {
+		t.Fatal(err)
+	}
+	access.projectMetadataUpload(pageUpload, false)
+	if marker, ok := access.cache.localFile("draft.txt"); !ok || marker.localPath != mountWrite {
+		t.Fatalf("late page upload projection cleared newer mount marker: %+v ok=%t", marker, ok)
+	}
+
+	pageDelete, err := service.DeletePathWithProjection(ctx, "draft.txt", metadata.WriteOptions{Origin: "page"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mountRecreate := createTempFile(t, access.cacheRoot, "mount-recreate.txt", "newer")
+	if err := access.stageLocalWrite("draft.txt", mountRecreate, int64(len("newer"))); err != nil {
+		t.Fatal(err)
+	}
+	access.projectMetadataDelete(pageDelete, false)
+	if access.cache.isMarkedDeleted("draft.txt") {
+		t.Fatal("late page delete projection tombstoned a newer mount write")
+	}
+	if marker, ok := access.cache.localFile("draft.txt"); !ok || marker.localPath != mountRecreate {
+		t.Fatalf("late page delete projection cleared newer mount marker: %+v ok=%t", marker, ok)
+	}
+}
+
+func TestDirectoryProjectionSkipsLaterMountChildWrite(t *testing.T) {
+	access := newTestBucketAccess(t)
+	backend := newMetadataMountWriteBackend()
+	_, handle := attachMetadataWriteService(t, access, backend)
+	service := handle.Service
+	service.SetQuietPeriod(24 * time.Hour)
+	ctx := context.Background()
+
+	if _, _, err := service.CreateDirectoryPathWithProjection(
+		ctx, "source", metadata.WriteOptions{Origin: "page"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	target, err := service.RenamePathWithProjection(
+		ctx, "source", "destination", metadata.WriteOptions{Origin: "page"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mountWrite := createTempFile(t, access.cacheRoot, "mount-child.txt", "mount")
+	if err := access.stageLocalWrite("destination/existing.txt", mountWrite, int64(len("mount"))); err != nil {
+		t.Fatal(err)
+	}
+
+	access.projectMetadataRename("source", target, true)
+	if marker, ok := access.cache.localFile("destination/existing.txt"); !ok || marker.localPath != mountWrite {
+		t.Fatalf("late directory projection cleared newer child marker: %+v ok=%t", marker, ok)
 	}
 }

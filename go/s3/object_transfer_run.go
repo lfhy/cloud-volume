@@ -17,6 +17,7 @@ func beginObjectTransferTask(
 	parent context.Context,
 	taskID,
 	kind,
+	profileID,
 	bucket,
 	sourceKey,
 	targetKey string,
@@ -30,6 +31,7 @@ func beginObjectTransferTask(
 	}
 	ctx, cancel := context.WithCancel(parent)
 	startTransfer(taskID, kind, bucket, sourceKey, "", totalBytes, cancel)
+	SetTransferProfile(taskID, profileID)
 	setTransferTarget(taskID, targetKey)
 	return ctx, objectTransferTask{id: taskID}
 }

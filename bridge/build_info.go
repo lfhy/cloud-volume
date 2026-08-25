@@ -5,8 +5,8 @@ import "runtime"
 var buildArch = ""
 
 type buildInfoResult struct {
-	BuildArch string `json:"buildArch"`
-	RuntimeOS string `json:"runtimeOS"`
+	BuildArch   string `json:"buildArch"`
+	RuntimeOS   string `json:"runtimeOS"`
 	RuntimeArch string `json:"runtimeArch"`
 }
 

@@ -31,6 +31,11 @@ func listObjectPage(args json.RawMessage) (any, error) {
 	if err := decodeArgs(args, &input); err != nil {
 		return nil, err
 	}
+	// Profile-scoped pages use their durable metadata namespace without touching
+	// a mount session. Legacy profiles retain the old mounted/direct fallback.
+	if page, handled, err := metadataListFunc(input); handled || err != nil {
+		return page, err
+	}
 	if input.ForceRefresh {
 		bucketmount.InvalidateListCacheForPrefix(input.Config, input.Bucket, input.Prefix)
 	}

@@ -262,7 +262,7 @@ extension _FileManagerPagePreview on _FileManagerPageState {
       waitingText: action.waitingText,
       doneTitle: action.doneTitle,
       doneText: action.doneText,
-      task: task,
+      taskId: task == null ? null : 'transfer:${task.id}',
       errorText: errorText,
     );
   }
@@ -276,7 +276,7 @@ extension _FileManagerPagePreview on _FileManagerPageState {
       waitingText: action.waitingText,
       doneTitle: action.doneTitle,
       doneText: action.doneText,
-      task: task,
+      taskId: task == null ? null : 'transfer:${task.id}',
       done: true,
     );
   }

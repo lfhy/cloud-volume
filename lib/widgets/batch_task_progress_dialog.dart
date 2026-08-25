@@ -1,13 +1,17 @@
 // Batch task progress dialog keeps multi-item operations visible while they run.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:remote_storage/state/transfer_queue.dart';
+import 'package:remote_storage/models/remote_task.dart';
+import 'package:remote_storage/models/remote_task_display.dart';
+import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/utils/bridge_error_text.dart';
 import 'package:remote_storage/utils/transfer_format.dart';
 import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:remote_storage/widgets/batch_task_progress_mode.dart';
-import 'package:remote_storage/widgets/transfer_task_widgets.dart';
+import 'package:remote_storage/widgets/remote_task_widgets.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 class BatchTaskProgressDialog extends StatelessWidget {
@@ -29,37 +33,48 @@ class BatchTaskProgressDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: TransferQueue.instance,
+      animation: RemoteTaskStore.instance,
       builder: (context, _) {
-        final queue = TransferQueue.instance;
-        final tasks = queue.tasks
-            .where((task) => taskIds.contains(task.id))
-            .toList(growable: false);
-        final finishedCount = tasks.where((task) => task.isFinished).length;
+        final ids = taskIds.map(_remoteTaskID).toSet();
+        final tasksById = <String, RemoteTask>{};
+        for (final task in RemoteTaskStore.instance.tasks) {
+          if (ids.contains(task.id)) tasksById[task.id] = task;
+        }
+        for (final id in ids) {
+          final task = RemoteTaskStore.instance.executionTask(id);
+          if (task != null) tasksById[id] = task;
+        }
+        final tasks = tasksById.values.toList(growable: false);
+        final canCancel = tasks.any((task) => task.cancelable);
+        final finishedCount = tasks
+            .where((task) => !task.status.isActive)
+            .length;
         final failedCount = tasks
-            .where((task) => task.status == TransferStatus.failed)
+            .where((task) => task.status == RemoteTaskStatus.failed)
             .length;
         final activeCount = tasks.length - finishedCount;
         final allFinished = tasks.isNotEmpty && activeCount == 0;
         final totalBytes = tasks.fold<int>(
           0,
-          (sum, task) => task.totalBytes > 0 ? sum + task.totalBytes : sum,
+          (sum, task) => task.progress.totalBytes > 0
+              ? sum + task.progress.totalBytes
+              : sum,
         );
         final completedBytes = tasks.fold<int>(
           0,
-          (sum, task) => sum + task.bytesCompleted,
+          (sum, task) => sum + task.progress.bytesCompleted,
         );
         final totalSpeed = tasks.fold<double>(
           0,
-          (sum, task) => sum + task.speedBytes,
+          (sum, task) => sum + task.progress.speedBytes,
         );
         final totalItems = tasks.fold<int>(
           0,
-          (sum, task) => sum + task.totalItems,
+          (sum, task) => sum + task.progress.totalItems,
         );
         final completedItems = tasks.fold<int>(
           0,
-          (sum, task) => sum + task.itemsCompleted,
+          (sum, task) => sum + task.progress.itemsCompleted,
         );
         final progress = totalItems > 0
             ? (completedItems / totalItems).clamp(0.0, 1.0)
@@ -126,11 +141,12 @@ class BatchTaskProgressDialog extends StatelessWidget {
                             child: const Text('关闭'),
                           )
                         else ...[
-                          ShadButton.destructive(
-                            onPressed: () => _cancelActiveTasks(tasks),
-                            child: Text(resolvedMode.cancelLabel),
-                          ),
-                          const SizedBox(width: 10),
+                          if (canCancel)
+                            ShadButton.destructive(
+                              onPressed: () => _cancelActiveTasks(tasks),
+                              child: Text(resolvedMode.cancelLabel),
+                            ),
+                          if (canCancel) const SizedBox(width: 10),
                           ShadButton(
                             onPressed: onRunInBackground,
                             child: const Text('后台运行'),
@@ -148,14 +164,15 @@ class BatchTaskProgressDialog extends StatelessWidget {
     );
   }
 
-  void _cancelActiveTasks(List<TransferTask> tasks) {
-    for (final task in tasks.where((task) => task.isCancelable)) {
-      TransferQueue.instance.cancelTask(task.id);
+  void _cancelActiveTasks(List<RemoteTask> tasks) {
+    for (final task in tasks.where((task) => task.cancelable)) {
+      unawaited(RemoteTaskStore.instance.cancel(task.id));
     }
   }
 
-  BatchTaskProgressMode _modeForTasks(List<TransferTask> tasks) {
-    if (tasks.isNotEmpty && tasks.every((task) => task.isDelete)) {
+  BatchTaskProgressMode _modeForTasks(List<RemoteTask> tasks) {
+    if (tasks.isNotEmpty &&
+        tasks.every((task) => task.kind == RemoteTaskKind.delete)) {
       return BatchTaskProgressMode.delete;
     }
     return BatchTaskProgressMode.upload;
@@ -301,10 +318,15 @@ class _SummaryCard extends StatelessWidget {
   }
 }
 
+String _remoteTaskID(String id) {
+  if (id.startsWith('transfer:') || id.startsWith('sync:')) return id;
+  return 'transfer:$id';
+}
+
 class _TaskList extends StatelessWidget {
   const _TaskList({required this.tasks, required this.mode});
 
-  final List<TransferTask> tasks;
+  final List<RemoteTask> tasks;
   final BatchTaskProgressMode mode;
 
   @override
@@ -339,7 +361,7 @@ class _TaskList extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        task.displayName,
+                        task.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -371,15 +393,12 @@ class _TaskList extends StatelessWidget {
                           ),
                         ),
                       ],
-                      if (task.currentFileTotalBytes > 0) ...[
+                      if (task.progress.totalBytes > 0) ...[
                         const SizedBox(height: 8),
                         ClipRRect(
                           borderRadius: BorderRadius.circular(999),
                           child: LinearProgressIndicator(
-                            value:
-                                (task.currentFileBytesCompleted /
-                                        task.currentFileTotalBytes)
-                                    .clamp(0.0, 1.0),
+                            value: task.progress.fraction,
                             minHeight: 5,
                             backgroundColor: theme.colorScheme.muted,
                             valueColor: AlwaysStoppedAnimation<Color>(
@@ -392,8 +411,8 @@ class _TaskList extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 12),
-                TransferStatusBadge(task: task, showSpeed: false),
-                if (task.isCancelable) ...[
+                RemoteTaskStatusBadge(task: task),
+                if (task.cancelable) ...[
                   const SizedBox(width: 8),
                   ShadIconButton.ghost(
                     icon: Icon(
@@ -403,7 +422,8 @@ class _TaskList extends StatelessWidget {
                     width: 30,
                     height: 30,
                     iconSize: 16,
-                    onPressed: () => TransferQueue.instance.cancelTask(task.id),
+                    onPressed: () =>
+                        unawaited(RemoteTaskStore.instance.cancel(task.id)),
                   ),
                 ],
               ],
@@ -414,48 +434,54 @@ class _TaskList extends StatelessWidget {
     );
   }
 
-  String _subtitleFor(TransferTask task) {
-    final parts = <String>[task.key];
-    if (task.statusDetail == 'selecting_path') {
+  String _subtitleFor(RemoteTask task) {
+    final parts = <String>[
+      if (task.operationPath.isNotEmpty) task.operationPath,
+      if (task.localPath.isNotEmpty) '本地：${task.localPath}',
+    ];
+    if (task.phaseDetail == 'selecting_path') {
       parts.add('等待选择保存位置');
     }
-    final isDeleteSweep = task.isDelete && task.statusDetail == 'deleting';
+    final isDeleteSweep =
+        task.kind == RemoteTaskKind.delete && task.phaseDetail == 'deleting';
     if (isDeleteSweep) {
       parts.add('正在删除源对象');
     }
-    if (task.totalItems > 0) {
+    if (task.progress.totalItems > 0) {
       // Multi-phase sweeps restart the item bar per phase, so completed can
       // briefly exceed the running total; clamp to avoid "2N / N" labels.
-      final completed = task.itemsCompleted > task.totalItems
-          ? task.totalItems
-          : task.itemsCompleted;
-      parts.add('$completed / ${task.totalItems} 个对象');
-    } else if (task.statusDetail == 'scanning') {
+      final completed = task.progress.itemsCompleted > task.progress.totalItems
+          ? task.progress.totalItems
+          : task.progress.itemsCompleted;
+      parts.add('$completed / ${task.progress.totalItems} 个对象');
+    } else if (task.phaseDetail == 'scanning') {
       parts.add('正在扫描文件');
     }
-    if (task.totalBytes > 0) {
-      parts.add(formatBytes(task.totalBytes));
+    if (task.progress.totalBytes > 0) {
+      parts.add(formatBytes(task.progress.totalBytes));
     }
-    if (task.currentFileKey.isNotEmpty) {
-      final currentBytes = task.currentFileTotalBytes > 0
-          ? '${formatBytes(task.currentFileBytesCompleted)} / ${formatBytes(task.currentFileTotalBytes)}'
+    if (task.progress.currentKey.isNotEmpty) {
+      final currentBytes = task.progress.totalBytes > 0
+          ? '${formatBytes(task.progress.bytesCompleted)} / ${formatBytes(task.progress.totalBytes)}'
           : '';
       parts.add(
         currentBytes.isEmpty
-            ? '当前文件 ${task.currentFileKey}'
-            : '当前文件 ${task.currentFileKey}  $currentBytes',
+            ? '当前文件 ${task.progress.currentKey}'
+            : '当前文件 ${task.progress.currentKey}  $currentBytes',
       );
-    } else if (task.progressTargetLabel.isNotEmpty) {
-      parts.add(task.progressTargetLabel);
+    } else if (task.mountReadRange.isNotEmpty) {
+      parts.add('读取范围 ${task.mountReadRange}');
+    } else if (task.targetPath.isNotEmpty) {
+      parts.add(task.targetPath);
     }
     return parts.join('  ·  ');
   }
 
-  String _errorTextFor(TransferTask task) {
-    if (task.status != TransferStatus.failed) {
+  String _errorTextFor(RemoteTask task) {
+    if (task.status != RemoteTaskStatus.failed) {
       return '';
     }
-    final raw = task.error?.trim() ?? '';
+    final raw = task.error.trim();
     if (raw.isEmpty) {
       return '失败原因未返回，请查看 bridge 日志。';
     }

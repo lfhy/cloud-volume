@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	storageconfig "remote-storage/go/config"
+	"remote-storage/go/mount/metadata"
 	s3ops "remote-storage/go/s3"
 )
 
@@ -52,16 +54,30 @@ func LocalPeerContentPath(
 		return source.path, source.info.Size, true
 	}
 	globalManager.mu.Lock()
-	defer globalManager.mu.Unlock()
 	trimmedBucket := normalizeBucketName(bucket)
 	session, ok := globalManager.sessions[trimmedBucket]
 	if !ok || session.access == nil || !mountSessionMatches(session, cfg, trimmedBucket, MountOptions{}) {
+		globalManager.mu.Unlock()
 		return "", 0, false
 	}
 	access := session.access
+	globalManager.mu.Unlock()
+	// Stat outside the manager lock: ancestor materialization may perform real
+	// provider I/O, and holding the global lock would block mount/unmount calls.
+	statCtx, statCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer statCancel()
+	// P2P content is a confirmed-remote acceleration path. A metadata pending
+	// inode may have an old provider ETag in its ObjectInfo, but its bytes are
+	// still local Desired data and must never be advertised as remote content.
+	if access.metadataService() != nil {
+		item, err := access.metadataStat(statCtx, virtualPath)
+		if err != nil || item.state != metadata.StateSynced {
+			return "", 0, false
+		}
+	}
 	info, ok := access.cache.cachedObject(virtualPath)
 	if ok && !info.IsDir && peerContentVersionHint(info) == versionHint {
-		if path, ok := access.localReadablePath(virtualPath, info); ok {
+		if path, ok := access.localReadablePath(statCtx, virtualPath, info); ok {
 			return path, info.Size, true
 		}
 	}
@@ -69,7 +85,7 @@ func LocalPeerContentPath(
 	// valid for peer service through its persistent remote-version stamp.
 	path := access.cachePathFor(cleanVirtualPath(virtualPath))
 	stamp, ok := loadDownloadStamp(path)
-	if !ok || peerContentVersionHint(s3ops.ObjectInfo{
+	if !ok || stamp.MetadataInode != 0 || stamp.MetadataGeneration != 0 || peerContentVersionHint(s3ops.ObjectInfo{
 		Size: stamp.Size, LastModified: stamp.LastModified, ETag: stamp.ETag,
 	}) != versionHint || !isUsableLocalFile(path, stamp.Size) {
 		return "", 0, false

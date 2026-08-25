@@ -101,6 +101,9 @@ func (o *localMountOverlay) handles(virtualPath string) bool {
 			return true
 		}
 	}
+	if isFinderCopyTempPath(virtualPath) {
+		return true
+	}
 	return isLocalMetadataPath(virtualPath)
 }
 

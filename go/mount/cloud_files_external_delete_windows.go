@@ -109,6 +109,9 @@ func (b *windowsCloudFilesBackend) createExternalPlaceholder(
 		return fmt.Errorf("stat upload placeholder parent: %w", err)
 	}
 	item := cloudFilesPlaceholderInfo(info)
+	if metadataItem, metadataErr := session.access.metadataStat(context.Background(), clean); metadataErr == nil {
+		item = cloudFilesMetadataPlaceholderInfo(metadataItem, session.access.metadataNamespaceID())
+	}
 	item.RelativePath = filepath.Base(localPath)
 	watcher.RememberPlaceholders(baseDir, []cloudPlaceholderInfo{item})
 	if err := provider.CreatePlaceholders(baseDir, []cloudPlaceholderInfo{item}); err != nil {

@@ -4,10 +4,12 @@
 package mount
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -56,11 +58,215 @@ func TestFindMountedWebDAVPathAcceptsExactURLMatch(t *testing.T) {
 func TestMountWebDAVRejectsEmptyMountPath(t *testing.T) {
 	t.Parallel()
 
-	if _, err := mountWebDAV("http://127.0.0.1:65075/云卷-测试/", ""); err == nil {
+	if _, err := mountWebDAV("http://127.0.0.1:65075/云卷-测试/", "", "云卷-测试"); err == nil {
 		t.Fatal("expected mountWebDAV to reject an empty mount path")
 	}
-	if _, err := mountWebDAV("http://127.0.0.1:65075/云卷-测试/", "   "); err == nil {
+	if _, err := mountWebDAV("http://127.0.0.1:65075/云卷-测试/", "   ", "云卷-测试"); err == nil {
 		t.Fatal("expected mountWebDAV to reject a whitespace-only mount path")
+	}
+}
+
+func TestMountWebDAVWaitsForCommandCompletion(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	oldExecute := executeMountWebDAV
+	oldWait := waitMountedWebDAV
+	executeMountWebDAV = func(_ time.Duration, _ string, _ string, _ ...string) ([]byte, error) {
+		close(started)
+		<-release
+		return []byte("mounted"), nil
+	}
+	waitMountedWebDAV = func(_, requested string, _ time.Duration) (string, error) {
+		return requested, nil
+	}
+	t.Cleanup(func() {
+		executeMountWebDAV = oldExecute
+		waitMountedWebDAV = oldWait
+	})
+
+	result := make(chan struct {
+		path string
+		err  error
+	}, 1)
+	go func() {
+		path, err := mountWebDAV(
+			"http://127.0.0.1:65075/云卷-测试/",
+			filepath.Join(t.TempDir(), "mount"),
+			"云卷-测试",
+		)
+		result <- struct {
+			path string
+			err  error
+		}{path: path, err: err}
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("mount command did not start")
+	}
+	select {
+	case <-result:
+		t.Fatal("mount returned before the command completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case got := <-result:
+		if got.err != nil {
+			t.Fatalf("mountWebDAV: %v", got.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("mount did not return after the command completed")
+	}
+}
+
+func TestMountWebDAVUsesNonInteractiveCommand(t *testing.T) {
+	var gotArgs []string
+	oldExecute := executeMountWebDAV
+	oldWait := waitMountedWebDAV
+	executeMountWebDAV = func(_ time.Duration, _ string, _ string, args ...string) ([]byte, error) {
+		gotArgs = append([]string(nil), args...)
+		return nil, nil
+	}
+	waitMountedWebDAV = func(_, requested string, _ time.Duration) (string, error) {
+		return requested, nil
+	}
+	t.Cleanup(func() {
+		executeMountWebDAV = oldExecute
+		waitMountedWebDAV = oldWait
+	})
+
+	path := filepath.Join(t.TempDir(), "mount")
+	if _, err := mountWebDAV("http://127.0.0.1:65075/云卷-测试/", path, "云卷-测试"); err != nil {
+		t.Fatalf("mountWebDAV: %v", err)
+	}
+	want := []string{"-S", "-v", "云卷-测试", "http://127.0.0.1:65075/云卷-测试/", path}
+	if len(gotArgs) != len(want) {
+		t.Fatalf("mount args = %q, want %q", gotArgs, want)
+	}
+	for i := range want {
+		if gotArgs[i] != want[i] {
+			t.Fatalf("mount args = %q, want %q", gotArgs, want)
+		}
+	}
+}
+
+func TestMountWebDAVTimeoutDoesNotRecoverMountTableEntry(t *testing.T) {
+	oldExecute := executeMountWebDAV
+	oldProbe := probeMountedWebDAV
+	oldUnmount := executeUnmountWebDAV
+	var unmounted string
+	executeMountWebDAV = func(_ time.Duration, _ string, _ string, _ ...string) ([]byte, error) {
+		return []byte("late"), errors.New("mount command timed out")
+	}
+	probeMountedWebDAV = func(_, requested string) string { return requested }
+	executeUnmountWebDAV = func(path string) error {
+		unmounted = path
+		return nil
+	}
+	t.Cleanup(func() {
+		executeMountWebDAV = oldExecute
+		probeMountedWebDAV = oldProbe
+		executeUnmountWebDAV = oldUnmount
+	})
+
+	path := filepath.Join(t.TempDir(), "mount")
+	if _, err := mountWebDAV("http://127.0.0.1:65075/云卷-测试/", path, "云卷-测试"); err == nil {
+		t.Fatal("expected timeout to fail instead of recovering the mount-table row")
+	}
+	if unmounted != path {
+		t.Fatalf("cleanup unmounted %q, want %q", unmounted, path)
+	}
+}
+
+func TestSessionStartBindsFallbackTargetBeforeFailedMountCleanup(t *testing.T) {
+	access := newTestBucketAccess(t)
+	const fallback = "/tmp/cloud-volume-fallback"
+	oldPrepare := prepareMountPath
+	oldExecute := executeMountWebDAV
+	oldProbe := probeMountedWebDAV
+	oldUnmount := executeUnmountWebDAV
+	var unmounted string
+	prepareMountPath = func(string) (string, error) { return fallback, nil }
+	executeMountWebDAV = func(_ time.Duration, _ string, _ string, _ ...string) ([]byte, error) {
+		return nil, errors.New("injected mount failure")
+	}
+	probeMountedWebDAV = func(_, requested string) string {
+		if requested != fallback {
+			t.Fatalf("cleanup probed %q, want fallback %q", requested, fallback)
+		}
+		return requested
+	}
+	executeUnmountWebDAV = func(path string) error {
+		unmounted = path
+		return nil
+	}
+	t.Cleanup(func() {
+		prepareMountPath = oldPrepare
+		executeMountWebDAV = oldExecute
+		probeMountedWebDAV = oldProbe
+		executeUnmountWebDAV = oldUnmount
+	})
+
+	session := &mountSession{
+		access:    access,
+		bucket:    "test-bucket",
+		mountName: "云卷-test-bucket",
+		mountPath: "/Volumes/云卷-test-bucket",
+	}
+	if err := session.start(); err == nil {
+		t.Fatal("start unexpectedly succeeded")
+	}
+	if session.mountPath != fallback || session.mountTarget != fallback {
+		t.Fatalf("failed start retained path=%q target=%q, want fallback %q", session.mountPath, session.mountTarget, fallback)
+	}
+	if unmounted != fallback {
+		t.Fatalf("cleanup unmounted %q, want fallback %q", unmounted, fallback)
+	}
+	if session.server != nil {
+		_ = session.server.stop()
+	}
+}
+
+func TestWaitForMountedWebDAVPathWaitsForExactRegistration(t *testing.T) {
+	oldProbe := probeMountedWebDAV
+	calls := 0
+	probeMountedWebDAV = func(_, requested string) string {
+		calls++
+		if calls < 3 {
+			return ""
+		}
+		return requested
+	}
+	t.Cleanup(func() { probeMountedWebDAV = oldProbe })
+
+	path, err := waitForMountedWebDAVPath("http://127.0.0.1:65075/volume/", "/tmp/mount", time.Second)
+	if err != nil {
+		t.Fatalf("waitForMountedWebDAVPath: %v", err)
+	}
+	if path != "/tmp/mount" || calls != 3 {
+		t.Fatalf("wait result path=%q calls=%d, want /tmp/mount after 3 probes", path, calls)
+	}
+}
+
+func TestMacOSUserMountPath(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := macOSUserMountPath("/Volumes/云卷-测试")
+	want := filepath.Join(home, "云卷", "云卷-测试")
+	if got != want {
+		t.Fatalf("fallback path = %q; want %q", got, want)
+	}
+}
+
+func TestIsManagedMacOSMountPath(t *testing.T) {
+	if !isManagedMacOSMountPath("/Volumes/云卷-测试") {
+		t.Fatal("default managed path was not recognized")
+	}
+	if isManagedMacOSMountPath("/Volumes/custom") {
+		t.Fatal("custom /Volumes path was treated as managed")
 	}
 }
 
@@ -76,6 +282,22 @@ func TestFindMountedWebDAVPathMatchesRequestedPathByURL(t *testing.T) {
 	)
 	if got != "/tmp/cloud-volume" {
 		t.Fatalf("recovered requested path = %q", got)
+	}
+}
+
+func TestFindMountedWebDAVPathResolvesPrivateVarAlias(t *testing.T) {
+	t.Parallel()
+
+	got := findMountedWebDAVPath(
+		"http://127.0.0.1:60250/volume/",
+		"/var/folders",
+		[]mountEntry{{
+			SourceURL: "http://127.0.0.1:60250/volume/",
+			Path:      "/private/var/folders",
+		}},
+	)
+	if got != "/var/folders" {
+		t.Fatalf("resolved mount path = %q; want requested path", got)
 	}
 }
 
@@ -190,9 +412,155 @@ func TestStopKeepsWebDAVAliveWhenUnmountFails(t *testing.T) {
 	}
 	_ = response.Body.Close()
 }
-func TestOpenMountPathReturnsBeforeFinderStatfs(t *testing.T) {
-	t.Parallel()
 
+func TestStopFailedAttemptDoesNotUnmountDifferentVolume(t *testing.T) {
+	oldProbe := probeMountedWebDAV
+	oldUnmount := executeUnmountWebDAV
+	probeMountedWebDAV = func(_, _ string) string { return "" }
+	executeUnmountWebDAV = func(string) error {
+		t.Fatal("attempt cleanup tried to unmount a non-matching volume")
+		return nil
+	}
+	t.Cleanup(func() {
+		probeMountedWebDAV = oldProbe
+		executeUnmountWebDAV = oldUnmount
+	})
+
+	session := &mountSession{
+		mountAttempted: true,
+		mountTarget:    "/tmp/shared-mount-path",
+		serverURL:      "http://127.0.0.1:65075/volume/",
+	}
+	if err := session.stop(); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if session.mountAttempted {
+		t.Fatal("stop left failed mount attempt active")
+	}
+}
+
+func TestUnconfirmedAttemptDoesNotPromoteDifferentURLMount(t *testing.T) {
+	oldExact := probeExactWebDAVMountActive
+	oldPath := probePathWebDAVMountActive
+	oldMounted := probeMountedWebDAV
+	exactCalls := 0
+	pathCalls := 0
+	probeExactWebDAVMountActive = func(serverURL, mountPath string) (bool, error) {
+		exactCalls++
+		if serverURL != "http://127.0.0.1:65075/ours/" || mountPath != "/tmp/shared-mount-path" {
+			t.Fatalf("exact probe got url=%q path=%q", serverURL, mountPath)
+		}
+		return false, nil // A different URL owns this same mount path.
+	}
+	probePathWebDAVMountActive = func(string) (bool, error) {
+		pathCalls++
+		return true, nil
+	}
+	probeMountedWebDAV = func(_, _ string) string { return "" }
+	t.Cleanup(func() {
+		probeExactWebDAVMountActive = oldExact
+		probePathWebDAVMountActive = oldPath
+		probeMountedWebDAV = oldMounted
+	})
+
+	session := &mountSession{
+		mountAttempted: true,
+		mountTarget:    "/tmp/shared-mount-path",
+		serverURL:      "http://127.0.0.1:65075/ours/",
+		backend:        &macOSWebDAVBackend{},
+	}
+	manager := &manager{lastProbes: make(map[string]mountProbeSnapshot)}
+	if manager.syncSessionLocked(session) {
+		t.Fatal("different URL mount was promoted as this attempt")
+	}
+	if session.mounted || exactCalls != 1 || pathCalls != 0 {
+		t.Fatalf("mounted=%t exact_calls=%d path_calls=%d", session.mounted, exactCalls, pathCalls)
+	}
+}
+
+func TestStopDrainsWritebackBeforeUnmount(t *testing.T) {
+	access := newTestBucketAccess(t)
+	access.transferTimeout = time.Second
+	var order []string
+	oldDrain := drainMacOSWriteback
+	oldProbe := probeWebDAVMountActive
+	oldUnmount := executeUnmountWebDAV
+	drainMacOSWriteback = func(_ context.Context, _ *bucketAccess) error {
+		order = append(order, "drain")
+		return nil
+	}
+	probeWebDAVMountActive = func(string) (bool, error) {
+		order = append(order, "probe")
+		return true, nil
+	}
+	executeUnmountWebDAV = func(string) error {
+		order = append(order, "unmount")
+		return nil
+	}
+	t.Cleanup(func() {
+		drainMacOSWriteback = oldDrain
+		probeWebDAVMountActive = oldProbe
+		executeUnmountWebDAV = oldUnmount
+	})
+
+	session := &mountSession{
+		bucket:      "test-bucket",
+		mounted:     true,
+		stopping:    true,
+		mountTarget: "/Volumes/云卷-test",
+		access:      access,
+	}
+	if err := session.stop(); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if got, want := len(order), 3; got != want ||
+		order[0] != "drain" || order[1] != "probe" || order[2] != "unmount" {
+		t.Fatalf("unexpected stop order: %v", order)
+	}
+}
+
+func TestStopKeepsMountWhenWritebackDrainTimesOut(t *testing.T) {
+	access := newTestBucketAccess(t)
+	access.transferTimeout = 10 * time.Millisecond
+	oldDrain := drainMacOSWriteback
+	oldProbe := probeWebDAVMountActive
+	drainMacOSWriteback = func(ctx context.Context, _ *bucketAccess) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	probeWebDAVMountActive = func(string) (bool, error) {
+		t.Fatal("unmount probe ran after drain timeout")
+		return false, nil
+	}
+	t.Cleanup(func() {
+		drainMacOSWriteback = oldDrain
+		probeWebDAVMountActive = oldProbe
+	})
+
+	session := &mountSession{
+		bucket:      "test-bucket",
+		mounted:     true,
+		stopping:    true,
+		mountTarget: "/Volumes/云卷-test",
+		access:      access,
+	}
+	if err := session.stop(); err == nil {
+		t.Fatal("stop unexpectedly succeeded after drain timeout")
+	}
+	if !session.mounted || session.stopping || session.access == nil {
+		t.Fatal("drain timeout did not preserve the live mount for retry")
+	}
+	if session.lastError == "" {
+		t.Fatal("drain timeout was not surfaced through mount status")
+	}
+}
+
+func TestOpenMountPathReturnsBeforeFinderStatfs(t *testing.T) {
+	oldLaunchFinder := launchFinder
+	launchFinder = func(path string) {
+		macOSMountOpenGate.finish(filepath.Clean(path))
+	}
+	t.Cleanup(func() { launchFinder = oldLaunchFinder })
 	dir := t.TempDir()
 	startedAt := time.Now()
 	if err := openMountPath(dir); err != nil {

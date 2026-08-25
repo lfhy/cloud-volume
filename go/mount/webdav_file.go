@@ -61,14 +61,16 @@ func newReadableWebDAVFile(
 	virtualPath string,
 ) (*readableWebDAVFile, error) {
 	if virtualPath == "" {
-		return newDirectoryHandle(access, ""), nil
+		// Root stat has no durable source; a fixed zero time keeps Finder from
+		// seeing the root mtime jump on every refresh.
+		return newDirectoryHandle(access, "", s3ops.ObjectInfo{Key: "", IsDir: true}), nil
 	}
 	info, err := access.statPath(ctx, virtualPath)
 	if err != nil {
 		return nil, pathError("open", virtualPath, err)
 	}
-	if info.IsDir {
-		return newDirectoryHandle(access, virtualPath), nil
+	if info.IsDir { // parent directory open
+		return newDirectoryHandle(access, virtualPath, info), nil
 	}
 
 	readable := &readableWebDAVFile{
@@ -78,7 +80,7 @@ func newReadableWebDAVFile(
 		info:       fileInfoFromObject(info),
 		objectInfo: info,
 	}
-	if localPath, ok := access.localReadablePath(virtualPath, info); ok {
+	if localPath, ok := access.localReadablePath(ctx, virtualPath, info); ok {
 		file, fileErr := os.Open(localPath)
 		if fileErr == nil {
 			readable.file = file
@@ -161,18 +163,14 @@ func seedWritableTempFile(
 	return err
 }
 
-func newDirectoryHandle(access *bucketAccess, virtualPath string) *readableWebDAVFile {
+func newDirectoryHandle(access *bucketAccess, virtualPath string, info s3ops.ObjectInfo) *readableWebDAVFile {
 	return &readableWebDAVFile{
 		ctx:    context.Background(),
 		access: access,
 		path:   virtualPath,
-		info: virtualFileInfo{
-			name:    baseName(virtualPath),
-			size:    0,
-			mode:    fs.ModeDir | 0o755,
-			modTime: time.Now(),
-			isDir:   true,
-		},
+		// Directory mtimes must be stable across PROPFIND refreshes; an
+		// ever-changing timestamp makes Finder treat the folder as modified.
+		info:     fileInfoFromObject(info),
 		dirInfos: nil,
 	}
 }
@@ -302,6 +300,9 @@ func (f *readableWebDAVFile) startTransferTask() {
 		f.objectInfo.Size,
 		transferCancel,
 	)
+	// The Web task API scopes runtime snapshots to the active profile. A mounted
+	// read is no exception: its range is physical progress for this account.
+	s3ops.SetTransferProfile(taskID, f.access.config.ProfileID)
 	s3ops.SetTransferStatusDetail(taskID, "mount_read")
 	s3ops.SetTransferTarget(taskID, "等待范围请求")
 }
@@ -381,9 +382,7 @@ func (f *writableWebDAVFile) Close() error {
 	if err := os.Rename(f.tempPath, cachePath); err != nil {
 		return err
 	}
-	f.access.registerLocalWrite(f.virtualKey, cachePath, fileSize(cachePath))
-	f.access.scheduleUpload(f.virtualKey, cachePath)
-	return nil
+	return f.access.stageLocalWrite(f.virtualKey, cachePath, fileSize(cachePath))
 }
 
 func (f *writableWebDAVFile) Read([]byte) (int, error) {
@@ -418,8 +417,12 @@ func fileInfoFromObject(info s3ops.ObjectInfo) os.FileInfo {
 		name = baseName(info.Key)
 	}
 	modTime := time.Now()
-	if parsed, err := time.Parse("2006-01-02 15:04:05", info.LastModified); err == nil {
+	if parsed, err := parseObjectLastModified(info.LastModified); err == nil {
 		modTime = parsed
+	} else if info.IsDir {
+		// Directory marker listings often omit LastModified. A moving fallback
+		// makes Finder report the folder as modified on every PROPFIND.
+		modTime = time.Unix(0, 0)
 	}
 	mode := fs.FileMode(0o644)
 	if info.IsDir {

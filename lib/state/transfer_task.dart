@@ -28,6 +28,7 @@ class TransferTask {
     this.currentFileTotalBytes = 0,
     this.speedBytes = 0,
     this.rawType = '',
+    this.publishRemoteTask = true,
     this.error,
   });
 
@@ -52,6 +53,7 @@ class TransferTask {
           (json['currentFileBytesCompleted'] ?? 0) as int,
       currentFileTotalBytes: (json['currentFileTotalBytes'] ?? 0) as int,
       speedBytes: (json['speedBytes'] ?? 0).toDouble(),
+      publishRemoteTask: json['publishRemoteTask'] != false,
       error: json['error']?.toString(),
     );
   }
@@ -73,8 +75,14 @@ class TransferTask {
   int currentFileBytesCompleted;
   int currentFileTotalBytes;
   double speedBytes;
+
   /// 任务的原始 type 字符串（保留 sync_ 前缀用于区分同步任务）。
   String rawType;
+
+  /// Whether this compatibility producer should be projected into the
+  /// unified RemoteTaskStore. Metadata-backed page writes opt out because Go
+  /// owns their durable task projection.
+  final bool publishRemoteTask;
   String? error;
 
   String get displayName {
@@ -120,9 +128,7 @@ class TransferTask {
 
   /// Pending/running user file upload or download (not in-app update).
   bool get isActiveFileTransfer =>
-      (isPending || isRunning) &&
-      !isAppUpdate &&
-      (isUpload || isDownload);
+      (isPending || isRunning) && !isAppUpdate && (isUpload || isDownload);
 
   /// 是否为文件同步产生的任务（原始 type 以 sync_ 开头）。
   bool get isSyncTask => rawType.startsWith('sync_');
@@ -170,6 +176,7 @@ class TransferTask {
       'currentFileTotalBytes': currentFileTotalBytes,
       'speedBytes': speedBytes,
       'rawType': rawType,
+      'publishRemoteTask': publishRemoteTask,
       'error': error,
     };
   }

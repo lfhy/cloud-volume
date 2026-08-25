@@ -5,6 +5,7 @@ package mount
 
 import (
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -14,6 +15,11 @@ import (
 const managedMountPrefix = "云卷-"
 
 type macOSWebDAVBackend struct{}
+
+var (
+	probeExactWebDAVMountActive = isExactWebDAVMountActive
+	probePathWebDAVMountActive  = isWebDAVMountActive
+)
 
 func newPlatformMountBackend(_ storageconfig.RemoteStorageConfig) (mountBackend, error) {
 	return &macOSWebDAVBackend{}, nil
@@ -39,7 +45,13 @@ func (b *macOSWebDAVBackend) Stop(session *mountSession) error {
 }
 
 func (b *macOSWebDAVBackend) IsActive(session *mountSession) (bool, error) {
-	return isWebDAVMountActive(session.mountTarget)
+	if session != nil && session.mountAttempted && !session.mounted {
+		if strings.TrimSpace(session.serverURL) == "" {
+			return false, nil
+		}
+		return probeExactWebDAVMountActive(session.serverURL, session.mountTarget)
+	}
+	return probePathWebDAVMountActive(session.mountTarget)
 }
 
 func (b *macOSWebDAVBackend) CleanupStale(session *mountSession) error {
@@ -78,25 +90,39 @@ func cleanupAllManagedMounts() error {
 }
 
 func matchingBucketMountPaths(paths []string, mountName string) []string {
-	basePath := filepath.Join("/Volumes", mountName)
 	matches := make([]string, 0, len(paths))
 	for _, mountPath := range paths {
 		clean := filepath.Clean(strings.TrimSpace(mountPath))
-		if clean == basePath || strings.HasPrefix(clean, basePath+"-") {
-			matches = append(matches, clean)
+		for _, root := range macOSManagedMountRoots() {
+			basePath := filepath.Join(root, mountName)
+			if clean == basePath || strings.HasPrefix(clean, basePath+"-") {
+				matches = append(matches, clean)
+				break
+			}
 		}
 	}
 	return matches
 }
 
 func matchingManagedMountPaths(paths []string) []string {
-	basePrefix := filepath.Join("/Volumes", managedMountPrefix)
 	matches := make([]string, 0, len(paths))
 	for _, mountPath := range paths {
 		clean := filepath.Clean(strings.TrimSpace(mountPath))
-		if strings.HasPrefix(clean, basePrefix) {
-			matches = append(matches, clean)
+		for _, root := range macOSManagedMountRoots() {
+			basePrefix := filepath.Join(root, managedMountPrefix)
+			if strings.HasPrefix(clean, basePrefix) {
+				matches = append(matches, clean)
+				break
+			}
 		}
 	}
 	return matches
+}
+
+func macOSManagedMountRoots() []string {
+	roots := []string{"/Volumes"}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		roots = append(roots, filepath.Join(home, "云卷"))
+	}
+	return roots
 }

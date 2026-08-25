@@ -136,6 +136,13 @@ func TestSFTPCreateAndDeleteDirectory(t *testing.T) {
 	if err := backend.CreateDirectory(nil, "SFTP", "", "testdir"); err != nil {
 		t.Fatalf("CreateDirectory error: %v", err)
 	}
+	info, err := backend.HeadObject(nil, "SFTP", "testdir")
+	if err != nil {
+		t.Fatalf("HeadObject(testdir) error: %v", err)
+	}
+	if !info.IsDir || info.LastModified == "" {
+		t.Fatalf("directory stat = %+v, want directory with LastModified", info)
+	}
 	page, err := backend.ListObjectsPage(nil, "SFTP", "", "", 200)
 	if err != nil {
 		t.Fatalf("list after mkdir error: %v", err)

@@ -56,6 +56,28 @@ func TestCompleteDownloadUsableRejectsSameSizeSameTimestampETagChange(t *testing
 	}
 }
 
+func TestPromoteConfirmedPendingStampKeepsMaterializedCache(t *testing.T) {
+	root := t.TempDir()
+	localPath := createTempFile(t, root, "cache/object.txt", "hello world")
+	pending := s3ops.ObjectInfo{
+		Key: "object.txt", Size: 11, LastModified: "2026-05-26 22:00:00", ETag: "etag-v1",
+	}
+	if err := writePendingDownloadStamp(localPath, pending, 42, 7); err != nil {
+		t.Fatalf("writePendingDownloadStamp: %v", err)
+	}
+	if isCompleteDownloadUsable(localPath, pending) {
+		t.Fatal("pending stamp unexpectedly matched a confirmed cache")
+	}
+	promoteConfirmedPendingStamp(localPath, pending, 42, 7)
+	if !isCompleteDownloadUsable(localPath, pending) {
+		t.Fatal("confirmed pending cache was not promoted")
+	}
+	stamp, ok := loadDownloadStamp(localPath)
+	if !ok || stamp.MetadataInode != 0 || stamp.MetadataGeneration != 0 {
+		t.Fatalf("promoted stamp still carries metadata identity: %+v ok=%t", stamp, ok)
+	}
+}
+
 func TestReconcileDownloadArtifactsClearsChangedRemoteState(t *testing.T) {
 	t.Parallel()
 

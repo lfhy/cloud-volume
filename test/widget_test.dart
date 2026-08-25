@@ -15,6 +15,7 @@ import 'package:remote_storage/models/bucket_mount_status.dart';
 import 'package:remote_storage/models/cached_file_record.dart';
 import 'package:remote_storage/models/config_backup.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
+import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/models/paged_listings.dart';
 import 'package:remote_storage/models/s3_objects.dart';
 import 'package:remote_storage/models/share_record.dart';
@@ -24,17 +25,20 @@ import 'package:remote_storage/models/transfer_job.dart';
 import 'package:remote_storage/models/sync_profile.dart';
 import 'package:remote_storage/pages/file_manager_page.dart';
 import 'package:remote_storage/state/transfer_queue.dart';
+import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/state/sync_profile_notifier.dart';
 import 'package:remote_storage/widgets/file_manager_breadcrumb_bar.dart';
 
 void main() {
   setUp(() {
     TransferQueue.instance.resetForTest();
+    RemoteTaskStore.instance.resetForTest();
     SyncProfileNotifier.instance.stop();
   });
 
   tearDown(() {
     TransferQueue.instance.resetForTest();
+    RemoteTaskStore.instance.resetForTest();
     SyncProfileNotifier.instance.stop();
   });
 
@@ -50,6 +54,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
     TransferQueue.instance.resetForTest();
+    RemoteTaskStore.instance.resetForTest();
     SyncProfileNotifier.instance.stop();
   });
 
@@ -74,6 +79,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
     TransferQueue.instance.resetForTest();
+    RemoteTaskStore.instance.resetForTest();
     SyncProfileNotifier.instance.stop();
   });
 
@@ -87,6 +93,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
     TransferQueue.instance.resetForTest();
+    RemoteTaskStore.instance.resetForTest();
     SyncProfileNotifier.instance.stop();
   });
 
@@ -167,6 +174,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
     TransferQueue.instance.resetForTest();
+    RemoteTaskStore.instance.resetForTest();
     SyncProfileNotifier.instance.stop();
   });
 
@@ -220,6 +228,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
     TransferQueue.instance.resetForTest();
+    RemoteTaskStore.instance.resetForTest();
     SyncProfileNotifier.instance.stop();
   });
 }
@@ -253,6 +262,37 @@ class _FakeApi implements RemoteStorageGateway {
   int quotaRequestCount = 0;
   final Map<String, RemoteStorageConfig> savedProfiles =
       <String, RemoteStorageConfig>{};
+
+  @override
+  Future<RemoteTaskPage> listRemoteTasks([
+    RemoteTaskFilter filter = const RemoteTaskFilter(),
+  ]) async => const RemoteTaskPage();
+
+  @override
+  Future<RemoteTask> getRemoteTask(String taskId) async =>
+      throw UnsupportedError('任务不可用');
+
+  @override
+  Future<bool> cancelRemoteTask(String taskId) async => false;
+
+  @override
+  Future<bool> retryRemoteTask(String taskId) async => false;
+
+  @override
+  Future<bool> triggerRemoteTask(String taskId) async => false;
+
+  @override
+  Future<int> triggerAllRemoteTasks({
+    String profileId = '',
+    String bucket = '',
+  }) async => 0;
+
+  @override
+  Future<int> clearRemoteTaskHistory({
+    String profileId = '',
+    String bucket = '',
+    List<String> taskIds = const <String>[],
+  }) async => 0;
 
   @override
   Future<BootstrapState> loadBootstrapState() async => BootstrapState(
@@ -387,6 +427,9 @@ class _FakeApi implements RemoteStorageGateway {
 
   @override
   Future<int> cleanupStaleWindowsProcesses() async => 0;
+
+  @override
+  Future<int> sweepOrphanMounts() async => 0;
 
   @override
   Future<List<BucketInfo>> listBuckets(
@@ -529,24 +572,21 @@ class _FakeApi implements RemoteStorageGateway {
   @override
   Future<List<ConfigBackupSnapshot>> listConfigBackupsWithTarget(
     ConfigBackupTarget target,
-  ) async =>
-      throw UnimplementedError();
+  ) async => throw UnimplementedError();
 
   @override
   Future<BootstrapState> restoreConfigBackupWithTarget(
     ConfigBackupTarget target,
     String key, {
     String? password,
-  }) async =>
-      throw UnimplementedError();
+  }) async => throw UnimplementedError();
 
   @override
   Future<bool> verifyBackupPassword(
     ConfigBackupTarget target,
     String key, {
     String? password,
-  }) async =>
-      throw UnimplementedError();
+  }) async => throw UnimplementedError();
 
   @override
   Future<ObjectInfo> headObject(
@@ -600,8 +640,9 @@ class _FakeApi implements RemoteStorageGateway {
     String bucket,
     String key,
     bool isDirectory,
-    String newName,
-  ) async {}
+    String newName, {
+    String taskId = '',
+  }) async {}
 
   @override
   Future<void> copyObject(
@@ -822,5 +863,4 @@ class _FakeApi implements RemoteStorageGateway {
   @override
   Future<void> setP2PEnabled(bool enabled) async =>
       throw UnsupportedError('P2P 不可用');
-
 }

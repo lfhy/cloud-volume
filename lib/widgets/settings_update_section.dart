@@ -1,5 +1,4 @@
 // 更新检查区：在通用设置中展示版本状态，并提供 GitHub 下载页入口。
-
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -10,9 +9,11 @@ import 'package:remote_storage/services/proxy_http_client.dart';
 import 'package:remote_storage/services/platform_asset_matcher.dart';
 import 'package:remote_storage/services/update_settings.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
-import 'package:remote_storage/state/transfer_queue.dart';
+import 'package:remote_storage/models/remote_task.dart';
+import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/widgets/settings_update_mirror_field.dart'
     show SettingsUpdateMirrorField;
+import 'package:remote_storage/widgets/settings_update_task_policy.dart';
 import 'package:remote_storage/widgets/update_status_row.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -52,7 +53,7 @@ class _SettingsUpdateSectionState extends State<SettingsUpdateSection> {
   UpdateNetworkConfig _mirrorConfig = const UpdateNetworkConfig();
   // Compile-time architecture reported by the Go bridge; empty until loaded.
   String _buildArch = '';
-  // Task id of the in-flight app update, used to poll TransferQueue progress.
+  // Task id of the in-flight app update, projected by RemoteTaskStore.
   String? _installTaskId;
 
   @override
@@ -62,7 +63,8 @@ class _SettingsUpdateSectionState extends State<SettingsUpdateSection> {
     _ownsUpdateService = widget.updateService == null;
     _loadMirrorConfig();
     _loadBuildArch();
-    TransferQueue.instance.addListener(_onTransferQueueChanged);
+    if (widget.api != null) RemoteTaskStore.instance.bindApi(widget.api!);
+    RemoteTaskStore.instance.addListener(_onTransferQueueChanged);
   }
 
   /// Prefer the architecture injected into the Go bridge at build time. Falls
@@ -109,27 +111,20 @@ class _SettingsUpdateSectionState extends State<SettingsUpdateSection> {
 
   @override
   void dispose() {
-    TransferQueue.instance.removeListener(_onTransferQueueChanged);
+    RemoteTaskStore.instance.removeListener(_onTransferQueueChanged);
     if (_ownsUpdateService) {
       _updateService.close();
     }
     super.dispose();
   }
 
-  /// TransferQueue listener: when our install task progresses or finishes,
-  /// reflect that in the local UI state.
   void _onTransferQueueChanged() {
     final taskId = _installTaskId;
     if (taskId == null || !_installing) return;
-    final task = TransferQueue.instance.tasks.cast<TransferTask?>().firstWhere(
-      (t) => t?.id == taskId,
-      orElse: () => null,
-    );
+    final task = findAppUpdateTask(RemoteTaskStore.instance.tasks, taskId);
     if (task == null) return;
 
-    if (task.status == TransferStatus.done || task.statusDetail == 'done') {
-      // The Go side will relaunch and exit; reaching here as done means
-      // relaunch already started. Reset on next frame to avoid UI flicker.
+    if (task.status == RemoteTaskStatus.done || task.phaseDetail == 'done') {
       if (mounted) {
         setState(() {
           _installStatusText = '安装完成，正在重启...';
@@ -138,7 +133,7 @@ class _SettingsUpdateSectionState extends State<SettingsUpdateSection> {
       }
       return;
     }
-    if (task.status == TransferStatus.canceled) {
+    if (task.status == RemoteTaskStatus.canceled) {
       if (mounted) {
         setState(() {
           _resetInstallState();
@@ -147,8 +142,10 @@ class _SettingsUpdateSectionState extends State<SettingsUpdateSection> {
       }
       return;
     }
-    if (task.status == TransferStatus.failed) {
-      final errMsg = task.error ?? '更新失败，请重试或前往 GitHub 手动下载。';
+    if (task.status == RemoteTaskStatus.failed) {
+      final errMsg = task.error.isEmpty
+          ? '更新失败，请重试或前往 GitHub 手动下载。'
+          : task.error;
       if (mounted) {
         setState(() {
           _installing = false;
@@ -160,10 +157,9 @@ class _SettingsUpdateSectionState extends State<SettingsUpdateSection> {
       }
       return;
     }
-    // Running: update progress from bytes.
-    final total = task.totalBytes;
-    final received = task.bytesCompleted;
-    final detail = task.statusDetail;
+    final total = task.progress.totalBytes;
+    final received = task.progress.bytesCompleted;
+    final detail = task.phaseDetail;
     if (mounted) {
       setState(() {
         if (total > 0) {
@@ -237,11 +233,6 @@ class _SettingsUpdateSectionState extends State<SettingsUpdateSection> {
     password: widget.config?.proxyPassword ?? '',
   );
 
-  /// Resolves the effective proxy config. When the user selected "follow
-  /// system" mode, Dart's HttpClient only reads http_proxy/https_proxy env
-  /// vars and ignores the Windows Settings manual proxy. On desktop we query
-  /// the bridge for the host-level system proxy so the update check actually
-  /// honors it.
   Future<ProxyConfig> _resolveEffectiveProxy() async {
     final base = _proxyConfig;
     if (base.mode != kProxyModeSystem && base.mode.isNotEmpty) {
@@ -267,9 +258,6 @@ class _SettingsUpdateSectionState extends State<SettingsUpdateSection> {
     return base;
   }
 
-  /// Dispatches the install to the Go bridge. The Go side runs the download +
-  /// install + relaunch in a background goroutine and reports progress through
-  /// the shared TransferQueue, which we listen to in [_onTransferQueueChanged].
   Future<void> _startInstall() async {
     final api = widget.api;
     final result = _result;
@@ -281,7 +269,7 @@ class _SettingsUpdateSectionState extends State<SettingsUpdateSection> {
       return;
     }
 
-    if (TransferQueue.instance.hasActiveFileTransfers) {
+    if (RemoteTaskStore.instance.hasActiveFileTransfers) {
       setState(() {
         _installing = true;
         _installProgress = -1;
@@ -289,7 +277,7 @@ class _SettingsUpdateSectionState extends State<SettingsUpdateSection> {
         _errorText = null;
       });
       await _waitForFileTransfersIdle();
-      if (!mounted) return;
+      if (!mounted || !_installing) return;
     }
 
     setState(() {
@@ -314,7 +302,7 @@ class _SettingsUpdateSectionState extends State<SettingsUpdateSection> {
         _installTaskId = taskId;
         _installStatusText = '正在下载 ${matched.asset.name}...';
       });
-      TransferQueue.instance.pollNow();
+      unawaited(RemoteTaskStore.instance.refresh());
     } catch (error) {
       if (!mounted) return;
       _resetInstallState();
@@ -329,30 +317,31 @@ class _SettingsUpdateSectionState extends State<SettingsUpdateSection> {
     _installStatusText = '';
   }
 
-  /// Blocks until no pending/running upload/download remains in the queue.
   Future<void> _waitForFileTransfersIdle() async {
-    final queue = TransferQueue.instance;
-    if (!queue.hasActiveFileTransfers) return;
+    final store = RemoteTaskStore.instance;
+    if (!store.hasActiveFileTransfers) return;
     final completer = Completer<void>();
     void listener() {
-      if (!queue.hasActiveFileTransfers) {
-        queue.removeListener(listener);
+      if (!store.hasActiveFileTransfers) {
+        store.removeListener(listener);
         if (!completer.isCompleted) completer.complete();
       }
     }
 
-    queue.addListener(listener);
+    store.addListener(listener);
     try {
       await completer.future;
     } finally {
-      queue.removeListener(listener);
+      store.removeListener(listener);
     }
   }
 
-  /// True while one-click update flow is active (wait, download, or install).
-  bool get _canCancelInstall => _installing;
+  bool get _canCancelInstall => canCancelAppUpdate(
+    installing: _installing,
+    taskId: _installTaskId,
+    tasks: RemoteTaskStore.instance.tasks,
+  );
 
-  /// Stops the in-flight update via bridge `cancel_transfer` (aborts HTTP download).
   Future<void> _cancelInstall() async {
     if (_installTaskId == null && _installing) {
       if (mounted) {
@@ -367,10 +356,14 @@ class _SettingsUpdateSectionState extends State<SettingsUpdateSection> {
     if (taskId == null) return;
     setState(() => _installStatusText = '正在取消更新...');
     try {
-      if (TransferQueue.instance.canCancelTask(taskId)) {
-        await TransferQueue.instance.cancelTask(taskId);
-      } else {
-        await widget.api?.cancelTransfer(taskId);
+      final id = taskId.startsWith('transfer:') ? taskId : 'transfer:$taskId';
+      final canceled = await RemoteTaskStore.instance.cancel(id);
+      if (!canceled) {
+        if (mounted) {
+          setState(() => _installStatusText = '已进入安装阶段，无法取消。');
+        }
+        await RemoteTaskStore.instance.refresh();
+        return;
       }
     } catch (error) {
       if (!mounted) return;
@@ -382,7 +375,7 @@ class _SettingsUpdateSectionState extends State<SettingsUpdateSection> {
       _resetInstallState();
       _errorText = null;
     });
-    await TransferQueue.instance.pollNow();
+    await RemoteTaskStore.instance.refresh();
   }
 
   String get _statusTitle {

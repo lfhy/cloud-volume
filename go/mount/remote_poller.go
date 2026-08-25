@@ -137,6 +137,24 @@ func (a *bucketAccess) pollRemoteDirectory(
 	if a == nil {
 		return nil
 	}
+	if a.metadataService() != nil {
+		items, err := a.metadataDirectory(ctx, virtualPrefix, true)
+		if err != nil {
+			return err
+		}
+		if a.externalMetadataDirectoryRefresh != nil {
+			if err := a.externalMetadataDirectoryRefresh(cleanVirtualPath(virtualPrefix), items); err != nil {
+				return err
+			}
+			return nil
+		}
+		if a.externalDirectoryRefresh != nil {
+			if err := a.externalDirectoryRefresh(cleanVirtualPath(virtualPrefix), metadataObjectInfos(items)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	items, err := a.fetchDirectory(ctx, virtualPrefix)
 	if err != nil {
 		return err

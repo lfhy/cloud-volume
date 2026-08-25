@@ -5,7 +5,9 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:remote_storage/models/transfer_job.dart';
+import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/services/remote_storage_api.dart';
+import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/utils/transfer_format.dart';
 import 'package:remote_storage/widgets/file_sync_status_badge.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -18,6 +20,8 @@ part 'transfer_queue_local_progress.dart';
 part 'transfer_queue_lifecycle.dart';
 part 'transfer_queue_foreground.dart';
 part 'transfer_queue_directory_children.dart';
+part 'transfer_queue_remote_tasks.dart';
+part 'transfer_queue_snapshots.dart';
 
 /// 全局队列：页面和侧边栏共享。
 class TransferQueue extends ChangeNotifier {
@@ -82,6 +86,7 @@ class TransferQueue extends ChangeNotifier {
     task.status = TransferStatus.canceled;
     task.speedBytes = 0;
     task.error = null;
+    _publishRemoteTask(task);
     _rebuildMountWritebackCounts();
     scheduleTransferQueuePersist(this);
     _scheduleNotifyListeners();
@@ -151,6 +156,7 @@ class TransferQueue extends ChangeNotifier {
     }
     _tasks.removeWhere((t) => t.id == id);
     _tasksById.remove(id);
+    _removeRemoteTask(id);
     _foregroundTaskIds.remove(id);
     _cancelRequestedIds.remove(id);
     _rebuildMountWritebackCounts();
@@ -174,6 +180,10 @@ class TransferQueue extends ChangeNotifier {
   /// Removes every finished task (done / failed / canceled). Returns how many
   /// entries were purged. Used by the toolbar "清空已完成" action.
   int clearFinished() {
+    final removedIds = _tasks
+        .where(_canRemoveTask)
+        .map((task) => task.id)
+        .toList();
     final before = _tasks.length;
     _tasks.removeWhere(_canRemoveTask);
     if (_tasks.length == before) {
@@ -181,6 +191,9 @@ class TransferQueue extends ChangeNotifier {
     }
     final remainingIds = _tasks.map((task) => task.id).toSet();
     _tasksById.removeWhere((id, _) => !remainingIds.contains(id));
+    for (final id in removedIds) {
+      _removeRemoteTask(id);
+    }
     _foregroundTaskIds.removeWhere((id) => !remainingIds.contains(id));
     _cancelRequestedIds.removeWhere((id) => !remainingIds.contains(id));
     _rebuildMountWritebackCounts();
@@ -219,93 +232,6 @@ class TransferQueue extends ChangeNotifier {
     return null;
   }
 
-  void refreshFromSnapshots(List<TransferSnapshot> snapshots) {
-    var changed = false;
-    var shouldPersist = false;
-    for (final snapshot in snapshots) {
-      final task =
-          _taskById(snapshot.id) ??
-          (() {
-            changed = true;
-            shouldPersist = true;
-            return _addRemoteTask(snapshot);
-          })();
-      final nextStatus = _statusFromWire(snapshot.status);
-      final resolvedStatus =
-          _cancelRequestedIds.contains(snapshot.id) &&
-              nextStatus != TransferStatus.canceled &&
-              nextStatus != TransferStatus.done &&
-              nextStatus != TransferStatus.failed
-          ? TransferStatus.canceled
-          : nextStatus;
-      if (task.status != resolvedStatus) {
-        changed = true;
-        shouldPersist = true;
-      }
-      if (_cancelRequestedIds.contains(snapshot.id) &&
-          nextStatus != TransferStatus.canceled &&
-          nextStatus != TransferStatus.done &&
-          nextStatus != TransferStatus.failed) {
-        task.status = TransferStatus.canceled;
-      } else {
-        if (nextStatus == TransferStatus.canceled ||
-            nextStatus == TransferStatus.done ||
-            nextStatus == TransferStatus.failed) {
-          _cancelRequestedIds.remove(snapshot.id);
-        }
-        task.status = nextStatus;
-      }
-      if (task.bytesCompleted != snapshot.bytesCompleted ||
-          task.totalBytes != snapshot.totalBytes ||
-          task.speedBytes != snapshot.speedBytes ||
-          task.itemsCompleted != snapshot.itemsCompleted ||
-          task.totalItems != snapshot.totalItems ||
-          task.currentFileKey != snapshot.currentFileKey ||
-          task.currentFileBytesCompleted !=
-              snapshot.currentFileBytesCompleted ||
-          task.currentFileTotalBytes != snapshot.currentFileTotalBytes ||
-          task.targetPath != snapshot.targetPath ||
-          task.statusDetail != snapshot.statusDetail ||
-          task.createdAt != snapshot.createdAt ||
-          task.error != snapshot.error) {
-        changed = true;
-      }
-      if (task.totalBytes != snapshot.totalBytes ||
-          task.itemsCompleted != snapshot.itemsCompleted ||
-          task.totalItems != snapshot.totalItems ||
-          task.currentFileKey != snapshot.currentFileKey ||
-          task.currentFileBytesCompleted !=
-              snapshot.currentFileBytesCompleted ||
-          task.currentFileTotalBytes != snapshot.currentFileTotalBytes ||
-          task.targetPath != snapshot.targetPath ||
-          task.statusDetail != snapshot.statusDetail ||
-          task.createdAt != snapshot.createdAt ||
-          task.error != snapshot.error) {
-        shouldPersist = true;
-      }
-      task.bytesCompleted = snapshot.bytesCompleted;
-      task.totalBytes = snapshot.totalBytes;
-      task.itemsCompleted = snapshot.itemsCompleted;
-      task.totalItems = snapshot.totalItems;
-      task.currentFileKey = snapshot.currentFileKey;
-      task.currentFileBytesCompleted = snapshot.currentFileBytesCompleted;
-      task.currentFileTotalBytes = snapshot.currentFileTotalBytes;
-      task.speedBytes = snapshot.speedBytes;
-      task.targetPath = snapshot.targetPath;
-      task.statusDetail = snapshot.statusDetail;
-      task.createdAt = snapshot.createdAt;
-      task.error = snapshot.error;
-    }
-    if (changed) {
-      _rebuildMountWritebackCounts();
-      if (shouldPersist) {
-        scheduleTransferQueuePersist(this);
-      }
-      _scheduleNotifyListeners();
-    }
-    _ensurePolling();
-  }
-
   List<TransferTask> recentTasks({int limit = 6}) {
     if (limit <= 0 || _tasks.isEmpty) {
       return const <TransferTask>[];
@@ -327,8 +253,12 @@ class TransferQueue extends ChangeNotifier {
     _seed = 0;
     _api = null;
     _restoreFuture = null;
+    final localIds = _tasks.map((task) => task.id).toList();
     _tasks.clear();
     _tasksById.clear();
+    for (final id in localIds) {
+      _removeRemoteTask(id);
+    }
     _foregroundTaskIds.clear();
     _mountWritebackCounts.clear();
     _cancelRequestedIds.clear();
@@ -414,6 +344,9 @@ class TransferQueue extends ChangeNotifier {
 
   Future<void> _restorePersistedTasks() async {
     await loadPersistedTransferQueueStateData(this);
+    for (final task in _tasks) {
+      _publishRemoteTask(task);
+    }
     if (_tasks.isNotEmpty) {
       _rebuildMountWritebackCounts();
       scheduleTransferQueuePersist(this);

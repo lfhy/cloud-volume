@@ -74,13 +74,15 @@ mixin _RemoteStorageWebObjectApiMixin implements RemoteStorageGateway {
     String bucket,
     String key,
     bool isDirectory,
-    String newName,
-  ) async {
+    String newName, {
+    String taskId = '',
+  }) async {
     await _invoke('rename_object', <String, dynamic>{
       'bucket': bucket,
       'key': key,
       'isDirectory': isDirectory,
       'newName': newName,
+      if (taskId.trim().isNotEmpty) 'taskId': taskId,
     });
   }
 

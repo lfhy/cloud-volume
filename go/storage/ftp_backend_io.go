@@ -64,21 +64,26 @@ func (b ftpBackend) DeleteObject(
 	ctx context.Context,
 	bucket, key string,
 	isDirectory bool,
-	_ string,
+	taskID string,
 ) error {
-	if err := b.ensureBucketWritable(bucket); err != nil {
-		return err
-	}
-	conn, err := b.ftpConnect(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = conn.Quit() }()
-	remotePath := ftpRemotePath(key)
-	if isDirectory {
-		return conn.RemoveDirRecur(remotePath)
-	}
-	return conn.Delete(remotePath)
+	return runTrackedMutation(
+		ctx, "delete", bucket, key, "", taskID, b.cfg.ProfileID,
+		func(operationCtx context.Context) error {
+			if err := b.ensureBucketWritable(bucket); err != nil {
+				return err
+			}
+			conn, err := b.ftpConnect(operationCtx)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = conn.Quit() }()
+			remotePath := ftpRemotePath(key)
+			if isDirectory {
+				return conn.RemoveDirRecur(remotePath)
+			}
+			return conn.Delete(remotePath)
+		},
+	)
 }
 
 func (b ftpBackend) DeleteObjectHard(
@@ -115,29 +120,39 @@ func (b ftpBackend) CopyObject(
 	ctx context.Context,
 	bucket, sourceKey, targetKey string,
 	isDirectory bool,
-	_ string,
+	taskID string,
 ) error {
-	if err := b.ensureBucketWritable(bucket); err != nil {
-		return err
-	}
-	return b.ftpCopy(ctx, bucket, sourceKey, targetKey, isDirectory)
+	return runTrackedMutation(
+		ctx, "copy", bucket, sourceKey, targetKey, taskID, b.cfg.ProfileID,
+		func(operationCtx context.Context) error {
+			if err := b.ensureBucketWritable(bucket); err != nil {
+				return err
+			}
+			return b.ftpCopy(operationCtx, bucket, sourceKey, targetKey, isDirectory)
+		},
+	)
 }
 
 func (b ftpBackend) MoveObject(
 	ctx context.Context,
 	bucket, sourceKey, targetKey string,
 	isDirectory bool,
-	_ string,
+	taskID string,
 ) error {
-	if err := b.ensureBucketWritable(bucket); err != nil {
-		return err
-	}
-	conn, err := b.ftpConnect(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = conn.Quit() }()
-	return conn.Rename(ftpRemotePath(sourceKey), ftpRemotePath(targetKey))
+	return runTrackedMutation(
+		ctx, "move", bucket, sourceKey, targetKey, taskID, b.cfg.ProfileID,
+		func(operationCtx context.Context) error {
+			if err := b.ensureBucketWritable(bucket); err != nil {
+				return err
+			}
+			conn, err := b.ftpConnect(operationCtx)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = conn.Quit() }()
+			return conn.Rename(ftpRemotePath(sourceKey), ftpRemotePath(targetKey))
+		},
+	)
 }
 
 func (b ftpBackend) UploadFile(
@@ -167,6 +182,7 @@ func (b ftpBackend) UploadFile(
 		func(uploadCtx context.Context, body io.Reader) error {
 			return b.ftpStore(uploadCtx, key, body)
 		},
+		b.cfg.ProfileID,
 	)
 }
 
@@ -191,13 +207,23 @@ func (b ftpBackend) UploadReader(
 		func(uploadCtx context.Context, tracked io.Reader) error {
 			return b.ftpStore(uploadCtx, key, tracked)
 		},
+		b.cfg.ProfileID,
 	)
 }
 
 func (b ftpBackend) DownloadFile(
 	ctx context.Context,
-	_, key, localPath, _ string,
-) error {
+	bucket, key, localPath, taskID string,
+) (err error) {
+	var total int64
+	if taskID != "" {
+		if info, statErr := b.HeadObject(ctx, bucket, key); statErr == nil {
+			total = info.Size
+		}
+		var finish func(error)
+		ctx, finish = beginTrackedDownload(ctx, bucket, key, localPath, total, taskID, b.cfg.ProfileID)
+		defer func() { finish(err) }()
+	}
 	conn, err := b.ftpConnect(ctx)
 	if err != nil {
 		return err
@@ -217,7 +243,11 @@ func (b ftpBackend) DownloadFile(
 		return err
 	}
 	defer out.Close()
-	_, err = io.Copy(out, r)
+	reader := io.Reader(r)
+	if taskID != "" {
+		reader = &trackedDownloadReader{ctx: ctx, reader: r, taskID: taskID}
+	}
+	_, err = io.Copy(out, reader)
 	return err
 }
 

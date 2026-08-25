@@ -28,9 +28,20 @@ type unmountCommand struct {
 // request was dispatched.
 const macosOpenLaunchTimeout = 3 * time.Second
 
+// This wait is only for the exact mount row; it never performs an upstream
+// listing or waits for Finder's first statfs.
+const macosMountReadyTimeout = 30 * time.Second
+
+const macosMountCleanupTimeout = 45 * time.Second
+
 var (
 	probeWebDAVMountActive = isWebDAVMountActive
 	executeUnmountWebDAV   = unmountWebDAV
+	executeMountWebDAV     = runLoggedCommand
+	probeMountedWebDAV     = probeMountedWebDAVPath
+	waitMountedWebDAV      = waitForMountedWebDAVPath
+	prepareMountPath       = prepareMacOSMountPath
+	launchFinder           = runMacOSFinderOpen
 )
 
 func (s *mountSession) start() error {
@@ -50,7 +61,15 @@ func (s *mountSession) start() error {
 		port,
 	)
 
-	mountPath, err := mountWebDAV(serverURL, s.mountPath)
+	mountPath, err := prepareMountPath(s.mountPath)
+	if err != nil {
+		s.lastError = err.Error()
+		return err
+	}
+	s.mountPath = mountPath
+	s.mountTarget = mountPath
+	s.mountAttempted = true
+	mountPath, err = mountWebDAVPrepared(serverURL, mountPath, s.mountName)
 	if err != nil {
 		s.lastError = err.Error()
 		return err
@@ -58,201 +77,149 @@ func (s *mountSession) start() error {
 	s.mountPath = mountPath
 	s.mountTarget = mountPath
 	s.mounted = true
+	s.mountAttempted = false
 	log.Printf("[mount/session] mounted bucket=%q path=%q", s.bucket, mountPath)
-	// Pre-warm macOS webdavfs so the first user-visible access doesn't
-	// pay the ~90s statfs initialization penalty. A background filesystem
-	// stat forces webdavfs_agent to start its handshake immediately after
-	// the volume appears, rather than waiting for Finder to trigger it.
-	go prewarmWebDAVMount(mountPath)
 	return nil
 }
 
-// prewarmWebDAVMount triggers webdavfs_agent initialization without
-// blocking the mount path. It does a single os.Stat on the mount root
-// (which forces the VFS layer to query the WebDAV server), then a
-// ReadDir to populate the directory cache.
+// mountWebDAV starts the loopback WebDAV volume with /sbin/mount_webdav and
+// waits for this URL/path to appear in the system mount table. The row wait
+// confirms registration only; Apple's webdavfs_agent may still delay its first
+// statfs, so Finder opening remains a separate asynchronous operation.
 //
-// os.Stat / os.ReadDir have no context parameter and cannot be interrupted
-// once blocked inside webdavfs_agent. To stay true to "non-blocking to the
-// caller", each call runs in its own goroutine and prewarmWebDAVMount waits
-// at most prewarmStatTimeout for it. A truly wedged webdavfs therefore leaves
-// a single leaked syscall goroutine behind, but prewarmWebDAVMount itself
-// always returns within the bound and the next stop()/unmount can proceed.
-const prewarmStatTimeout = 30 * time.Second
-
-func prewarmWebDAVMount(mountPath string) {
-	startedAt := time.Now()
-	info, ok := boundedStat(mountPath, prewarmStatTimeout)
-	if !ok {
-		log.Printf("[mount/macos] prewarm-stat-timeout path=%q duration=%s", mountPath, time.Since(startedAt).Round(time.Millisecond))
-		return
-	}
-	if info.err != nil {
-		log.Printf("[mount/macos] prewarm-stat-error path=%q err=%v duration=%s", mountPath, info.err, time.Since(startedAt).Round(time.Millisecond))
-		return
-	}
-	log.Printf("[mount/macos] prewarm-stat-done path=%q duration=%s size=%d", mountPath, time.Since(startedAt).Round(time.Millisecond), info.size)
-	// Read one directory entry to populate the webdavfs dirent cache.
-	// This is non-blocking to the caller and makes the first Finder
-	// window significantly faster.
-	entries, ok := boundedReadDir(mountPath, prewarmStatTimeout)
-	if !ok {
-		log.Printf("[mount/macos] prewarm-readdir-timeout path=%q duration=%s", mountPath, time.Since(startedAt).Round(time.Millisecond))
-		return
-	}
-	if entries.err != nil {
-		log.Printf("[mount/macos] prewarm-readdir-error path=%q err=%v duration=%s", mountPath, entries.err, time.Since(startedAt).Round(time.Millisecond))
-		return
-	}
-	log.Printf("[mount/macos] prewarm-done path=%q entries=%d duration=%s", mountPath, entries.count, time.Since(startedAt).Round(time.Millisecond))
-}
-
-type statResult struct {
-	size int64
-	err  error
-}
-
-// boundedStat runs os.Stat in a goroutine and returns ok=false if it does
-// not finish within timeout. The underlying syscall cannot be cancelled, so
-// on timeout the goroutine remains live until webdavfs releases it.
-func boundedStat(path string, timeout time.Duration) (statResult, bool) {
-	result := make(chan statResult, 1)
-	go func() {
-		info, err := os.Stat(path)
-		size := int64(-1)
-		if err == nil {
-			size = info.Size()
-		}
-		result <- statResult{size: size, err: err}
-	}()
-	select {
-	case r := <-result:
-		return r, true
-	case <-time.After(timeout):
-		return statResult{}, false
-	}
-}
-
-type readDirResult struct {
-	count int
-	err   error
-}
-
-func boundedReadDir(path string, timeout time.Duration) (readDirResult, bool) {
-	result := make(chan readDirResult, 1)
-	go func() {
-		entries, err := os.ReadDir(path)
-		result <- readDirResult{count: len(entries), err: err}
-	}()
-	select {
-	case r := <-result:
-		return r, true
-	case <-time.After(timeout):
-		return readDirResult{}, false
-	}
-}
-
-func (s *mountSession) stop() error {
-	log.Printf(
-		"[mount/session] stop bucket=%q mounted=%t target=%q",
-		s.bucket,
-		s.mounted,
-		s.mountTarget,
-	)
-	var mountErr error
-	if s.mounted && s.mountTarget != "" {
-		active, err := probeWebDAVMountActive(s.mountTarget)
-		if err != nil {
-			mountErr = err
-		} else if active {
-			mountErr = executeUnmountWebDAV(s.mountTarget)
-		}
-		if mountErr != nil {
-			s.lastError = mountErr.Error()
-			s.stopping = false
-			log.Printf(
-				"[mount/session] keep-webdav-after-unmount-error bucket=%q err=%v",
-				s.bucket,
-				mountErr,
-			)
-			return mountErr
-		}
-		s.mounted = false
-	}
-	serverErr := error(nil)
-	if s.server != nil {
-		log.Printf("[mount/session] stop-webdav bucket=%q", s.bucket)
-		serverErr = s.server.stop()
-		s.server = nil
-	}
-	accessErr := error(nil)
-	if s.access != nil {
-		log.Printf("[mount/session] close-access bucket=%q", s.bucket)
-		accessErr = s.access.close()
-		s.access = nil
-	}
-	if serverErr != nil {
-		s.lastError = serverErr.Error()
-		return serverErr
-	}
-	if accessErr != nil {
-		s.lastError = accessErr.Error()
-		return accessErr
-	}
-	log.Printf("[mount/session] stop-done bucket=%q", s.bucket)
-	return nil
-}
-
-// mountWebDAV mounts the loopback WebDAV server at mountPath using the
-// synchronous /sbin/mount_webdav command. Unlike `osascript "mount volume"`,
-// which registers the volume in the kernel and returns immediately while
-// webdavfs_agent finishes its ~90s handshake in the background, mount_webdav
-// blocks until the volume is actually usable. The previous osascript path
-// reported "mounted" from a stale mount-table entry, cancelled the still-running
-// handshake, and left Finder unable to see or open the volume.
-//
-// mountPath is the already-resolved on-disk path (set by the macOS backend to
-// either the caller's requested path or the default /Volumes/云卷-<bucket>).
-func mountWebDAV(serverURL, mountPath string) (string, error) {
+// mountPath is either a caller path or the managed default; this helper resolves
+// a permitted default-path fallback before invoking the system command.
+func mountWebDAV(serverURL, mountPath, volumeName string) (string, error) {
 	cleanPath := filepath.Clean(strings.TrimSpace(mountPath))
 	if cleanPath == "" || cleanPath == "." || cleanPath == "/" {
 		return "", fmt.Errorf("mount bucket: invalid mount path %q", mountPath)
 	}
-	if err := os.MkdirAll(cleanPath, 0o755); err != nil {
+	preparedPath, err := prepareMountPath(cleanPath)
+	if err != nil {
 		return "", err
 	}
-	output, recovered, err := runLoggedCommandUntilSuccess(
+	return mountWebDAVPrepared(serverURL, preparedPath, volumeName)
+}
+
+func mountWebDAVPrepared(serverURL, mountPath, volumeName string) (string, error) {
+	cleanPath := filepath.Clean(strings.TrimSpace(mountPath))
+	if cleanPath == "" || cleanPath == "." || cleanPath == "/" {
+		return "", fmt.Errorf("mount bucket: invalid mount path %q", mountPath)
+	}
+	volumeName = strings.TrimSpace(volumeName)
+	if volumeName == "" {
+		volumeName = filepath.Base(cleanPath)
+	}
+	// Do not cancel the command merely because the mount table row appears.
+	// webdavfs_agent can still be initializing at that point; canceling here
+	// reports a false success and immediately tears the new volume down.
+	// -S is required for a desktop daemon: without it mount_webdav may wait
+	// for an authentication or "server not responding" UI that no caller can
+	// dismiss. Keep the volume name explicit so Finder does not derive it from
+	// a temporary fallback path.
+	output, err := executeMountWebDAV(
 		macosMountCommandTimeout,
-		100*time.Millisecond,
 		"mount-webdav-path",
-		func() (string, bool) {
-			mounted := probeMountedWebDAVPath(serverURL, cleanPath)
-			return mounted, mounted != ""
-		},
 		"/sbin/mount_webdav",
+		"-S",
+		"-v",
+		volumeName,
 		serverURL,
 		cleanPath,
 	)
-	if recovered != "" {
-		return recovered, nil
-	}
 	if err != nil {
-		if recovered := recoverMountedWebDAVPath(serverURL, cleanPath); recovered != "" {
-			return recovered, nil
+		cleanupErr := cleanupFailedWebDAVMount(serverURL, cleanPath)
+		if cleanupErr != nil {
+			return "", fmt.Errorf("mount bucket with macOS mount_webdav: %w: %s; cleanup: %v", err, string(output), cleanupErr)
 		}
 		return "", fmt.Errorf("mount bucket with macOS mount_webdav: %w: %s", err, string(output))
 	}
-	return cleanPath, nil
+	readyPath, readyErr := waitMountedWebDAV(serverURL, cleanPath, macosMountReadyTimeout)
+	if readyErr != nil {
+		if cleanupErr := cleanupFailedWebDAVMount(serverURL, cleanPath); cleanupErr != nil {
+			return "", fmt.Errorf("%w; cleanup: %v", readyErr, cleanupErr)
+		}
+		return "", readyErr
+	}
+	return readyPath, nil
 }
 
-func recoverMountedWebDAVPath(serverURL, requestedPath string) string {
-	deadline := time.Now().Add(2 * time.Second)
+// prepareMacOSMountPath creates a caller-selected mount directory. The
+// system /Volumes root is root-owned on normal macOS installs, so the default
+// managed path falls back to a user-owned directory when it cannot be created.
+func prepareMacOSMountPath(mountPath string) (string, error) {
+	cleanPath := filepath.Clean(strings.TrimSpace(mountPath))
+	err := os.MkdirAll(cleanPath, 0o755)
+	if err == nil {
+		return cleanPath, nil
+	} else if !isManagedMacOSMountPath(cleanPath) || !os.IsPermission(err) {
+		return "", err
+	}
+	fallback := macOSUserMountPath(cleanPath)
+	if fallback == "" {
+		return "", err
+	}
+	if fallbackErr := os.MkdirAll(fallback, 0o755); fallbackErr != nil {
+		return "", fmt.Errorf("create macOS mount path %q: %w (fallback %q: %v)", cleanPath, err, fallback, fallbackErr)
+	}
+	log.Printf("[mount/macos] default-path-not-writable requested=%q fallback=%q", cleanPath, fallback)
+	return fallback, nil
+}
+
+func isManagedMacOSMountPath(path string) bool {
+	clean := filepath.Clean(strings.TrimSpace(path))
+	return filepath.Dir(clean) == "/Volumes" && strings.HasPrefix(filepath.Base(clean), managedMountPrefix)
+}
+
+func macOSUserMountPath(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return ""
+	}
+	return filepath.Join(home, "云卷", filepath.Base(filepath.Clean(path)))
+}
+
+func waitForMountedWebDAVPath(serverURL, requestedPath string, timeout time.Duration) (string, error) {
+	startedAt := time.Now()
+	deadline := time.Now().Add(timeout)
 	for {
-		if recovered := probeMountedWebDAVPath(serverURL, requestedPath); recovered != "" {
-			return recovered
+		if recovered := probeMountedWebDAV(serverURL, requestedPath); recovered != "" {
+			log.Printf(
+				"[mount/macos] mount-webdav-registered path=%q duration=%s",
+				recovered,
+				time.Since(startedAt).Round(time.Millisecond),
+			)
+			return recovered, nil
 		}
 		if time.Now().After(deadline) {
-			return ""
+			return "", fmt.Errorf("mount bucket with macOS mount_webdav: mount did not become visible within %s", timeout)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// cleanupFailedWebDAVMount removes a mount-table entry left behind when the
+// synchronous command times out. The entry is evidence that registration
+// started, not that webdavfs_agent is ready; it must never be returned as a
+// successful mount path.
+func cleanupFailedWebDAVMount(serverURL, requestedPath string) error {
+	deadline := time.Now().Add(macosMountCleanupTimeout)
+	var lastErr error
+	for {
+		if mounted := probeMountedWebDAV(serverURL, requestedPath); mounted != "" {
+			if err := executeUnmountWebDAV(mounted); err != nil {
+				lastErr = err
+				log.Printf("[mount/macos] failed-mount-cleanup-error path=%q err=%v", mounted, err)
+			} else {
+				log.Printf("[mount/macos] failed-mount-cleanup-done path=%q", mounted)
+				return nil
+			}
+		}
+		if time.Now().After(deadline) {
+			if lastErr != nil {
+				return lastErr
+			}
+			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -288,10 +255,10 @@ func findMountedWebDAVPath(serverURL, requestedPath string, entries []mountEntry
 		return ""
 	}
 	if strings.TrimSpace(requestedPath) != "" {
-		requested := filepath.Clean(requestedPath)
+		requested := canonicalMountPath(requestedPath)
 		for _, current := range matched {
-			if filepath.Clean(current) == requested {
-				return requested
+			if canonicalMountPath(current) == requested {
+				return filepath.Clean(requestedPath)
 			}
 		}
 		return ""
@@ -397,7 +364,7 @@ func openMountPath(mountPath string) error {
 		log.Printf("[mount/macos] open-mount-path coalesced path=%q", clean)
 		return nil
 	}
-	go runMacOSFinderOpen(clean)
+	go launchFinder(clean)
 	return nil
 }
 

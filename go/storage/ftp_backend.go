@@ -146,7 +146,7 @@ func ftpEntryFromInfo(parentDir string, entry *ftpclient.Entry) ObjectInfo {
 	return ObjectInfo{
 		Key:          key,
 		Size:         int64(entry.Size),
-		LastModified: entry.Time.Format("2006-01-02 15:04:05"),
+		LastModified: entry.Time.In(time.Local).Format("2006-01-02 15:04:05"),
 		IsDir:        isDir,
 	}
 }

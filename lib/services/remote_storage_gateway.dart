@@ -9,12 +9,15 @@ import 'package:remote_storage/models/cached_file_record.dart';
 import 'package:remote_storage/models/config_backup.dart';
 import 'package:remote_storage/models/paged_listings.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
+import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/models/s3_objects.dart';
 import 'package:remote_storage/models/share_record.dart';
 import 'package:remote_storage/models/system_proxy_info.dart';
 import 'package:remote_storage/models/sync_profile.dart';
 import 'package:remote_storage/models/trash_item.dart';
 import 'package:remote_storage/models/transfer_job.dart';
+
+part 'remote_storage_gateway_models.dart';
 
 /// Client-side capability flags let pages adjust behavior without forking routes.
 class RemoteStorageCapabilities {
@@ -187,8 +190,9 @@ abstract class RemoteStorageGateway {
     String bucket,
     String key,
     bool isDirectory,
-    String newName,
-  );
+    String newName, {
+    String taskId = '',
+  });
   Future<void> copyObject(
     RemoteStorageConfig config,
     String bucket,
@@ -273,6 +277,47 @@ abstract class RemoteStorageGateway {
   Future<void> cancelTransfer(String taskId);
   Future<bool> triggerTransfer(String taskId);
   Future<List<TransferSnapshot>> listTransferJobs();
+
+  /// Unified logical remote-operation queue. Implementations may temporarily
+  /// adapt legacy transfer snapshots while metadata projection is rolling out.
+  Future<RemoteTaskPage> listRemoteTasks([
+    RemoteTaskFilter filter = const RemoteTaskFilter(),
+  ]) async {
+    throw UnsupportedError('统一远端任务队列不可用');
+  }
+
+  Future<RemoteTask> getRemoteTask(String taskId) async {
+    throw UnsupportedError('统一远端任务队列不可用');
+  }
+
+  Future<bool> cancelRemoteTask(String taskId) async {
+    throw UnsupportedError('统一远端任务队列不可用');
+  }
+
+  Future<bool> retryRemoteTask(String taskId) async {
+    throw UnsupportedError('统一远端任务队列不可用');
+  }
+
+  Future<bool> triggerRemoteTask(String taskId) async {
+    throw UnsupportedError('统一远端任务队列不可用');
+  }
+
+  /// Forces all durable pending tasks in the requested queue scope to run.
+  Future<int> triggerAllRemoteTasks({
+    String profileId = '',
+    String bucket = '',
+  }) async {
+    throw UnsupportedError('统一远端任务队列不可用');
+  }
+
+  Future<int> clearRemoteTaskHistory({
+    String profileId = '',
+    String bucket = '',
+    List<String> taskIds = const <String>[],
+  }) async {
+    throw UnsupportedError('统一远端任务队列不可用');
+  }
+
   Future<BucketMountStatus> mountBucket(
     RemoteStorageConfig config,
     String bucket,
@@ -280,6 +325,7 @@ abstract class RemoteStorageGateway {
   );
   Future<void> cleanupMounts();
   Future<int> cleanupStaleWindowsProcesses();
+  Future<int> sweepOrphanMounts();
   Future<CacheStats> getCacheStats(RemoteStorageConfig config);
   Future<void> openCacheDirectory(RemoteStorageConfig config);
   Future<CleanCacheResult> cleanCache(
@@ -323,9 +369,9 @@ abstract class RemoteStorageGateway {
   });
 
   /// Triggers a background download + install + relaunch of a release asset.
-  /// Returns the transfer task id so the caller can poll progress via
-  /// [TransferQueue]. The download/install runs entirely in Go so the Dart
-  /// side only renders UI state.
+  /// Returns the transfer task id so the caller can observe the matching
+  /// [RemoteTaskStore] projection. The download/install runs entirely in Go,
+  /// while the Dart side only renders the unified task state.
   Future<String> installApp({
     required String assetUrl,
     required String assetName,
@@ -371,101 +417,3 @@ abstract interface class WindowsWinFspQuery {
 }
 
 typedef RemoteStorageApiFactory = Future<RemoteStorageGateway> Function();
-
-/// Bridge build metadata used for update package selection.
-class BridgeBuildInfo {
-  const BridgeBuildInfo({
-    this.buildArch = '',
-    this.runtimeOS = '',
-    this.runtimeArch = '',
-  });
-
-  factory BridgeBuildInfo.fromJson(Map<String, dynamic> json) {
-    return BridgeBuildInfo(
-      buildArch: (json['buildArch'] ?? '').toString(),
-      runtimeOS: (json['runtimeOS'] ?? '').toString(),
-      runtimeArch: (json['runtimeArch'] ?? '').toString(),
-    );
-  }
-
-  final String buildArch;
-  final String runtimeOS;
-  final String runtimeArch;
-}
-
-/// [CacheStats] mirrors the Go-side cache directory summary used by Settings.
-class CacheStats {
-  const CacheStats({
-    required this.path,
-    required this.exists,
-    required this.sizeBytes,
-    required this.fileCount,
-    required this.lastModified,
-  });
-
-  factory CacheStats.fromJson(Map<String, dynamic> json) {
-    return CacheStats(
-      path: (json['path'] ?? '').toString(),
-      exists: json['exists'] == true,
-      sizeBytes: (json['sizeBytes'] ?? 0) as int,
-      fileCount: (json['fileCount'] ?? 0) as int,
-      lastModified: (json['lastModified'] ?? '').toString(),
-    );
-  }
-
-  final String path;
-  final bool exists;
-  final int sizeBytes;
-  final int fileCount;
-  final String lastModified;
-}
-
-/// [CleanCacheResult] reports how much the most recent cleanup pass reclaimed.
-class CleanCacheResult {
-  const CleanCacheResult({
-    required this.beforeBytes,
-    required this.afterBytes,
-    required this.removed,
-    required this.freedBytes,
-  });
-
-  factory CleanCacheResult.fromJson(Map<String, dynamic> json) {
-    return CleanCacheResult(
-      beforeBytes: (json['beforeBytes'] ?? 0) as int,
-      afterBytes: (json['afterBytes'] ?? 0) as int,
-      removed: (json['removed'] ?? 0) as int,
-      freedBytes: (json['freedBytes'] ?? 0) as int,
-    );
-  }
-
-  final int beforeBytes;
-  final int afterBytes;
-  final int removed;
-  final int freedBytes;
-}
-
-class MountBucketOptions {
-  const MountBucketOptions({
-    this.mountPath = '',
-    this.readOnly = false,
-    this.driveLetter = '',
-    this.windowsMountEngine,
-  });
-
-  final String mountPath;
-  final bool readOnly;
-  final String driveLetter;
-
-  /// Optional Windows mount engine override chosen from the mount dialog.
-  /// When null the backend uses the persisted config value. Non-null values
-  /// are persisted by the caller before mounting.
-  final WindowsMountEngine? windowsMountEngine;
-
-  Map<String, dynamic> toJson() {
-    return <String, dynamic>{
-      'mountPath': mountPath.trim(),
-      'readOnly': readOnly,
-      'driveLetter': driveLetter.trim().toUpperCase(),
-    };
-  }
-}

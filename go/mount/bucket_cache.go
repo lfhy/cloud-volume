@@ -3,7 +3,6 @@ package mount
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -100,6 +99,17 @@ func (c *bucketCache) localFile(virtualPath string) (localFile, bool) {
 
 	item, ok := c.localFiles[cleanVirtualPath(virtualPath)]
 	return item, ok
+}
+
+// localEntry returns only local-first state, never a TTL-bound remote object.
+// Metadata-backed mounts must not let a legacy remote cache shadow the durable
+// inode view, but staged files and directory markers still take precedence.
+func (c *bucketCache) localEntry(virtualPath string) (s3ops.ObjectInfo, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	item, ok := c.localEntries[cleanVirtualPath(virtualPath)]
+	return item.info, ok
 }
 
 func (c *bucketCache) isLocalDirectory(virtualPath string) bool {
@@ -229,6 +239,52 @@ func (c *bucketCache) clearLocalFileMarker(virtualPath string) {
 	delete(c.localFiles, cleanVirtualPath(virtualPath))
 }
 
+// clearLocalMarkers drops path-indexed local state without deleting its bytes.
+// Metadata journal projection uses this when another writer owns the newer
+// Desired entry but a mounted source file must remain physically recoverable.
+func (c *bucketCache) clearLocalMarkers(virtualPath string, isDir bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.clearLocalMarkersLocked(cleanVirtualPath(virtualPath), isDir)
+}
+
+func (c *bucketCache) clearLocalMarkersLocked(clean string, isDir bool) {
+	if !isDir {
+		delete(c.localFiles, clean)
+		delete(c.localEntries, clean)
+		delete(c.deletedPaths, clean)
+		c.invalidateParentsLocked(clean)
+		return
+	}
+	prefix := ensureDirSuffix(clean)
+	for key := range c.localFiles {
+		if strings.HasPrefix(key, prefix) {
+			delete(c.localFiles, key)
+		}
+	}
+	for key := range c.localEntries {
+		if key == clean || strings.HasPrefix(key, prefix) {
+			delete(c.localEntries, key)
+		}
+	}
+	for key := range c.deletedPaths {
+		if key == clean || strings.HasPrefix(key, prefix) {
+			delete(c.deletedPaths, key)
+		}
+	}
+	c.invalidateParentsLocked(clean)
+}
+
+// markDeletedRetainingBytes hides a local marker without deleting its source.
+func (c *bucketCache) markDeletedRetainingBytes(virtualPath string, isDir bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	clean := cleanVirtualPath(virtualPath)
+	c.clearLocalMarkersLocked(clean, isDir)
+	c.deletedPaths[clean] = deletedEntry{isDir: isDir}
+	c.invalidateParentsLocked(clean)
+}
+
 func (c *bucketCache) markDeleted(virtualPath string, isDir bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -255,118 +311,6 @@ func (c *bucketCache) isMarkedDeleted(virtualPath string) bool {
 	return false
 }
 
-func (c *bucketCache) renameLocalFile(
-	oldVirtualPath,
-	newVirtualPath string,
-	isDir bool,
-	cacheRoot string,
-) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	oldClean := cleanVirtualPath(oldVirtualPath)
-	newClean := cleanVirtualPath(newVirtualPath)
-	if !isDir {
-		c.renameLocalFileLocked(oldClean, newClean, cacheRoot)
-		c.renameLocalEntryLocked(oldClean, newClean, false)
-		c.renameDeletedLocked(oldClean, newClean, false)
-		c.invalidateParentsLocked(oldClean)
-		c.invalidateParentsLocked(newClean)
-		return
-	}
-
-	oldPrefix := ensureDirSuffix(oldClean)
-	newPrefix := ensureDirSuffix(newClean)
-	c.renameLocalEntryLocked(oldClean, newClean, true)
-	c.renameDeletedLocked(oldClean, newClean, true)
-	for key, item := range c.localFiles {
-		if !strings.HasPrefix(key, oldPrefix) {
-			continue
-		}
-		suffix := strings.TrimPrefix(key, oldPrefix)
-		nextKey := newPrefix + suffix
-		nextPath := pathForVirtualKey(cacheRoot, nextKey)
-		_ = os.MkdirAll(filepath.Dir(nextPath), 0o755)
-		_ = os.Remove(nextPath)
-		_ = os.Rename(item.localPath, nextPath)
-		item.localPath = nextPath
-		item.info.Key = nextKey
-		c.localFiles[nextKey] = item
-		delete(c.localFiles, key)
-	}
-	c.invalidateParentsLocked(oldClean)
-	c.invalidateParentsLocked(newClean)
-}
-
-func (c *bucketCache) renameLocalFileLocked(oldClean, newClean, cacheRoot string) {
-	item, ok := c.localFiles[oldClean]
-	if !ok {
-		return
-	}
-	newCachePath := pathForVirtualKey(cacheRoot, newClean)
-	_ = os.MkdirAll(filepath.Dir(newCachePath), 0o755)
-	_ = os.Remove(newCachePath)
-	_ = os.Rename(item.localPath, newCachePath)
-	item.localPath = newCachePath
-	item.info.Key = newClean
-	c.localFiles[newClean] = item
-	delete(c.localFiles, oldClean)
-}
-
-func (c *bucketCache) renameLocalEntryLocked(oldClean, newClean string, isDir bool) {
-	if !isDir {
-		item, ok := c.localEntries[oldClean]
-		if !ok {
-			return
-		}
-		item.info = normalizeObjectInfo(newClean, item.info)
-		c.localEntries[newClean] = item
-		delete(c.localEntries, oldClean)
-		return
-	}
-
-	if item, ok := c.localEntries[oldClean]; ok {
-		item.info = normalizeObjectInfo(newClean, item.info)
-		c.localEntries[newClean] = item
-		delete(c.localEntries, oldClean)
-	}
-	oldPrefix := ensureDirSuffix(oldClean)
-	newPrefix := ensureDirSuffix(newClean)
-	for key, item := range c.localEntries {
-		if !strings.HasPrefix(key, oldPrefix) {
-			continue
-		}
-		nextKey := newPrefix + strings.TrimPrefix(key, oldPrefix)
-		item.info = normalizeObjectInfo(nextKey, item.info)
-		c.localEntries[nextKey] = item
-		delete(c.localEntries, key)
-	}
-}
-
-func (c *bucketCache) renameDeletedLocked(oldClean, newClean string, isDir bool) {
-	if !isDir {
-		if item, ok := c.deletedPaths[oldClean]; ok {
-			c.deletedPaths[newClean] = item
-			delete(c.deletedPaths, oldClean)
-		}
-		return
-	}
-	if item, ok := c.deletedPaths[oldClean]; ok {
-		c.deletedPaths[newClean] = item
-		delete(c.deletedPaths, oldClean)
-	}
-	oldPrefix := ensureDirSuffix(oldClean)
-	newPrefix := ensureDirSuffix(newClean)
-	for key, item := range c.deletedPaths {
-		if !strings.HasPrefix(key, oldPrefix) {
-			continue
-		}
-		nextKey := newPrefix + strings.TrimPrefix(key, oldPrefix)
-		c.deletedPaths[nextKey] = item
-		delete(c.deletedPaths, key)
-	}
-}
-
 func (c *bucketCache) mergeLocalFiles(
 	virtualPrefix string,
 	items []s3ops.ObjectInfo,
@@ -374,14 +318,14 @@ func (c *bucketCache) mergeLocalFiles(
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	byKey := map[string]s3ops.ObjectInfo{}
+	byPath := map[string]s3ops.ObjectInfo{}
 	cleanPrefix := cleanVirtualPath(virtualPrefix)
 	for _, item := range items {
-		key := cleanVirtualPath(strings.TrimSuffix(item.Key, "/"))
-		if c.hiddenByDeleteLocked(key) {
+		path := cleanVirtualPath(strings.TrimSuffix(item.Key, "/"))
+		if c.hiddenByDeleteLocked(path) {
 			continue
 		}
-		byKey[item.Key] = item
+		byPath[path] = item
 	}
 
 	for key, item := range c.localEntries {
@@ -391,11 +335,11 @@ func (c *bucketCache) mergeLocalFiles(
 		if c.hiddenByDeleteLocked(key) {
 			continue
 		}
-		byKey[item.info.Key] = item.info
+		byPath[cleanVirtualPath(strings.TrimSuffix(item.info.Key, "/"))] = item.info
 	}
 
-	out := make([]s3ops.ObjectInfo, 0, len(byKey))
-	for _, item := range byKey {
+	out := make([]s3ops.ObjectInfo, 0, len(byPath))
+	for _, item := range byPath {
 		out = append(out, item)
 	}
 	return out

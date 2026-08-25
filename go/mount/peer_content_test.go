@@ -2,11 +2,15 @@
 package mount
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	storageconfig "remote-storage/go/config"
+	"remote-storage/go/mount/metadata"
 	s3ops "remote-storage/go/s3"
 )
 
@@ -37,5 +41,45 @@ func TestPeerContentVersionHintPrefersETagAndFallsBackToTimestampSize(t *testing
 	withoutETag.ETag = ""
 	if got := peerContentVersionHint(withoutETag); got != "mtime-size:2026-07-28 12:00:00:7" {
 		t.Fatalf("fallback version hint = %q", got)
+	}
+}
+
+func TestLocalPeerContentPathRejectsMetadataPendingBytes(t *testing.T) {
+	access := newTestBucketAccess(t)
+	cfg := storageconfig.RemoteStorageConfig{
+		ProfileID: "peer-pending-profile", Endpoint: "https://example.test",
+		CacheDirectory: t.TempDir(), Bucket: "test-bucket",
+	}
+	manager := metadata.NewManager(t.TempDir())
+	handle, err := manager.AcquireWithBackend(cfg, access.bucket, &metadataReadTestBackend{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	access.metadataHandle = handle
+	access.config = cfg.Normalized()
+	service := access.metadataService()
+	service.SetQuietPeriod(time.Hour)
+	t.Cleanup(func() {
+		access.metadataHandle = nil
+		handle.Release()
+		manager.RemoveAllForTest()
+	})
+	if _, _, err := service.WritePath(
+		context.Background(), "pending-peer.txt", strings.NewReader("pending"), 7,
+		metadata.WriteOptions{Origin: "page"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	localPath := createTempFile(t, access.cacheRoot, "pending-peer.txt", "pending")
+	info := s3ops.ObjectInfo{
+		Key: "pending-peer.txt", Size: 7, LastModified: "2026-08-18 00:00:00", ETag: "remote-old",
+	}
+	access.cache.storeObject("pending-peer.txt", info)
+	if err := writeDownloadStamp(localPath, info); err != nil {
+		t.Fatal(err)
+	}
+	registerTestSession(t, cfg, access.bucket, access)
+	if _, _, ok := LocalPeerContentPath(cfg, access.bucket, "pending-peer.txt", "etag:remote-old"); ok {
+		t.Fatal("pending metadata bytes were offered as confirmed peer content")
 	}
 }

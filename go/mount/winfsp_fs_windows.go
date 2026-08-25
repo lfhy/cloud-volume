@@ -42,6 +42,7 @@ type winFspBucketFS struct {
 type winFspOpenFile struct {
 	localPath   string
 	virtualPath string
+	oid         uint64
 	file        *os.File
 	writable    bool
 	dirty       bool
@@ -51,7 +52,7 @@ type winFspOpenFile struct {
 // winFspOpenDir caches a directory listing between Opendir/Readdir/Releasedir.
 type winFspOpenDir struct {
 	virtualPath string
-	entries     []s3ops.ObjectInfo
+	entries     []winFspDirectoryEntry
 	pos         int
 	mu          sync.Mutex
 }
@@ -116,7 +117,7 @@ func (fs *winFspBucketFS) Statfs(_ string, stat *fuse.Statfs_t) int {
 
 func (fs *winFspBucketFS) Getattr(p string, stat *fuse.Stat_t, fh uint64) int {
 	if p == "/" {
-		fillWinFspDirStat(stat, 0o755)
+		fillWinFspDirStatWithInode(stat, 0o755, winFspVisibleOID(fs.ctx, fs.access, ""))
 		return 0
 	}
 	if fh != 0 {
@@ -125,7 +126,7 @@ func (fs *winFspBucketFS) Getattr(p string, stat *fuse.Stat_t, fh uint64) int {
 		fs.mu.Unlock()
 		if ok && open.file != nil {
 			if info, err := open.file.Stat(); err == nil {
-				fillWinFspFileStat(stat, info, 0o644)
+				fillWinFspFileStatWithInode(stat, info, 0o644, open.oid)
 				return 0
 			}
 		}
@@ -135,10 +136,10 @@ func (fs *winFspBucketFS) Getattr(p string, stat *fuse.Stat_t, fh uint64) int {
 		return -fuse.ENOENT
 	}
 	if info.IsDir {
-		fillWinFspDirStat(stat, 0o755)
+		fillWinFspDirStatWithInode(stat, 0o755, winFspVisibleOID(fs.ctx, fs.access, p))
 		return 0
 	}
-	fillWinFspFileStatFromObject(stat, info)
+	fillWinFspFileStatFromObjectWithInode(stat, info, winFspVisibleOID(fs.ctx, fs.access, p))
 	return 0
 }
 
@@ -195,7 +196,10 @@ func (fs *winFspBucketFS) Opendir(p string) (int, uint64) {
 	}
 	sortObjectInfos(items)
 	fs.mu.Lock()
-	fs.openDirs[handle] = &winFspOpenDir{virtualPath: p, entries: items}
+	fs.openDirs[handle] = &winFspOpenDir{
+		virtualPath: p,
+		entries:     winFspDirectoryEntries(fs.ctx, fs.access, p, items),
+	}
 	fs.mu.Unlock()
 	return 0, handle
 }
@@ -230,15 +234,15 @@ func (fs *winFspBucketFS) Readdir(
 	}
 	for open.pos < len(open.entries) {
 		entry := open.entries[open.pos]
-		name := baseName(entry.Key)
-		if entry.IsDir {
-			name = baseName(strings.TrimSuffix(entry.Key, "/"))
+		name := baseName(entry.info.Key)
+		if entry.info.IsDir {
+			name = baseName(strings.TrimSuffix(entry.info.Key, "/"))
 		}
 		var stat fuse.Stat_t
-		if entry.IsDir {
-			fillWinFspDirStat(&stat, 0o755)
+		if entry.info.IsDir {
+			fillWinFspDirStatWithInode(&stat, 0o755, entry.oid)
 		} else {
-			fillWinFspFileStatFromObject(&stat, entry)
+			fillWinFspFileStatFromObjectWithInode(&stat, entry.info, entry.oid)
 		}
 		if !fill(name, &stat, int64(open.pos+1)) {
 			open.pos++
@@ -259,6 +263,31 @@ func (fs *winFspBucketFS) Open(p string, flags int) (int, uint64) {
 	if fs.readOnly && writable {
 		return -fuse.EROFS, ^uint64(0)
 	}
+	if writable && flags&fuse.O_TRUNC != 0 {
+		clean := cleanVirtualPath(p)
+		if err := fs.access.hiddenTrashError(clean); err != nil {
+			return winFspErrno(err), ^uint64(0)
+		}
+		if flags&fuse.O_CREAT == 0 {
+			info, err := fs.access.statPath(fs.ctx, clean)
+			if err != nil {
+				return winFspErrno(err), ^uint64(0)
+			}
+			if info.IsDir {
+				return -fuse.EISDIR, ^uint64(0)
+			}
+		}
+		cachePath := fs.access.cachePathFor(clean)
+		if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
+			return winFspErrno(err), ^uint64(0)
+		}
+		file, err := os.OpenFile(cachePath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0o644)
+		if err != nil {
+			return winFspErrno(err), ^uint64(0)
+		}
+		fs.access.registerLocalWrite(clean, cachePath, 0)
+		return fs.registerOpen(p, cachePath, file, true, true, winFspVisibleOID(fs.ctx, fs.access, p))
+	}
 	localPath, info, err := fs.access.ensureLocalFile(fs.ctx, p)
 	if err != nil {
 		if writable && flags&fuse.O_CREAT != 0 {
@@ -270,7 +299,8 @@ func (fs *winFspBucketFS) Open(p string, flags int) (int, uint64) {
 			if openErr != nil {
 				return winFspErrno(openErr), ^uint64(0)
 			}
-			return fs.registerOpen(p, cachePath, file, true)
+			fs.access.registerLocalWrite(cleanVirtualPath(p), cachePath, 0)
+			return fs.registerOpen(p, cachePath, file, true, true, 0)
 		}
 		return winFspErrno(err), ^uint64(0)
 	}
@@ -283,7 +313,7 @@ func (fs *winFspBucketFS) Open(p string, flags int) (int, uint64) {
 		return winFspErrno(err), ^uint64(0)
 	}
 	_ = info
-	return fs.registerOpen(p, localPath, file, writable)
+	return fs.registerOpen(p, localPath, file, writable, false, winFspVisibleOID(fs.ctx, fs.access, p))
 }
 
 func (fs *winFspBucketFS) Create(p string, flags int, mode uint32) (int, uint64) {
@@ -302,7 +332,8 @@ func (fs *winFspBucketFS) Create(p string, flags int, mode uint32) (int, uint64)
 	if err != nil {
 		return winFspErrno(err), ^uint64(0)
 	}
-	return fs.registerOpen(p, cachePath, file, true)
+	fs.access.registerLocalWrite(clean, cachePath, 0)
+	return fs.registerOpen(p, cachePath, file, true, true, 0)
 }
 
 func (fs *winFspBucketFS) Read(p string, buff []byte, ofst int64, fh uint64) int {
@@ -364,6 +395,16 @@ func (fs *winFspBucketFS) Truncate(p string, size int64, fh uint64) int {
 }
 
 func (fs *winFspBucketFS) Flush(_ string, fh uint64) int {
+	return fs.syncOpenFile(fh)
+}
+
+// Fsync is intentionally local-only. Remote journal work remains asynchronous
+// and is admitted once at handle release, not once for every rsync sync call.
+func (fs *winFspBucketFS) Fsync(_ string, _ bool, fh uint64) int {
+	return fs.syncOpenFile(fh)
+}
+
+func (fs *winFspBucketFS) syncOpenFile(fh uint64) int {
 	if fh == 0 {
 		return 0
 	}
@@ -375,8 +416,8 @@ func (fs *winFspBucketFS) Flush(_ string, fh uint64) int {
 	}
 	open.mu.Lock()
 	defer open.mu.Unlock()
-	if open.writable && open.dirty {
-		_ = open.file.Sync()
+	if err := open.file.Sync(); err != nil {
+		return winFspErrno(err)
 	}
 	return 0
 }
@@ -393,15 +434,18 @@ func (fs *winFspBucketFS) Release(p string, fh uint64) int {
 	}
 	open.mu.Lock()
 	defer open.mu.Unlock()
+	stageErr := error(nil)
 	if open.writable && open.dirty {
 		if stat, err := open.file.Stat(); err == nil {
-			fs.access.registerLocalWrite(open.virtualPath, open.localPath, stat.Size())
+			stageErr = fs.access.stageLocalWrite(open.virtualPath, open.localPath, stat.Size())
 		}
-		fs.access.scheduleUpload(open.virtualPath, open.localPath)
 		open.dirty = false
 	}
 	if open.file != nil {
 		_ = open.file.Close()
+	}
+	if stageErr != nil {
+		return winFspErrno(stageErr)
 	}
 	return 0
 }
@@ -411,14 +455,18 @@ func (fs *winFspBucketFS) registerOpen(
 	virtualPath, localPath string,
 	file *os.File,
 	writable bool,
+	dirty bool,
+	oid uint64,
 ) (int, uint64) {
 	handle := fs.allocHandle()
 	fs.mu.Lock()
 	fs.openFiles[handle] = &winFspOpenFile{
 		localPath:   localPath,
 		virtualPath: cleanVirtualPath(virtualPath),
+		oid:         oid,
 		file:        file,
 		writable:    writable,
+		dirty:       dirty,
 	}
 	fs.mu.Unlock()
 	return 0, handle

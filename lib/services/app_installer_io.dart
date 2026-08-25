@@ -1,6 +1,6 @@
 // Desktop installer delegates to the Go bridge so all platform-specific
 // download + install + relaunch logic runs in Go, not Dart. Flutter renders
-// UI state only and polls progress through the TransferQueue.
+// UI state only; progress is exposed through the unified RemoteTaskStore.
 
 import 'package:remote_storage/services/app_update_service.dart';
 import 'package:remote_storage/services/proxy_http_client.dart';
@@ -12,9 +12,9 @@ const bool kSupportsInAppInstall = true;
 
 /// Starts the full download + install + relaunch flow in the Go bridge.
 ///
-/// Returns the Go transfer task id. Progress is reported via [TransferQueue]
-/// polling, not through [onProgress]. The callback is kept for source
-/// compatibility with older call sites and is intentionally unused.
+/// Returns the Go transfer task id. Progress is reported through the unified
+/// RemoteTaskStore projection, not through [onProgress]. The callback is kept
+/// for source compatibility with older call sites and is intentionally unused.
 Future<String> downloadAndInstallAsset(
   RemoteStorageGateway api,
   ReleaseAsset asset,

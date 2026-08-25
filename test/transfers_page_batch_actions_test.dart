@@ -1,5 +1,6 @@
 // Transfers page tests keep the header bulk actions wired to queue state.
 
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -11,6 +12,7 @@ import 'package:remote_storage/models/cached_file_record.dart';
 import 'package:remote_storage/models/config_backup.dart';
 import 'package:remote_storage/models/paged_listings.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
+import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/models/s3_objects.dart';
 import 'package:remote_storage/models/share_record.dart';
 import 'package:remote_storage/models/system_proxy_info.dart';
@@ -19,19 +21,20 @@ import 'package:remote_storage/models/transfer_job.dart';
 import 'package:remote_storage/models/sync_profile.dart';
 import 'package:remote_storage/pages/transfers_page.dart';
 import 'package:remote_storage/services/remote_storage_api.dart';
-import 'package:remote_storage/state/transfer_queue.dart';
+import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/widgets/list_selection_controls.dart';
+import 'package:remote_storage/widgets/sidebar_transfer_status.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
-    TransferQueue.instance.resetForTest();
+    RemoteTaskStore.instance.resetForTest();
   });
 
   tearDown(() {
-    TransferQueue.instance.resetForTest();
+    RemoteTaskStore.instance.resetForTest();
   });
 
   testWidgets('batch cancel from header cancels eligible selected tasks', (
@@ -43,27 +46,30 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final api = _TransfersPageFakeApi();
-    final queue = TransferQueue.instance;
-    queue.bindApi(api);
-
-    final pendingUpload = queue.startTask(
-      kind: TransferKind.upload,
+    final pendingUpload = const RemoteTask(
+      id: 'sync:test:pending-upload',
+      kind: RemoteTaskKind.upload,
+      status: RemoteTaskStatus.waiting,
       bucket: 'bucket-a',
-      key: 'pending-upload.txt',
-      localPath: '/tmp/pending-upload.txt',
+      targetPath: 'pending-upload.txt',
+      cancelable: true,
     );
-    final runningDownload = queue.startTask(
-      kind: TransferKind.download,
+    final runningDownload = const RemoteTask(
+      id: 'sync:test:running-download',
+      kind: RemoteTaskKind.download,
+      status: RemoteTaskStatus.running,
       bucket: 'bucket-a',
-      key: 'running-download.txt',
-      localPath: '/tmp/running-download.txt',
-    )..status = TransferStatus.running;
-    final doneUpload = queue.startTask(
-      kind: TransferKind.upload,
+      targetPath: 'running-download.txt',
+      cancelable: true,
+    );
+    final doneUpload = const RemoteTask(
+      id: 'sync:test:done-upload',
+      kind: RemoteTaskKind.upload,
+      status: RemoteTaskStatus.done,
       bucket: 'bucket-a',
-      key: 'done-upload.txt',
-      localPath: '/tmp/done-upload.txt',
-    )..status = TransferStatus.done;
+      targetPath: 'done-upload.txt',
+    );
+    api.tasks.addAll([pendingUpload, runningDownload, doneUpload]);
 
     await tester.pumpWidget(
       ShadApp(
@@ -77,8 +83,8 @@ void main() {
     await tester.tap(find.byType(ListSelectionControl).first);
     await tester.pump();
 
-    expect(find.text('批量取消 2'), findsOneWidget);
-    await tester.tap(find.text('批量取消 2'));
+    expect(find.text('取消 2'), findsOneWidget);
+    await tester.tap(find.text('取消 2'));
     await tester.pump();
 
     expect(
@@ -86,16 +92,552 @@ void main() {
       containsAll([pendingUpload.id, runningDownload.id]),
     );
     expect(api.canceledTaskIds, isNot(contains(doneUpload.id)));
-    expect(queue.statusOf(pendingUpload.id), TransferStatus.canceled);
-    expect(queue.statusOf(runningDownload.id), TransferStatus.canceled);
-    expect(queue.statusOf(doneUpload.id), TransferStatus.done);
     await tester.pumpWidget(const SizedBox.shrink());
-    TransferQueue.instance.resetForTest();
+    RemoteTaskStore.instance.resetForTest();
+  });
+
+  testWidgets('immediate sync uses one durable queue action with loading', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final triggered = Completer<void>();
+    final api = _TransfersPageFakeApi()..triggerAllGate = triggered.future;
+    api.tasks.addAll(const <RemoteTask>[
+      RemoteTask(
+        id: 'sync:test:waiting-one',
+        kind: RemoteTaskKind.upload,
+        status: RemoteTaskStatus.waiting,
+        source: RemoteTaskSource.metadata,
+        targetPath: 'one.txt',
+        triggerable: true,
+      ),
+      RemoteTask(
+        id: 'sync:test:waiting-two',
+        kind: RemoteTaskKind.mkdir,
+        status: RemoteTaskStatus.waiting,
+        source: RemoteTaskSource.metadata,
+        targetPath: 'two',
+        triggerable: true,
+      ),
+      RemoteTask(
+        id: 'sync:test:retry-wait',
+        kind: RemoteTaskKind.write,
+        status: RemoteTaskStatus.retryWait,
+        source: RemoteTaskSource.metadata,
+        targetPath: 'retry.txt',
+      ),
+      RemoteTask(
+        id: 'transfer:legacy-waiting',
+        kind: RemoteTaskKind.upload,
+        status: RemoteTaskStatus.waiting,
+        source: RemoteTaskSource.runtime,
+        targetPath: 'legacy.txt',
+        triggerable: true,
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Material(
+          child: TransfersPage(api: api, config: RemoteStorageConfig.empty()),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('立即同步 3'));
+    await tester.pump();
+
+    expect(find.text('正在同步…'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    triggered.complete();
+    await tester.pump();
+    await tester.pump();
+
+    expect(api.triggerAllCalls, 1);
+    expect(api.triggeredTaskIds, isEmpty);
+    await tester.pumpWidget(const SizedBox.shrink());
+    RemoteTaskStore.instance.resetForTest();
+  });
+
+  testWidgets('selected history uses explicit cleanup instead of cancel', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final cleanup = Completer<void>();
+    final api = _TransfersPageFakeApi()..clearHistoryGate = cleanup.future;
+    const done = RemoteTask(
+      id: 'sync:test:old-upload',
+      kind: RemoteTaskKind.upload,
+      status: RemoteTaskStatus.done,
+      bucket: 'bucket-a',
+      targetPath: 'old-upload.txt',
+    );
+    api.tasks.add(done);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Material(
+          child: TransfersPage(api: api, config: RemoteStorageConfig.empty()),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byType(ListSelectionControl).first);
+    await tester.pump();
+    expect(find.text('清理历史 1'), findsOneWidget);
+    await tester.tap(find.text('清理历史 1'));
+    await tester.pump();
+
+    expect(find.text('正在清理历史 1…'), findsOneWidget);
+    expect(find.text('正在清理全部历史 1…'), findsNothing);
+
+    cleanup.complete();
+    await tester.pump();
+    await tester.pump();
+
+    expect(api.clearedTaskIds, [done.id]);
+    expect(api.canceledTaskIds, isEmpty);
+    await tester.pumpWidget(const SizedBox.shrink());
+    RemoteTaskStore.instance.resetForTest();
+  });
+
+  testWidgets('clear-all history is available without selecting loaded rows', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _TransfersPageFakeApi()..respectActiveOnly = true;
+    api.tasks.addAll(const <RemoteTask>[
+      RemoteTask(
+        id: 'sync:test:all-history-1',
+        kind: RemoteTaskKind.download,
+        status: RemoteTaskStatus.done,
+        targetPath: 'first.txt',
+      ),
+      RemoteTask(
+        id: 'sync:test:all-history-2',
+        kind: RemoteTaskKind.upload,
+        status: RemoteTaskStatus.canceled,
+        targetPath: 'second.txt',
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Material(
+          child: TransfersPage(
+            api: api,
+            config: RemoteStorageConfig.empty(),
+            active: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    await tester.tap(find.text('清理全部历史 2'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      api.clearedTaskIds,
+      containsAll(<String>[
+        'sync:test:all-history-1',
+        'sync:test:all-history-2',
+      ]),
+    );
+    expect(RemoteTaskStore.instance.tasks, isEmpty);
+    await tester.pumpWidget(const SizedBox.shrink());
+    RemoteTaskStore.instance.resetForTest();
+  });
+
+  testWidgets('clear-all history shows a spinner until cleanup finishes', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final cleanup = Completer<void>();
+    final api = _TransfersPageFakeApi()
+      ..respectActiveOnly = true
+      ..clearHistoryGate = cleanup.future;
+    api.tasks.add(
+      const RemoteTask(
+        id: 'sync:test:slow-history',
+        kind: RemoteTaskKind.download,
+        status: RemoteTaskStatus.done,
+        targetPath: 'slow.txt',
+      ),
+    );
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Material(
+          child: TransfersPage(
+            api: api,
+            config: RemoteStorageConfig.empty(),
+            active: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    await tester.tap(find.text('清理全部历史 1'));
+    await tester.pump();
+
+    expect(find.text('正在清理全部历史 1…'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    cleanup.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox.shrink());
+    RemoteTaskStore.instance.resetForTest();
+  });
+
+  testWidgets('mount reads show the file path and byte range', (tester) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _TransfersPageFakeApi();
+    api.tasks.add(
+      const RemoteTask(
+        id: 'transfer:mount-read-1',
+        kind: RemoteTaskKind.download,
+        status: RemoteTaskStatus.done,
+        source: RemoteTaskSource.runtime,
+        sourcePath: 'root/charge.tar',
+        targetPath: 'bytes=1048576-1572863',
+        displayPath: 'root/charge.tar',
+        phaseDetail: 'mount_read',
+        progress: RemoteTaskProgress(
+          bytesCompleted: 524288,
+          totalBytes: 405169152,
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Material(
+          child: TransfersPage(api: api, config: RemoteStorageConfig.empty()),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('下载 root/charge.tar'), findsOneWidget);
+    expect(find.textContaining('读取范围 bytes=1048576-1572863'), findsOneWidget);
+    expect(find.text('下载 bytes=1048576-1572863'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    RemoteTaskStore.instance.resetForTest();
+  });
+
+  testWidgets('history-only active poll loads history on page entry', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _TransfersPageFakeApi()..respectActiveOnly = true;
+    api.tasks.add(
+      const RemoteTask(
+        id: 'sync:test:retained-history',
+        kind: RemoteTaskKind.download,
+        status: RemoteTaskStatus.done,
+        bucket: 'bucket-a',
+        sourcePath: 'retained.txt',
+      ),
+    );
+
+    Widget page({required bool active}) => ShadApp(
+      home: Material(
+        child: TransfersPage(
+          api: api,
+          config: RemoteStorageConfig.empty(),
+          active: active,
+        ),
+      ),
+    );
+
+    // MainLayout keeps this IndexedStack child alive while another page is
+    // selected, so the regression must cover the false -> true transition.
+    await tester.pumpWidget(page(active: false));
+    await tester.pump();
+    expect(RemoteTaskStore.instance.tasks, isEmpty);
+
+    await tester.pumpWidget(page(active: true));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('加载更多历史'), findsNothing);
+    expect(find.text('暂无任务'), findsNothing);
+
+    expect(RemoteTaskStore.instance.tasks, hasLength(1));
+    expect(find.text('下载 retained.txt'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    RemoteTaskStore.instance.resetForTest();
+  });
+
+  testWidgets('history pagination stays visible outside the scrolling rows', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _TransfersPageFakeApi()
+      ..respectActiveOnly = true
+      ..paginateHistory = true;
+    api.tasks.addAll(
+      List<RemoteTask>.generate(
+        124,
+        (index) => RemoteTask(
+          id: 'sync:test:paged-history-$index',
+          kind: RemoteTaskKind.download,
+          status: RemoteTaskStatus.done,
+          targetPath: 'history-$index.txt',
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Material(
+          child: TransfersPage(
+            api: api,
+            config: RemoteStorageConfig.empty(),
+            active: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('历史已显示 100 / 124'), findsOneWidget);
+    expect(find.text('加载下一页（还剩 24 条）'), findsOneWidget);
+
+    await tester.tap(find.text('加载下一页（还剩 24 条）'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(RemoteTaskStore.instance.loadedHistoryCount, 124);
+    expect(find.text('加载下一页（还剩 24 条）'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    RemoteTaskStore.instance.resetForTest();
+  });
+
+  testWidgets('small history queues render their complete count on entry', (
+    tester,
+  ) async {
+    final api = _TransfersPageFakeApi()
+      ..respectActiveOnly = true
+      ..paginateHistory = true;
+    api.tasks.addAll(
+      List<RemoteTask>.generate(
+        24,
+        (index) => RemoteTask(
+          id: 'sync:test:small-history-$index',
+          kind: RemoteTaskKind.download,
+          status: RemoteTaskStatus.done,
+          targetPath: 'small-history-$index.txt',
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Material(
+          child: TransfersPage(
+            api: api,
+            config: RemoteStorageConfig.empty(),
+            active: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(RemoteTaskStore.instance.loadedHistoryCount, 24);
+    expect(find.text('共 24 项'), findsOneWidget);
+    expect(find.textContaining('加载下一页'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    RemoteTaskStore.instance.resetForTest();
+  });
+
+  testWidgets('activating tasks does not animate the sidebar during build', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _TransfersPageFakeApi()..respectActiveOnly = true;
+    api.tasks.add(
+      const RemoteTask(
+        id: 'sync:test:sidebar-history',
+        kind: RemoteTaskKind.download,
+        status: RemoteTaskStatus.done,
+      ),
+    );
+
+    Widget page({required bool active}) => ShadApp(
+      home: Material(
+        child: Column(
+          children: [
+            Expanded(
+              child: TransfersPage(
+                api: api,
+                config: RemoteStorageConfig.empty(),
+                active: active,
+              ),
+            ),
+            SidebarTransferStatus(
+              accent: Colors.blue,
+              muted: Colors.grey,
+              onTap: () {},
+            ),
+          ],
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(page(active: false));
+    await tester.pump();
+    await tester.pumpWidget(page(active: true));
+    await tester.pump();
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    RemoteTaskStore.instance.resetForTest();
   });
 }
 
 class _TransfersPageFakeApi implements RemoteStorageGateway {
   final List<String> canceledTaskIds = <String>[];
+  final List<String> clearedTaskIds = <String>[];
+  final List<String> triggeredTaskIds = <String>[];
+  final List<RemoteTask> tasks = <RemoteTask>[];
+  bool respectActiveOnly = false;
+  bool paginateHistory = false;
+  Future<void>? clearHistoryGate;
+  Future<void>? triggerAllGate;
+  int triggerAllCalls = 0;
+
+  @override
+  Future<RemoteTaskPage> listRemoteTasks([
+    RemoteTaskFilter filter = const RemoteTaskFilter(),
+  ]) async {
+    final items = !respectActiveOnly || filter.includeHistory
+        ? tasks
+        : tasks.where((task) => task.status.isActive).toList(growable: false);
+    final history = tasks
+        .where(
+          (task) =>
+              task.status == RemoteTaskStatus.done ||
+              task.status == RemoteTaskStatus.canceled,
+        )
+        .length;
+    final offset = int.tryParse(filter.cursor) ?? 0;
+    final pagedItems = paginateHistory && filter.includeHistory
+        ? items.skip(offset).take(filter.limit).toList(growable: false)
+        : List<RemoteTask>.from(items);
+    final nextCursor =
+        paginateHistory &&
+            filter.includeHistory &&
+            offset + pagedItems.length < items.length
+        ? '${offset + pagedItems.length}'
+        : '';
+    return RemoteTaskPage(
+      items: pagedItems,
+      total: tasks.length,
+      hasTotal: true,
+      queue: RemoteTaskQueueCounts(
+        active: tasks.where((task) => task.status.isActive).length,
+        history: history,
+        total: tasks.length,
+        reported: true,
+      ),
+      nextCursor: nextCursor,
+    );
+  }
+
+  @override
+  Future<RemoteTask> getRemoteTask(String taskId) async =>
+      tasks.firstWhere((task) => task.id == taskId);
+
+  @override
+  Future<bool> cancelRemoteTask(String taskId) async {
+    canceledTaskIds.add(taskId);
+    return true;
+  }
+
+  @override
+  Future<bool> retryRemoteTask(String taskId) async => true;
+
+  @override
+  Future<bool> triggerRemoteTask(String taskId) async {
+    triggeredTaskIds.add(taskId);
+    return true;
+  }
+
+  @override
+  Future<int> triggerAllRemoteTasks({
+    String profileId = '',
+    String bucket = '',
+  }) async {
+    await triggerAllGate;
+    triggerAllCalls++;
+    return tasks.where(_isBulkSyncTask).length;
+  }
+
+  @override
+  Future<int> clearRemoteTaskHistory({
+    String profileId = '',
+    String bucket = '',
+    List<String> taskIds = const <String>[],
+  }) async {
+    await clearHistoryGate;
+    final ids = taskIds.isEmpty
+        ? tasks
+              .where(isRemoteTaskHistory)
+              .map((task) => task.id)
+              .toList(growable: false)
+        : taskIds;
+    clearedTaskIds.addAll(ids);
+    tasks.removeWhere((task) => ids.contains(task.id));
+    return ids.length;
+  }
 
   @override
   RemoteStorageCapabilities get capabilities =>
@@ -243,8 +785,7 @@ class _TransfersPageFakeApi implements RemoteStorageGateway {
   Future<List<BucketInfo>> listBuckets(
     RemoteStorageConfig config, {
     bool force = false,
-  }) async =>
-      throw UnimplementedError();
+  }) async => throw UnimplementedError();
 
   @override
   Future<BucketInfo> getBucketQuota(
@@ -306,24 +847,21 @@ class _TransfersPageFakeApi implements RemoteStorageGateway {
   @override
   Future<List<ConfigBackupSnapshot>> listConfigBackupsWithTarget(
     ConfigBackupTarget target,
-  ) async =>
-      throw UnimplementedError();
+  ) async => throw UnimplementedError();
 
   @override
   Future<BootstrapState> restoreConfigBackupWithTarget(
     ConfigBackupTarget target,
     String key, {
     String? password,
-  }) async =>
-      throw UnimplementedError();
+  }) async => throw UnimplementedError();
 
   @override
   Future<bool> verifyBackupPassword(
     ConfigBackupTarget target,
     String key, {
     String? password,
-  }) async =>
-      throw UnimplementedError();
+  }) async => throw UnimplementedError();
 
   @override
   Future<ObjectInfo> headObject(
@@ -373,8 +911,9 @@ class _TransfersPageFakeApi implements RemoteStorageGateway {
     String bucket,
     String key,
     bool isDirectory,
-    String newName,
-  ) async => throw UnimplementedError();
+    String newName, {
+    String taskId = '',
+  }) async => throw UnimplementedError();
 
   @override
   Future<void> copyObject(
@@ -486,7 +1025,11 @@ class _TransfersPageFakeApi implements RemoteStorageGateway {
 
   @override
   Future<int> cleanupStaleWindowsProcesses() async =>
-      throw UnimplementedError();
+      // Windows-only helper; tests run on the host without stale processes.
+      0;
+
+  @override
+  Future<int> sweepOrphanMounts() async => 0;
 
   @override
   Future<BucketMountStatus> mountBucket(
@@ -546,5 +1089,13 @@ class _TransfersPageFakeApi implements RemoteStorageGateway {
   @override
   Future<void> setP2PEnabled(bool enabled) async =>
       throw UnsupportedError('P2P 不可用');
-
 }
+
+bool _isBulkSyncTask(RemoteTask task) =>
+    task.source == RemoteTaskSource.metadata &&
+    switch (task.status) {
+      RemoteTaskStatus.waiting ||
+      RemoteTaskStatus.blocked ||
+      RemoteTaskStatus.retryWait => true,
+      _ => false,
+    };

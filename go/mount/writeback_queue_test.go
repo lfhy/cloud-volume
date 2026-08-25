@@ -2,6 +2,7 @@
 package mount
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -142,7 +143,7 @@ func TestRenameQueuedTransferProjectsNewPathNotInSync(t *testing.T) {
 	)
 	projector.calls = nil
 
-	if ok := access.writeback.rename("archive/output.zip", "archive/final.zip", false); !ok {
+	if ok, err := access.writeback.rename("archive/output.zip", "archive/final.zip", false); err != nil || !ok {
 		t.Fatal("expected queued writeback rename to succeed")
 	}
 	if len(projector.calls) != 1 {
@@ -276,6 +277,10 @@ func TestWritebackQueueRestoresPersistedEntries(t *testing.T) {
 	if reloaded.taskID != originalTaskID {
 		t.Fatalf("expected task %q after restore, got %q", originalTaskID, reloaded.taskID)
 	}
+	local, ok := access.cache.localFile(virtualPath)
+	if !ok || local.localPath != localPath || local.info.Size != int64(len("payload")) {
+		t.Fatalf("restored writeback did not restore local read marker: %+v ok=%t", local, ok)
+	}
 }
 
 func TestFlushNowReschedulesModifiedRunningEntry(t *testing.T) {
@@ -385,5 +390,92 @@ func TestDrainWaitsForRunningEntries(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("drain did not finish after running task cleared")
+	}
+}
+
+func TestDrainContextReturnsDeadlineWithoutDiscardingPendingWork(t *testing.T) {
+	access := newTestBucketAccess(t)
+	entry := &pendingWriteback{
+		taskID:      "task-running",
+		virtualPath: "archive/output.zip",
+		localPath:   filepath.Join(access.cacheRoot, "archive", "output.zip"),
+	}
+	access.writeback.mu.Lock()
+	access.writeback.running[entry.taskID] = entry
+	access.writeback.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if err := access.writeback.drainContext(ctx); err != context.DeadlineExceeded {
+		t.Fatalf("drain context error = %v, want deadline exceeded", err)
+	}
+	access.writeback.mu.Lock()
+	_, stillRunning := access.writeback.running[entry.taskID]
+	access.writeback.mu.Unlock()
+	if !stillRunning {
+		t.Fatal("deadline discarded the running writeback entry")
+	}
+}
+
+func TestDrainContextRestoresEveryUnsentEntryAfterQueueBackpressure(t *testing.T) {
+	first := &pendingWriteback{taskID: "first", virtualPath: "first.txt"}
+	second := &pendingWriteback{taskID: "second", virtualPath: "second.txt"}
+	queue := &writebackQueue{
+		entries: map[string]*pendingWriteback{
+			"first.txt":  first,
+			"second.txt": second,
+		},
+		running: map[string]*pendingWriteback{},
+		queue:   make(chan *pendingWriteback, 1),
+		stop:    make(chan struct{}),
+	}
+	// No dispatcher drains this sentinel, so drainContext must hit its deadline
+	// while trying to enqueue the first ready entry.
+	queue.queue <- &pendingWriteback{taskID: "sentinel", virtualPath: "sentinel"}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if err := queue.drainContext(ctx); err != context.DeadlineExceeded {
+		t.Fatalf("drain context error = %v, want deadline exceeded", err)
+	}
+	// Releasing the saturated dispatcher must let the canceled drain's due work
+	// enter the ordinary timer path again without another explicit drain call.
+	<-queue.queue
+	seen := map[string]bool{}
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	for len(seen) < 2 {
+		select {
+		case entry := <-queue.queue:
+			if entry != nil {
+				seen[entry.virtualPath] = true
+			}
+		case <-deadline.C:
+			t.Fatalf("canceled drain did not resume entries: %+v", seen)
+		}
+	}
+	if !seen["first.txt"] || !seen["second.txt"] {
+		t.Fatalf("canceled drain resumed the wrong entries: %+v", seen)
+	}
+}
+
+func TestRenameDrainsPendingEntryBeforeRemoteMove(t *testing.T) {
+	access := newTestBucketAccess(t)
+	oldPath := createTempFile(t, access.cacheRoot, "old.txt", "payload")
+	access.stageLocalWrite("old.txt", oldPath, int64(len("payload")))
+
+	if err := access.renamePath(context.Background(), "old.txt", "new.txt", false); err != nil {
+		t.Fatalf("rename local-only pending write: %v", err)
+	}
+	if access.writeback.entries["old.txt"] != nil || access.writeback.entries["new.txt"] != nil {
+		t.Fatalf("rename left a pending upload after draining source: %+v", access.writeback.entries)
+	}
+	if _, ok := access.cache.localFile("old.txt"); ok {
+		t.Fatal("drained source retained its local write marker")
+	}
+	if _, ok := access.cache.localFile("new.txt"); ok {
+		t.Fatal("rename recreated a local write marker after source drain")
+	}
+	if _, err := os.Stat(oldPath); err != nil {
+		t.Fatalf("drained cache bytes were unexpectedly removed: %v", err)
 	}
 }

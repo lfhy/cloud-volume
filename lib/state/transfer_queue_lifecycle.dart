@@ -4,6 +4,7 @@ part of 'transfer_queue.dart';
 extension TransferQueueLifecycle on TransferQueue {
   void bindApi(RemoteStorageGateway api) {
     _api = api;
+    RemoteTaskStore.instance.bindApi(api);
     unawaited(restorePersistedTransferQueueState(this).then((_) => pollNow()));
     _ensurePolling();
   }
@@ -15,6 +16,7 @@ extension TransferQueueLifecycle on TransferQueue {
     required String key,
     required String localPath,
     String targetPath = '',
+    bool publishRemoteTask = true,
   }) {
     if (id != null && _tasksById.containsKey(id)) {
       return _tasksById[id]!;
@@ -26,9 +28,12 @@ extension TransferQueueLifecycle on TransferQueue {
       key: key,
       localPath: localPath,
       targetPath: targetPath,
+      publishRemoteTask: publishRemoteTask,
+      createdAt: DateTime.now().toUtc().toIso8601String(),
     );
     _tasks.insert(0, task);
     _tasksById[task.id] = task;
+    _publishRemoteTask(task);
     _rebuildMountWritebackCounts();
     scheduleTransferQueuePersist(this);
     _scheduleNotifyListeners();
@@ -48,6 +53,7 @@ extension TransferQueueLifecycle on TransferQueue {
     task.statusDetail = '';
     task.error = error.toString();
     task.speedBytes = 0;
+    _publishRemoteTask(task);
     _rebuildMountWritebackCounts();
     scheduleTransferQueuePersist(this);
     _scheduleNotifyListeners();
@@ -67,6 +73,7 @@ extension TransferQueueLifecycle on TransferQueue {
     task.itemsCompleted = task.totalItems > 0
         ? task.totalItems
         : task.itemsCompleted;
+    _publishRemoteTask(task);
     _rebuildMountWritebackCounts();
     scheduleTransferQueuePersist(this);
     _scheduleNotifyListeners();
@@ -81,6 +88,7 @@ extension TransferQueueLifecycle on TransferQueue {
     task.statusDetail = '';
     task.speedBytes = 0;
     task.error = null;
+    _publishRemoteTask(task);
     _rebuildMountWritebackCounts();
     scheduleTransferQueuePersist(this);
     _scheduleNotifyListeners();

@@ -10,7 +10,19 @@ import (
 	"path/filepath"
 )
 
-func (b webDAVBackend) DownloadFile(ctx context.Context, _, key, localPath, _ string) error {
+func (b webDAVBackend) DownloadFile(
+	ctx context.Context,
+	bucket, key, localPath, taskID string,
+) (err error) {
+	var total int64
+	if taskID != "" {
+		if info, statErr := b.HeadObject(ctx, bucket, key); statErr == nil {
+			total = info.Size
+		}
+		var finish func(error)
+		ctx, finish = beginTrackedDownload(ctx, bucket, key, localPath, total, taskID, b.cfg.ProfileID)
+		defer func() { finish(err) }()
+	}
 	req, err := b.request(ctx, http.MethodGet, key, nil)
 	if err != nil {
 		return err
@@ -31,7 +43,11 @@ func (b webDAVBackend) DownloadFile(ctx context.Context, _, key, localPath, _ st
 		return err
 	}
 	defer out.Close()
-	_, err = io.Copy(out, resp.Body)
+	reader := io.Reader(resp.Body)
+	if taskID != "" {
+		reader = &trackedDownloadReader{ctx: ctx, reader: resp.Body, taskID: taskID}
+	}
+	_, err = io.Copy(out, reader)
 	return err
 }
 

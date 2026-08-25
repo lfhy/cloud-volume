@@ -23,11 +23,33 @@ func (h *cloudFilesHydrator) RefreshPlaceholders(
 	if h == nil || h.provider == nil || h.watcher == nil || h.access == nil {
 		return nil
 	}
+	placeholders := cloudFilesDirectoryPlaceholders(items)
+	return h.refreshPlaceholders(virtualPrefix, placeholders)
+}
+
+// RefreshMetadataPlaceholders retains metadata OIDs as Cloud Files identities
+// while using a separate fingerprint to keep same-size overwrites dehydrated.
+func (h *cloudFilesHydrator) RefreshMetadataPlaceholders(
+	virtualPrefix string,
+	items []metadataMountObject,
+) error {
+	if h == nil || h.provider == nil || h.watcher == nil || h.access == nil {
+		return nil
+	}
+	return h.refreshPlaceholders(
+		virtualPrefix,
+		cloudFilesMetadataDirectoryPlaceholders(items, h.access.metadataNamespaceID()),
+	)
+}
+
+func (h *cloudFilesHydrator) refreshPlaceholders(
+	virtualPrefix string,
+	placeholders []cloudPlaceholderInfo,
+) error {
 	localPath := cloudFilesVirtualPathToLocal(h.syncRoot, virtualPrefix)
 	if virtualPrefix == "" {
 		localPath = h.syncRoot
 	}
-	placeholders := cloudFilesDirectoryPlaceholders(items)
 	if err := h.refreshProjectedDirectory(localPath, placeholders); err != nil {
 		return err
 	}
@@ -47,6 +69,23 @@ func cloudFilesDirectoryPlaceholders(items []s3ops.ObjectInfo) []cloudPlaceholde
 			continue
 		}
 		placeholder := cloudFilesPlaceholderInfo(item)
+		placeholder.RelativePath = relativeName
+		placeholders = append(placeholders, placeholder)
+	}
+	return placeholders
+}
+
+func cloudFilesMetadataDirectoryPlaceholders(
+	items []metadataMountObject,
+	namespace string,
+) []cloudPlaceholderInfo {
+	placeholders := make([]cloudPlaceholderInfo, 0, len(items))
+	for _, item := range items {
+		relativeName := strings.TrimSuffix(baseName(item.info.Key), "/")
+		if relativeName == "" {
+			continue
+		}
+		placeholder := cloudFilesMetadataPlaceholderInfo(item, namespace)
 		placeholder.RelativePath = relativeName
 		placeholders = append(placeholders, placeholder)
 	}
@@ -227,6 +266,9 @@ func (h *cloudFilesHydrator) preserveLocalProjection(
 	if clean == "" || h.access.cache.isMarkedDeleted(clean) {
 		return true
 	}
+	if _, local := h.access.cache.localEntry(clean); local {
+		return true
+	}
 	return h.access.writeback != nil && h.access.writeback.hasPendingAtOrBelow(clean, isDir)
 }
 
@@ -247,6 +289,7 @@ func cloudFilesPlaceholderMatches(
 ) bool {
 	return left.FileSize == right.FileSize &&
 		left.FileID == right.FileID &&
+		left.Fingerprint == right.Fingerprint &&
 		left.IsDirectory == right.IsDirectory &&
 		left.ModTime.Equal(right.ModTime)
 }

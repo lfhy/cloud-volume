@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestWritebackStoreMergesLatestEntryAcrossQueueFiles(t *testing.T) {
@@ -38,7 +39,7 @@ func TestWritebackStoreMergesLatestEntryAcrossQueueFiles(t *testing.T) {
 		},
 	})
 
-	store, err := openWritebackStore(storeDir)
+	store, err := openWritebackStore(storeDir, "test-scope")
 	if err != nil {
 		t.Fatalf("openWritebackStore: %v", err)
 	}
@@ -54,11 +55,59 @@ func TestWritebackStoreMergesLatestEntryAcrossQueueFiles(t *testing.T) {
 	}
 }
 
+func TestWritebackStoreKeepsSamePathForSeparateScopes(t *testing.T) {
+	t.Parallel()
+
+	storeDir := filepath.Join(t.TempDir(), writebackStoreDirName)
+	writeWritebackQueueFile(t, filepath.Join(storeDir, "queue-100.json"), map[string]writebackRecord{
+		"scope-a:folder/file.txt": {
+			Scope:           "scope-a",
+			TaskID:          "task-a",
+			VirtualPath:     "folder/file.txt",
+			LocalPath:       "C:/scope-a.txt",
+			ModTimeUnixNano: 100,
+			DueAtUnixNano:   200,
+		},
+	})
+	writeWritebackQueueFile(t, filepath.Join(storeDir, "queue-101.json"), map[string]writebackRecord{
+		"scope-b:folder/file.txt": {
+			Scope:           "scope-b",
+			TaskID:          "task-b",
+			VirtualPath:     "folder/file.txt",
+			LocalPath:       "C:/scope-b.txt",
+			ModTimeUnixNano: 200,
+			DueAtUnixNano:   300,
+		},
+	})
+
+	store, err := openWritebackStore(storeDir, "scope-a")
+	if err != nil {
+		t.Fatalf("openWritebackStore: %v", err)
+	}
+	records, err := store.list()
+	if err != nil {
+		t.Fatalf("store.list before compact: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("same path across scopes collapsed before compact: %+v", records)
+	}
+	if err := store.replaceWithMerged(records); err != nil {
+		t.Fatalf("store.replaceWithMerged: %v", err)
+	}
+	records, err = store.list()
+	if err != nil {
+		t.Fatalf("store.list after compact: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("same path across scopes collapsed during compact: %+v", records)
+	}
+}
+
 func TestWritebackStoreDeleteRemovesOnlyCurrentProcessEntry(t *testing.T) {
 	t.Parallel()
 
 	storeDir := filepath.Join(t.TempDir(), writebackStoreDirName)
-	store, err := openWritebackStore(storeDir)
+	store, err := openWritebackStore(storeDir, "test-scope")
 	if err != nil {
 		t.Fatalf("openWritebackStore: %v", err)
 	}
@@ -75,6 +124,7 @@ func TestWritebackStoreDeleteRemovesOnlyCurrentProcessEntry(t *testing.T) {
 	})
 
 	entry := &pendingWriteback{
+		scope:           "test-scope",
 		taskID:          "task-local",
 		virtualPath:     "local/file.txt",
 		localPath:       "C:/local.txt",
@@ -104,7 +154,7 @@ func TestWritebackStoreReplaceWithMergedCompactsOldQueueFiles(t *testing.T) {
 	t.Parallel()
 
 	storeDir := filepath.Join(t.TempDir(), writebackStoreDirName)
-	store, err := openWritebackStore(storeDir)
+	store, err := openWritebackStore(storeDir, "test-scope")
 	if err != nil {
 		t.Fatalf("openWritebackStore: %v", err)
 	}
@@ -159,6 +209,7 @@ func TestRestorePersistedEntriesDropsMissingLocalPaths(t *testing.T) {
 	)
 	writeWritebackQueueFile(t, filepath.Join(storeDir, "queue-100.json"), map[string]writebackRecord{
 		"folder/file.txt": {
+			Scope:           access.writeback.scope,
 			TaskID:          "task-stale",
 			VirtualPath:     "folder/file.txt",
 			LocalPath:       missingPath,
@@ -190,6 +241,82 @@ func TestRestorePersistedEntriesDropsMissingLocalPaths(t *testing.T) {
 	}
 	if len(records) != 0 {
 		t.Fatalf("expected stale persisted records to be removed, got %d", len(records))
+	}
+}
+
+func TestRestorePersistedEntriesKeepsCacheRootFiles(t *testing.T) {
+	access := newTestBucketAccess(t)
+	cacheRoot := t.TempDir()
+	access.cacheRoot = cacheRoot
+	localPath := filepath.Join(cacheRoot, "archive", "output.zip")
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		t.Fatalf("mkdir cache path: %v", err)
+	}
+	if err := os.WriteFile(localPath, []byte("payload"), 0o600); err != nil {
+		t.Fatalf("write cache file: %v", err)
+	}
+
+	storeDir := filepath.Join(access.sessionRoot, writebackStoreDirName)
+	writeWritebackQueueFile(t, filepath.Join(storeDir, "queue-100.json"), map[string]writebackRecord{
+		"archive/output.zip": {
+			Scope:           access.writeback.scope,
+			TaskID:          "task-cache-root",
+			VirtualPath:     "archive/output.zip",
+			LocalPath:       localPath,
+			Size:            int64(len("payload")),
+			ModTimeUnixNano: time.Now().UnixNano(),
+			DueAtUnixNano:   time.Now().Add(time.Hour).UnixNano(),
+		},
+	})
+
+	if err := access.writeback.shutdown(); err != nil {
+		t.Fatalf("shutdown writeback queue: %v", err)
+	}
+	restored, err := newWritebackQueue(access)
+	if err != nil {
+		t.Fatalf("restore writeback queue: %v", err)
+	}
+	access.writeback = restored
+
+	entry := restored.entries["archive/output.zip"]
+	if entry == nil || entry.localPath != localPath {
+		t.Fatalf("cache-root record was not restored: %+v", entry)
+	}
+}
+
+func TestRestorePersistedEntriesDefersDifferentRemoteScope(t *testing.T) {
+	access := newTestBucketAccess(t)
+	localPath := createTempFile(t, access.cacheRoot, "scope.txt", "payload")
+	storeDir := filepath.Join(access.sessionRoot, writebackStoreDirName)
+	writeWritebackQueueFile(t, filepath.Join(storeDir, "queue-100.json"), map[string]writebackRecord{
+		"scope.txt": {
+			Scope:           "different-remote-scope",
+			TaskID:          "task-different-scope",
+			VirtualPath:     "scope.txt",
+			LocalPath:       localPath,
+			Size:            int64(len("payload")),
+			ModTimeUnixNano: time.Now().UnixNano(),
+			DueAtUnixNano:   time.Now().Add(time.Hour).UnixNano(),
+		},
+	})
+
+	if err := access.writeback.shutdown(); err != nil {
+		t.Fatalf("shutdown writeback queue: %v", err)
+	}
+	restored, err := newWritebackQueue(access)
+	if err != nil {
+		t.Fatalf("restore writeback queue: %v", err)
+	}
+	access.writeback = restored
+	if len(restored.entries) != 0 {
+		t.Fatalf("different remote scope was restored: %+v", restored.entries)
+	}
+	records, err := restored.store.list()
+	if err != nil {
+		t.Fatalf("read deferred scope records: %v", err)
+	}
+	if len(records) != 1 || records[0].Scope != "different-remote-scope" {
+		t.Fatalf("different scope record was not preserved: %+v", records)
 	}
 }
 

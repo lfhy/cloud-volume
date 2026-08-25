@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
+	"remote-storage/go/mount/metadata"
 	s3ops "remote-storage/go/s3"
 )
 
@@ -29,6 +31,9 @@ func (a *bucketAccess) listDirectoryWithPrefetch(
 	}
 	if a.overlay.handles(virtualPrefix) {
 		return a.overlay.listDirectory(virtualPrefix)
+	}
+	if a.metadataService() != nil {
+		return a.listMetadataDirectory(ctx, virtualPrefix, allowPrefetch)
 	}
 	if items, ok := a.cache.cachedList(cleanVirtualPath(virtualPrefix)); ok {
 		merged := a.filterTrashItems(
@@ -82,14 +87,29 @@ func (a *bucketAccess) statPath(
 	if item, ok := a.cache.localFile(clean); ok {
 		return item.info, nil
 	}
-	if item, ok := a.cache.cachedObject(clean); ok {
+	if item, ok := a.cache.localEntry(clean); ok {
 		return item, nil
 	}
 	if a.cache.isMarkedDeleted(clean) {
 		return s3ops.ObjectInfo{}, os.ErrNotExist
 	}
-
 	parentPrefix := parentVirtualPrefix(clean)
+	if a.cache.isLocalDirectory(parentPrefix) {
+		// Children of a directory created in this mount are represented by the
+		// local overlay until writeback catches up, so an absent child is local.
+		return s3ops.ObjectInfo{}, os.ErrNotExist
+	}
+	if a.metadataService() != nil {
+		item, err := a.metadataStat(ctx, clean)
+		if err != nil {
+			return s3ops.ObjectInfo{}, err
+		}
+		return item.info, nil
+	}
+	if item, ok := a.cache.cachedObject(clean); ok {
+		return item, nil
+	}
+
 	if items, ok := a.cache.cachedList(parentPrefix); ok {
 		for _, item := range a.cache.mergeLocalFiles(parentPrefix, items) {
 			if item.Key == clean || item.Key == ensureDirSuffix(clean) {
@@ -102,12 +122,6 @@ func (a *bucketAccess) statPath(
 		// turn a many-small-file copy into one upstream Stat call per file.
 		return s3ops.ObjectInfo{}, os.ErrNotExist
 	}
-	if a.cache.isLocalDirectory(parentPrefix) {
-		// Children of a directory created in this mount are represented by the
-		// local overlay until writeback catches up, so an absent child is local.
-		return s3ops.ObjectInfo{}, os.ErrNotExist
-	}
-
 	flightKey := "stat:" + clean
 	value, err, _ := a.group.Do(flightKey, func() (any, error) {
 		info, err := a.fetchStat(ctx, clean)
@@ -141,25 +155,62 @@ func (a *bucketAccess) ensureLocalFile(
 		}
 		return a.overlay.localPath(clean), info, nil
 	}
-	if item, ok := a.cache.localFile(clean); ok {
-		if isUsableLocalFile(item.localPath, item.info.Size) {
-			return item.localPath, item.info, nil
+	var (
+		info       s3ops.ObjectInfo
+		metaItem   metadataMountObject
+		hasMeta    bool
+		localEntry localFile
+		hasLocal   bool
+	)
+	if item, ok := a.cache.localFile(clean); ok && isUsableLocalFile(item.localPath, item.info.Size) {
+		localEntry, hasLocal = item, true
+	}
+	if a.metadataService() != nil {
+		item, metaErr := a.metadataStat(ctx, clean)
+		if metaErr != nil {
+			if hasLocal && errors.Is(metaErr, os.ErrNotExist) && !a.cache.isMarkedDeleted(clean) {
+				return localEntry.localPath, localEntry.info, nil
+			}
+			return "", s3ops.ObjectInfo{}, metaErr
+		}
+		metaItem, hasMeta, info = item, true, item.info
+		if metaItem.state == metadata.StateSynced {
+			// The worker confirmed the exact generation this cache file was
+			// materialized from, so its bytes already match the remote object.
+			promoteConfirmedPendingStamp(
+				a.cachePathFor(clean), info, metaItem.inode, metaItem.contentGeneration,
+			)
+		}
+		if hasLocal {
+			// A path-indexed marker belongs to an active mount/local write. Keep
+			// that handle's bytes authoritative while a page generation changes.
+			return localEntry.localPath, localEntry.info, nil
+		}
+	} else {
+		var err error
+		info, err = a.statPath(ctx, clean)
+		if err != nil {
+			return "", s3ops.ObjectInfo{}, err
 		}
 	}
-
-	info, err := a.fetchStat(ctx, clean)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			a.cache.invalidatePath(clean)
-		}
-		return "", s3ops.ObjectInfo{}, err
-	}
-	a.cache.storeObject(clean, info)
 	if info.IsDir {
 		return "", s3ops.ObjectInfo{}, fmt.Errorf("%s is a directory", clean)
 	}
 
 	localPath := a.cachePathFor(clean)
+	if hasMeta && metadataPendingState(metaItem.state) && metaItem.contentGeneration != 0 {
+		if matchesPendingDownloadStamp(localPath, info, metaItem.inode, metaItem.contentGeneration) {
+			return localPath, info, nil
+		}
+		if pendingPath, pendingItem, handled, pendingErr := a.materializeMetadataPendingFile(
+			ctx, clean, localPath, metaItem,
+		); handled || pendingErr != nil {
+			if pendingErr != nil {
+				return "", s3ops.ObjectInfo{}, pendingErr
+			}
+			return pendingPath, pendingItem.info, nil
+		}
+	}
 	reconcileDownloadArtifacts(localPath, info)
 	if isCompleteDownloadUsable(localPath, info) {
 		return localPath, info, nil
@@ -187,21 +238,22 @@ func (a *bucketAccess) mergeOverlayItems(
 	if err != nil || len(overlayItems) == 0 {
 		return items
 	}
-	byKey := make(map[string]s3ops.ObjectInfo, len(items)+len(overlayItems))
+	byPath := make(map[string]s3ops.ObjectInfo, len(items)+len(overlayItems))
 	for _, item := range items {
-		byKey[item.Key] = item
+		byPath[cleanVirtualPath(strings.TrimSuffix(item.Key, "/"))] = item
 	}
 	for _, item := range overlayItems {
-		byKey[item.Key] = item
+		byPath[cleanVirtualPath(strings.TrimSuffix(item.Key, "/"))] = item
 	}
-	merged := make([]s3ops.ObjectInfo, 0, len(byKey))
-	for _, item := range byKey {
+	merged := make([]s3ops.ObjectInfo, 0, len(byPath))
+	for _, item := range byPath {
 		merged = append(merged, item)
 	}
 	return merged
 }
 
 func (a *bucketAccess) localReadablePath(
+	ctx context.Context,
 	virtualPath string,
 	info s3ops.ObjectInfo,
 ) (string, bool) {
@@ -209,6 +261,23 @@ func (a *bucketAccess) localReadablePath(
 		return item.localPath, true
 	}
 	localPath := a.cachePathFor(cleanVirtualPath(virtualPath))
+	// A normal cache stamp identifies a confirmed remote object. Pending data
+	// has the same path but a distinct immutable chunk generation, so a prior
+	// equal-size/mtime cache file must not bypass chunk-backed reads.
+	if a.metadataService() != nil {
+		item, err := a.metadataStat(ctx, virtualPath)
+		if err != nil {
+			return "", false
+		}
+		if item.state == metadata.StateSynced {
+			promoteConfirmedPendingStamp(localPath, item.info, item.inode, item.contentGeneration)
+		}
+		if metadataPendingState(item.state) && item.contentGeneration != 0 {
+			return localPath, matchesPendingDownloadStamp(
+				localPath, info, item.inode, item.contentGeneration,
+			)
+		}
+	}
 	reconcileDownloadArtifacts(localPath, info)
 	if isCompleteDownloadUsable(localPath, info) {
 		return localPath, true
@@ -222,9 +291,22 @@ func (a *bucketAccess) readRemoteRange(
 	offset,
 	length int64,
 ) ([]byte, error) {
+	clean := cleanVirtualPath(virtualPath)
+	if a.cache.isMarkedDeleted(clean) {
+		return nil, os.ErrNotExist
+	}
+	if a.metadataService() != nil {
+		item, err := a.metadataStat(ctx, clean)
+		if err != nil {
+			return nil, err
+		}
+		if data, handled, pendingErr := a.readMetadataPendingRange(ctx, item, offset, length); handled || pendingErr != nil {
+			return data, pendingErr
+		}
+	}
 	timeoutCtx, cancel := a.withTransferTimeout(ctx)
 	defer cancel()
-	data, err := a.backend.ReadObjectRange(timeoutCtx, a.bucket, a.remoteKey(virtualPath), offset, length)
+	data, err := a.backend.ReadObjectRange(timeoutCtx, a.bucket, a.remoteKey(clean), offset, length)
 	if err != nil && errors.Is(err, os.ErrNotExist) {
 		// Remote file was deleted while the metadata cache was still stale.
 		// Invalidate the cached entries so subsequent access re-fetches from remote.
@@ -267,8 +349,28 @@ func (a *bucketAccess) MarkExternalDelete(virtualPath string, isDir bool) {
 // the path plus its parent listings so the new entry becomes visible on the
 // next read without waiting for the list TTL.
 func (a *bucketAccess) InvalidateExternalUpload(virtualPath string, isDir bool) {
+	if a == nil {
+		return
+	}
+	a.writebackMu.Lock()
+	defer a.writebackMu.Unlock()
 	clean := cleanVirtualPath(virtualPath)
-	a.cache.removeLocalPath(clean, isDir)
+	pending := a.writeback != nil && a.writeback.hasPendingAtOrBelow(clean, isDir)
+	if !pending && !isDir {
+		_, pending = a.cache.localFile(clean)
+	}
+	if !pending && isDir {
+		pending = a.cache.isLocalDirectory(clean)
+	}
+	if !pending {
+		a.cache.removeLocalPath(clean, isDir)
+	} else {
+		log.Printf(
+			"[mount/external] preserve-pending-local path=%q is_dir=%t",
+			clean,
+			isDir,
+		)
+	}
 	a.cache.invalidatePath(clean)
 	a.cache.invalidatePath(parentVirtualPrefix(clean))
 	if a.externalUpload != nil {
@@ -283,4 +385,70 @@ func (a *bucketAccess) InvalidateExternalUpload(virtualPath string, isDir bool) 
 func (a *bucketAccess) InvalidateExternalRename(oldPath, newPath string, isDir bool) {
 	a.MarkExternalDelete(oldPath, isDir)
 	a.InvalidateExternalUpload(newPath, isDir)
+}
+
+// projectMetadataDelete projects an accepted Desired tombstone while retaining
+// metadata as the remote-state authority for the worker and future refreshes.
+func (a *bucketAccess) projectMetadataDelete(projection metadata.PathProjection, isDir bool) {
+	if a == nil {
+		return
+	}
+	a.writebackMu.Lock()
+	defer a.writebackMu.Unlock()
+	a.projectMetadataDeleteLocked(projection, isDir)
+}
+
+func (a *bucketAccess) projectMetadataDeleteLocked(projection metadata.PathProjection, isDir bool) {
+	if !a.metadataProjectionCurrentLocked(projection) {
+		return
+	}
+	clean := cleanVirtualPath(projection.Path)
+	a.cache.markDeletedRetainingBytes(clean, isDir)
+	a.cache.invalidatePath(clean)
+}
+
+// projectMetadataUpload clears path-keyed mount-local markers that would
+// otherwise override the newer metadata Desired entry in a mounted read view.
+func (a *bucketAccess) projectMetadataUpload(projection metadata.PathProjection, isDir bool) {
+	if a == nil {
+		return
+	}
+	a.writebackMu.Lock()
+	defer a.writebackMu.Unlock()
+	a.projectMetadataUploadLocked(projection, isDir)
+}
+
+func (a *bucketAccess) projectMetadataUploadLocked(projection metadata.PathProjection, isDir bool) {
+	if !a.metadataProjectionCurrentLocked(projection) {
+		return
+	}
+	clean := cleanVirtualPath(projection.Path)
+	a.cache.clearLocalMarkers(clean, isDir)
+	a.cache.invalidatePath(clean)
+	a.cache.invalidatePath(parentVirtualPrefix(clean))
+}
+
+func (a *bucketAccess) projectMetadataRename(oldPath string, target metadata.PathProjection, isDir bool) {
+	if a == nil {
+		return
+	}
+	a.writebackMu.Lock()
+	defer a.writebackMu.Unlock()
+	a.projectMetadataDeleteLocked(metadata.PathProjection{Path: oldPath}, isDir)
+	a.projectMetadataUploadLocked(target, isDir)
+}
+
+// metadataProjectionCurrentLocked prevents an old page callback from changing
+// a mount cache after a newer mount mutation has advanced the Desired path.
+func (a *bucketAccess) metadataProjectionCurrentLocked(projection metadata.PathProjection) bool {
+	service := a.metadataService()
+	if service == nil {
+		return false
+	}
+	current, err := service.ProjectionCurrent(projection)
+	if err != nil {
+		log.Printf("[mount/metadata] projection-check path=%q error=%v", projection.Path, err)
+		return false
+	}
+	return current
 }

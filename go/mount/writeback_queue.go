@@ -66,6 +66,7 @@ func (q *writebackQueue) enqueue(virtualPath, localPath string, size int64) {
 	}
 	q.supersedeRunningLocked(clean, localPath)
 	entry := &pendingWriteback{
+		scope:           q.scope,
 		taskID:          taskID,
 		virtualPath:     clean,
 		localPath:       localPath,
@@ -339,6 +340,7 @@ func (q *writebackQueue) refreshEntryFromDisk(
 		return nil
 	}
 	refreshed := &pendingWriteback{
+		scope:           entry.scope,
 		taskID:          entry.taskID,
 		virtualPath:     entry.virtualPath,
 		localPath:       entry.localPath,
@@ -421,5 +423,6 @@ func s3opsQueueTransferForEntry(access *bucketAccess, entry *pendingWriteback) {
 		entry.localPath,
 		entry.size,
 	)
+	s3ops.SetTransferProfile(entry.taskID, access.config.ProfileID)
 	s3ops.SetTransferStatusDetail(entry.taskID, "sync_wait")
 }

@@ -11,6 +11,7 @@ import 'package:remote_storage/models/cached_file_record.dart';
 import 'package:remote_storage/models/config_backup.dart';
 import 'package:remote_storage/models/paged_listings.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
+import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/models/s3_objects.dart';
 import 'package:remote_storage/models/share_record.dart';
 import 'package:remote_storage/models/system_proxy_info.dart';
@@ -24,6 +25,7 @@ part 'remote_storage_api_desktop_paging.dart';
 part 'remote_storage_api_desktop_runtime.dart';
 part 'remote_storage_api_desktop_storage.dart';
 part 'remote_storage_api_desktop_cache.dart';
+part 'remote_storage_api_desktop_tasks.dart';
 
 dynamic _invokeBridgeCall(
   String libraryPath,
@@ -40,7 +42,8 @@ class RemoteStorageApi
         _RemoteStoragePagingApiMixin,
         _RemoteStorageRuntimeApiMixin,
         _RemoteStorageDesktopStorageApiMixin,
-        _RemoteStorageCacheApiMixin
+        _RemoteStorageCacheApiMixin,
+        _RemoteStorageDesktopTasksApiMixin
     implements RemoteStorageGateway, ActiveMountQuery {
   RemoteStorageApi(this._bridge);
 

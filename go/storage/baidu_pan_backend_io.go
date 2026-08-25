@@ -85,6 +85,7 @@ func (b baiduPanBackend) DownloadFile(
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(ctx)
 		s3ops.StartQueuedTransfer(taskID, "download", bucket, key, localPath, info.Size, cancel)
+		s3ops.SetTransferProfile(taskID, b.cfg.ProfileID)
 		defer func() { s3ops.FinishQueuedTransfer(taskID, finishErr) }()
 	}
 	cfg := b.bucketConfig(bucket)
@@ -203,6 +204,7 @@ func (b baiduPanBackend) uploadReaderInternal(
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(ctx)
 		s3ops.StartQueuedTransfer(taskID, "upload", bucket, cleanKey, localPath, size, cancel)
+		s3ops.SetTransferProfile(taskID, b.cfg.ProfileID)
 	}
 	tracked := body
 	if taskID != "" {

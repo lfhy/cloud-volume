@@ -22,4 +22,16 @@ void main() {
 
     expect(config.effectiveMountRemotePollSeconds, 5);
   });
+
+  test('profile identity survives JSON parsing and copyWith', () {
+    final config = RemoteStorageConfig.fromJson(<String, dynamic>{
+      'profileId': 'stable-profile-id',
+    });
+
+    expect(config.profileId, 'stable-profile-id');
+    expect(
+      config.copyWith(displayName: 'renamed').toJson(),
+      containsPair('profileId', 'stable-profile-id'),
+    );
+  });
 }

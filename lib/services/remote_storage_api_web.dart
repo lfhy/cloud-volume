@@ -11,6 +11,7 @@ import 'package:remote_storage/models/cached_file_record.dart';
 import 'package:remote_storage/models/config_backup.dart';
 import 'package:remote_storage/models/paged_listings.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
+import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/models/s3_objects.dart';
 import 'package:remote_storage/models/share_record.dart';
 import 'package:remote_storage/models/system_proxy_info.dart';
@@ -22,6 +23,7 @@ import 'package:remote_storage/services/remote_storage_gateway.dart';
 part 'remote_storage_api_web_objects.dart';
 part 'remote_storage_api_web_paging.dart';
 part 'remote_storage_api_web_transfers.dart';
+part 'remote_storage_api_web_tasks.dart';
 
 class RemoteStorageRequestException implements Exception {
   const RemoteStorageRequestException(this.message);
@@ -36,7 +38,8 @@ class RemoteStorageApi
     with
         _RemoteStorageWebObjectApiMixin,
         _RemoteStorageWebPagingApiMixin,
-        _RemoteStorageWebTransferApiMixin
+        _RemoteStorageWebTransferApiMixin,
+        _RemoteStorageWebTasksApiMixin
     implements RemoteStorageGateway {
   RemoteStorageApi({http.Client? client}) : _client = client ?? http.Client();
 
@@ -397,6 +400,9 @@ class RemoteStorageApi
     }
     return 0;
   }
+
+  @override
+  Future<int> sweepOrphanMounts() async => 0;
 
   @override
   Future<CacheStats> getCacheStats(RemoteStorageConfig config) async {

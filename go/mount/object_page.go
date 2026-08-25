@@ -65,6 +65,11 @@ func (m *manager) listMountedObjectPage(
 		log.Printf("[mount/object-page] sync-inactive bucket=%q prefix=%q", bucket, prefix)
 		return s3ops.ObjectPage{}, false, nil
 	}
+	if !existing.mounted {
+		m.mu.Unlock()
+		log.Printf("[mount/object-page] sync-unready bucket=%q prefix=%q", bucket, prefix)
+		return s3ops.ObjectPage{}, false, nil
+	}
 	session := existing
 	if !mountSessionMatches(session, cfg, trimmedBucket, MountOptions{}) || session.access == nil {
 		m.mu.Unlock()

@@ -1,0 +1,427 @@
+// Namespace registry maps stable profile identities to durable metadata roots.
+package metadata
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	storageconfig "remote-storage/go/config"
+	storageops "remote-storage/go/storage"
+)
+
+// Manager owns one Service/Worker pair per active namespace.
+type Manager struct {
+	mu           sync.Mutex
+	baseDir      string
+	services     map[string]*managedService
+	groupCacheMu sync.Mutex
+	groupCache   []TaskGroup
+	groupCacheAt time.Time
+	// groupCacheVersion lets readers reject a snapshot built while namespace
+	// topology or durable task state changed underneath it.
+	groupCacheVersion uint64
+	// taskChangeHooks fan newly acquired services into live task-change
+	// subscriptions so late namespaces push ticks too.
+	taskChangeMu     sync.Mutex
+	taskChangeHooks  map[int]func(*Service)
+	taskChangeNextID int
+}
+
+// NamespaceManifest is the non-secret discovery record kept beside a metadata DB.
+// It lets the task page reopen durable pending journals after an app restart.
+type NamespaceManifest struct {
+	Version   int    `json:"version"`
+	ID        string `json:"id"`
+	ProfileID string `json:"profileId"`
+	Bucket    string `json:"bucket"`
+}
+
+type managerRegistry struct {
+	mu      sync.Mutex
+	manager *Manager
+	baseDir string
+}
+
+func (r *managerRegistry) acquire(baseDir string) (*Manager, error) {
+	baseDir = filepath.Clean(baseDir)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.manager == nil {
+		r.manager = NewManager(baseDir)
+		r.baseDir = baseDir
+		return r.manager, nil
+	}
+	if r.baseDir != baseDir {
+		return nil, fmt.Errorf("metadata: default manager root changed from %q to %q", r.baseDir, baseDir)
+	}
+	return r.manager, nil
+}
+
+var defaultManagers managerRegistry
+
+// RemoveAllForTest stops and removes every open namespace; test helper.
+func (m *Manager) RemoveAllForTest() {
+	m.mu.Lock()
+	managed := make([]*managedService, 0, len(m.services))
+	for id, entry := range m.services {
+		managed = append(managed, entry)
+		delete(m.services, id)
+	}
+	m.mu.Unlock()
+	for _, entry := range managed {
+		chunkRoot := entry.service.chunkStoreRoot()
+		entry.worker.Stop()
+		_ = entry.service.Close()
+		_ = os.RemoveAll(chunkRoot)
+	}
+	_ = os.RemoveAll(m.baseDir)
+}
+
+type managedService struct {
+	service *Service
+	worker  *Worker
+	refs    int
+}
+
+// NewManager creates the process-wide namespace registry.
+func NewManager(baseDir string) *Manager {
+	return &Manager{
+		baseDir:         filepath.Join(baseDir, "v1"),
+		services:        map[string]*managedService{},
+		taskChangeHooks: map[int]func(*Service){},
+	}
+}
+
+// DefaultManager returns the process-wide manager rooted under the app runtime
+// directory, so page and mount callers share one namespace lifecycle.
+func DefaultManager() (*Manager, error) {
+	runtimeDir, err := storageconfig.RuntimeDir()
+	if err != nil {
+		return nil, err
+	}
+	return defaultManagers.acquire(filepath.Join(runtimeDir, "metadata"))
+}
+
+// NamespaceID derives a collision-safe namespace from account and view identity.
+// Callers must persist and supply ProfileID; the fallback exists only for
+// diagnostics/tests and must not create durable namespaces for saved profiles.
+func NamespaceID(config storageconfig.RemoteStorageConfig, bucket string) string {
+	normalized := config.Normalized()
+	profile := normalized.ProfileID
+	if profile == "" {
+		profile = "unversioned-" + strings.ToLower(normalized.StorageType+"-"+normalized.Endpoint+"-"+normalized.AccessKeyID)
+	}
+	raw := strings.Join([]string{
+		profile,
+		normalized.StorageType,
+		normalized.Endpoint,
+		normalized.Bucket,
+		normalized.RootPrefix,
+		bucket,
+	}, "\x00")
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:16])
+}
+
+// AcquireHandle pairs a retained service with the manager handle used to
+// release it. Holding the handle prevents premature worker/database shutdown.
+type AcquireHandle struct {
+	Service     *Service
+	manager     *Manager
+	releaseOnce sync.Once
+}
+
+// Release drops this handle exactly once, regardless of which mount lifecycle
+// callback observes the real platform session ending first.
+func (h *AcquireHandle) Release() {
+	if h == nil || h.manager == nil {
+		return
+	}
+	h.manager.Release(h)
+}
+
+// ErrNoProfileID marks configs that lack the immutable identity required to
+// open a durable namespace; callers treat it as "fall back to direct listing".
+var ErrNoProfileID = errors.New("metadata: profile has no profileId")
+
+// Acquire returns a retained service handle, creating its bbolt namespace on
+// demand. A missing ProfileID is an error: a namespace derived from mutable
+// fallback fields would silently split/merge accounts after identity assignment.
+func (m *Manager) Acquire(config storageconfig.RemoteStorageConfig, bucket string) (*AcquireHandle, error) {
+	normalized := config.Normalized()
+	if normalized.ProfileID == "" {
+		return nil, ErrNoProfileID
+	}
+	id := NamespaceID(normalized, bucket)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var managed *managedService
+	if existing, ok := m.services[id]; ok {
+		existing.refs++
+		// Refresh per-acquisition policy so a later bucket read-only or quiet
+		// setting change is honored by the retained namespace service.
+		existing.service.setPolicy(
+			quietDuration(normalized), normalized.BucketSettingsFor(bucket).ReadOnly,
+		)
+		existing.service.SetBackend(storageops.ForConfig(normalized))
+		managed = existing
+	} else {
+		service, err := m.openService(id, normalized, bucket)
+		if err != nil {
+			return nil, err
+		}
+		managed = service
+	}
+	return &AcquireHandle{Service: managed.service, manager: m}, nil
+}
+
+// AcquireWithBackend is Acquire with an explicit provider backend override,
+// used by tests and future injectable transport wiring.
+func (m *Manager) AcquireWithBackend(
+	config storageconfig.RemoteStorageConfig, bucket string, backend Backend,
+) (*AcquireHandle, error) {
+	normalized := config.Normalized()
+	if normalized.ProfileID == "" {
+		return nil, ErrNoProfileID
+	}
+	id := NamespaceID(normalized, bucket)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if existing, ok := m.services[id]; ok {
+		existing.refs++
+		existing.service.setPolicy(
+			quietDuration(normalized), normalized.BucketSettingsFor(bucket).ReadOnly,
+		)
+		existing.service.SetBackend(backend)
+		return &AcquireHandle{Service: existing.service, manager: m}, nil
+	}
+	namespace, err := m.namespace(id, normalized, bucket)
+	if err != nil {
+		return nil, err
+	}
+	store, err := OpenStore(namespace)
+	if err != nil {
+		return nil, err
+	}
+	service := NewService(store, backend)
+	service.setPolicy(quietDuration(normalized), normalized.BucketSettingsFor(bucket).ReadOnly)
+	service.groupCacheInvalidate = m.InvalidateTaskGroupCache
+	managed := &managedService{service: service, worker: NewWorker(service), refs: 1}
+	m.services[id] = managed
+	m.InvalidateTaskGroupCache()
+	m.attachNewNamespaces(service)
+	return &AcquireHandle{Service: service, manager: m}, nil
+}
+
+func (m *Manager) openService(id string, normalized storageconfig.RemoteStorageConfig, bucket string) (*managedService, error) {
+	namespace, err := m.namespace(id, normalized, bucket)
+	if err != nil {
+		return nil, err
+	}
+	store, err := OpenStore(namespace)
+	if err != nil {
+		return nil, err
+	}
+	// Metadata paths are view-relative, so its provider must retain the account
+	// RootPrefix wrapper just like page-level object reads do.
+	service := NewService(store, storageops.ForConfig(normalized))
+	service.setPolicy(quietDuration(normalized), normalized.BucketSettingsFor(bucket).ReadOnly)
+	service.groupCacheInvalidate = m.InvalidateTaskGroupCache
+	managed := &managedService{service: service, worker: NewWorker(service), refs: 1}
+	m.services[id] = managed
+	m.InvalidateTaskGroupCache()
+	m.attachNewNamespaces(service)
+	return managed, nil
+}
+
+// namespace resolves the durable metadata DB root separately from the
+// user-configured cache root where content-addressed chunks are stored.
+func (m *Manager) namespace(
+	id string, normalized storageconfig.RemoteStorageConfig, bucket string,
+) (Namespace, error) {
+	root := filepath.Join(m.baseDir, id)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return Namespace{}, err
+	}
+	cacheRoot, err := storageconfig.ResolveCacheDir(normalized)
+	if err != nil {
+		return Namespace{}, err
+	}
+	if err := writeNamespaceManifest(root, NamespaceManifest{
+		Version: 1, ID: id, ProfileID: normalized.ProfileID, Bucket: bucket,
+	}); err != nil {
+		return Namespace{}, err
+	}
+	return Namespace{
+		ID: id, Root: root, CacheRoot: cacheRoot, Config: normalized, Bucket: bucket,
+	}, nil
+}
+
+func writeNamespaceManifest(root string, manifest NamespaceManifest) error {
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		return err
+	}
+	temporary := filepath.Join(root, "namespace.json.tmp")
+	if err := os.WriteFile(temporary, raw, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(temporary, filepath.Join(root, "namespace.json"))
+}
+
+// KnownNamespaces scans only local manifest files; it never contacts providers.
+func (m *Manager) KnownNamespaces() ([]NamespaceManifest, error) {
+	entries, err := os.ReadDir(m.baseDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	result := make([]NamespaceManifest, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		raw, readErr := os.ReadFile(filepath.Join(m.baseDir, entry.Name(), "namespace.json"))
+		if readErr != nil {
+			continue
+		}
+		var manifest NamespaceManifest
+		if json.Unmarshal(raw, &manifest) != nil || manifest.Version != 1 || manifest.ID != entry.Name() || manifest.ProfileID == "" || manifest.Bucket == "" {
+			continue
+		}
+		result = append(result, manifest)
+	}
+	return result, nil
+}
+
+// Release drops one Acquire handle. Unbalanced calls are ignored so a stray
+// release cannot close a namespace another holder still uses.
+func (m *Manager) Release(handle *AcquireHandle) {
+	if handle == nil || handle.Service == nil || handle.manager != m {
+		return
+	}
+	handle.releaseOnce.Do(func() { m.release(handle) })
+}
+
+func (m *Manager) release(handle *AcquireHandle) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, managed := range m.services {
+		if managed.service != handle.Service {
+			continue
+		}
+		managed.refs--
+		if managed.refs > 0 || retainsBackgroundWork(managed.service) {
+			return
+		}
+		delete(m.services, id)
+		m.InvalidateTaskGroupCache()
+		managed.worker.Stop()
+		_ = managed.service.Close()
+		return
+	}
+}
+
+// retainsBackgroundWork keeps a page-only namespace alive after its final
+// handle release so its journal worker can finish durable local intent.
+func retainsBackgroundWork(service *Service) bool {
+	if service == nil {
+		return false
+	}
+	status := service.Status()
+	return status.PendingOps > 0 || status.FailedOps > 0 || status.PendingContent > 0
+}
+
+// RemoveNamespace deletes one namespace database and stops its workers.
+func (m *Manager) RemoveNamespace(config storageconfig.RemoteStorageConfig, bucket string) error {
+	normalized := config.Normalized()
+	id := NamespaceID(normalized, bucket)
+	cacheRoot, err := storageconfig.ResolveCacheDir(normalized)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	managed, ok := m.services[id]
+	if ok {
+		delete(m.services, id)
+	}
+	m.mu.Unlock()
+	chunkRoot := filepath.Join(cacheRoot, "metadata-chunks", id)
+	if ok {
+		m.InvalidateTaskGroupCache()
+		chunkRoot = managed.service.chunkStoreRoot()
+		managed.worker.Stop()
+		_ = managed.service.Close()
+	} else if namespace, err := m.namespace(id, normalized, bucket); err == nil {
+		if store, err := OpenStore(namespace); err == nil {
+			chunkRoot = filepath.Join(store.chunkRoot, "metadata-chunks", id)
+			_ = store.Close()
+		}
+	}
+	if err := os.RemoveAll(chunkRoot); err != nil {
+		return err
+	}
+	return os.RemoveAll(filepath.Join(m.baseDir, id))
+}
+
+// List returns diagnostics for every open namespace.
+func (m *Manager) List() []Status {
+	m.mu.Lock()
+	services := make([]*Service, 0, len(m.services))
+	for _, managed := range m.services {
+		services = append(services, managed.service)
+	}
+	m.mu.Unlock()
+	result := make([]Status, 0, len(services))
+	for _, service := range services {
+		result = append(result, service.Status())
+	}
+	return result
+}
+
+// DrainAll attempts to finish every due operation before app exit. Workers run
+// concurrently so one slow provider cannot serialize every namespace into the
+// exit timeout; the first failure is reported.
+func (m *Manager) DrainAll(ctx context.Context) error {
+	m.mu.Lock()
+	workers := make([]*Worker, 0, len(m.services))
+	for _, managed := range m.services {
+		workers = append(workers, managed.worker)
+	}
+	m.mu.Unlock()
+	results := make([]error, len(workers))
+	var wg sync.WaitGroup
+	for index, worker := range workers {
+		wg.Add(1)
+		go func(target *Worker, slot int) {
+			defer wg.Done()
+			results[slot] = target.Drain(ctx)
+		}(worker, index)
+	}
+	wg.Wait()
+	for _, err := range results {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func quietDuration(config storageconfig.RemoteStorageConfig) time.Duration {
+	seconds := config.Normalized().WritebackQuietSeconds
+	if seconds <= 0 {
+		seconds = 10
+	}
+	return time.Duration(seconds) * time.Second
+}

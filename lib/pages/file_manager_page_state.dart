@@ -12,6 +12,12 @@ extension _FileManagerPageDerivedState on _FileManagerPageState {
   RemoteStorageConfig get _activeConfig =>
       _activeBucketEntry?.config ?? widget.config;
 
+  /// Desktop profiles with an immutable identity are handled by the Go
+  /// metadata journal; their Dart producer remains execution-only.
+  bool get _usesMetadataRemoteTasks =>
+      widget.api.capabilities.supportsMounts &&
+      _activeConfig.profileId.trim().isNotEmpty;
+
   BucketMountStatus? get _activeMountStatus =>
       _activeBucketId == null ? null : _bucketMountStatuses[_activeBucketId!];
 

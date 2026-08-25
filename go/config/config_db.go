@@ -186,6 +186,7 @@ func saveProfileToDB(name string, config RemoteStorageConfig) error {
 	defer db.Close()
 	return db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(profilesBucketKey)
+		ensureProfileIdentity(bucket, cleanName, &config)
 		data, err := json.Marshal(config)
 		if err != nil {
 			return fmt.Errorf("encode profile: %w", err)
@@ -206,7 +207,7 @@ func loadProfileFromDB(name string) (RemoteStorageConfig, error) {
 	}
 	defer db.Close()
 	var config RemoteStorageConfig
-	err = db.View(func(tx *bolt.Tx) error {
+	err = db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(profilesBucketKey)
 		data := bucket.Get([]byte(cleanName))
 		if data == nil {
@@ -215,7 +216,17 @@ func loadProfileFromDB(name string) (RemoteStorageConfig, error) {
 		if err := json.Unmarshal(data, &config); err != nil {
 			return fmt.Errorf("decode profile: %w", err)
 		}
-		return nil
+		// Backfill migrated/legacy profiles so metadata namespaces never
+		// depend on the unversioned fallback identity.
+		ensureProfileIdentity(bucket, cleanName, &config)
+		if config.ProfileID == "" {
+			return nil
+		}
+		encoded, err := json.Marshal(config)
+		if err != nil {
+			return fmt.Errorf("encode profile: %w", err)
+		}
+		return bucket.Put([]byte(cleanName), encoded)
 	})
 	if err != nil {
 		return DefaultConfig(), err

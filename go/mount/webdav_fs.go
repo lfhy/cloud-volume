@@ -27,6 +27,9 @@ func (f *webDAVFS) OpenFile(
 	perm os.FileMode,
 ) (webdav.File, error) {
 	clean := normalizeWebDAVName(name)
+	if webDAVRequestMethod(ctx) == "LOCK" && flag == os.O_RDWR|os.O_CREATE|os.O_TRUNC {
+		return newWebDAVLockNullFile(clean), nil
+	}
 	if f.access.overlay.handles(clean) {
 		file, err := f.access.overlay.openFile(ctx, clean, flag, perm)
 		if err != nil {
@@ -73,7 +76,7 @@ func (f *webDAVFS) Rename(ctx context.Context, oldName, newName string) error {
 func (f *webDAVFS) Stat(ctx context.Context, name string) (os.FileInfo, error) {
 	clean := normalizeWebDAVName(name)
 	if clean == "" {
-		return virtualFileInfo{name: "/", size: 0, mode: fs.ModeDir | 0o755, modTime: time.Now(), isDir: true}, nil
+		return virtualFileInfo{name: "/", size: 0, mode: fs.ModeDir | 0o755, modTime: time.Time{}, isDir: true}, nil
 	}
 	if f.access.overlay.handles(clean) {
 		info, err := f.access.overlay.statPath(clean)

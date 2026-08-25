@@ -35,6 +35,7 @@ func UploadReader(
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(ctx)
 		startTransfer(taskID, "upload", bucket, key, fileName, size, cancel)
+		SetTransferProfile(taskID, cfg.ProfileID)
 		defer func() { finishTransfer(taskID, err) }()
 	}
 	reader := io.Reader(body)

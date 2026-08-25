@@ -15,26 +15,29 @@ import (
 
 // CacheStats summarises the resolved cache directory for the settings UI.
 type CacheStats struct {
-	Path        string `json:"path"`
-	Exists      bool   `json:"exists"`
-	SizeBytes   int64  `json:"sizeBytes"`
-	FileCount   int64  `json:"fileCount"`
-	LastModified string `json:"lastModified"`
+	Path           string `json:"path"`
+	Exists         bool   `json:"exists"`
+	SizeBytes      int64  `json:"sizeBytes"`
+	FileCount      int64  `json:"fileCount"`
+	ProtectedBytes int64  `json:"protectedBytes"`
+	ProtectedFiles int64  `json:"protectedFiles"`
+	LastModified   string `json:"lastModified"`
 }
 
 // CleanCacheRequest selects which cleanup strategy the bridge should run.
 type CleanCacheRequest struct {
-	// ClearAll wipes every file under the cache root when true.
+	// ClearAll wipes every evictable file under the cache root when true.
 	// Otherwise ApplyRules evicts by size/age from the active config.
 	ClearAll bool `json:"clearAll"`
 }
 
 // CleanCacheResult reports what happened during a cleanup pass.
 type CleanCacheResult struct {
-	BeforeBytes int64 `json:"beforeBytes"`
-	AfterBytes  int64 `json:"afterBytes"`
-	Removed     int64 `json:"removed"`
-	FreedBytes  int64 `json:"freedBytes"`
+	BeforeBytes      int64 `json:"beforeBytes"`
+	AfterBytes       int64 `json:"afterBytes"`
+	Removed          int64 `json:"removed"`
+	FreedBytes       int64 `json:"freedBytes"`
+	SkippedProtected int64 `json:"skippedProtected"`
 }
 
 // GetCacheStats resolves the cache directory for the active config and walks it
@@ -47,6 +50,7 @@ func GetCacheStats(config RemoteStorageConfig) (CacheStats, error) {
 		return CacheStats{}, err
 	}
 	stats := CacheStats{Path: cacheDir}
+	protection := loadMetadataChunkProtection(cacheDir)
 	info, err := os.Stat(cacheDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -68,6 +72,10 @@ func GetCacheStats(config RemoteStorageConfig) (CacheStats, error) {
 		}
 		stats.SizeBytes += info.Size()
 		stats.FileCount++
+		if protection.isPending(path) {
+			stats.ProtectedBytes += info.Size()
+			stats.ProtectedFiles++
+		}
 		if info.ModTime().Format(time.RFC3339) > stats.LastModified {
 			stats.LastModified = info.ModTime().Format(time.RFC3339)
 		}
@@ -100,8 +108,8 @@ func OpenCacheDirectory(config RemoteStorageConfig) error {
 	return nil
 }
 
-// CleanCache removes cache files according to the request mode. ClearAll wipes
-// the cache root contents; ApplyRules evicts by configured size/age limits.
+// CleanCache removes evictable cache files according to the request mode.
+// Pending metadata chunks and active splices are protected in both modes.
 func CleanCache(config RemoteStorageConfig, request CleanCacheRequest) (CleanCacheResult, error) {
 	normalized := config.Normalized()
 	cacheDir, err := ResolveCacheDir(normalized)
@@ -113,12 +121,23 @@ func CleanCache(config RemoteStorageConfig, request CleanCacheRequest) (CleanCac
 		return CleanCacheResult{}, err
 	}
 	result := CleanCacheResult{BeforeBytes: totalSize(entries)}
+	protection := loadMetadataChunkProtection(cacheDir)
 
 	var toRemove []cacheFile
 	if request.ClearAll {
-		toRemove = entries
+		for _, entry := range entries {
+			if protection.protected(entry.path) {
+				if protection.isPending(entry.path) {
+					result.SkippedProtected++
+				}
+				continue
+			}
+			toRemove = append(toRemove, entry)
+		}
 	} else {
-		toRemove = selectByRules(entries, normalized)
+		var skipped int
+		toRemove, skipped = selectByRules(entries, normalized, protection)
+		result.SkippedProtected = int64(skipped)
 	}
 
 	for _, file := range toRemove {
@@ -179,18 +198,28 @@ func listCacheFiles(cacheDir string) ([]cacheFile, error) {
 // selectByRules applies the configured size/age limits and returns the files
 // that should be removed. Age eviction happens first; size eviction then
 // removes the oldest survivors until total size fits within the cap.
-func selectByRules(files []cacheFile, config RemoteStorageConfig) []cacheFile {
+func selectByRules(
+	files []cacheFile, config RemoteStorageConfig, protection metadataChunkProtection,
+) ([]cacheFile, int) {
 	maxAgeDays := config.CacheMaxAgeDays
 	maxSizeMB := config.CacheMaxSizeMB
 	if maxAgeDays <= 0 && maxSizeMB <= 0 {
-		return nil
+		return nil, 0
 	}
 
 	now := time.Now()
 	var survivors []cacheFile
 	var remove []cacheFile
+	skipped := map[string]struct{}{}
 	for _, file := range files {
 		if maxAgeDays > 0 && now.Sub(file.modTime) > time.Duration(maxAgeDays)*24*time.Hour {
+			if protection.protected(file.path) {
+				if protection.isPending(file.path) {
+					skipped[file.path] = struct{}{}
+				}
+				survivors = append(survivors, file)
+				continue
+			}
 			remove = append(remove, file)
 			continue
 		}
@@ -198,7 +227,7 @@ func selectByRules(files []cacheFile, config RemoteStorageConfig) []cacheFile {
 	}
 
 	if maxSizeMB <= 0 {
-		return remove
+		return remove, len(skipped)
 	}
 
 	sort.Slice(survivors, func(i, j int) bool {
@@ -210,10 +239,16 @@ func selectByRules(files []cacheFile, config RemoteStorageConfig) []cacheFile {
 		if current <= maxBytes {
 			break
 		}
+		if protection.protected(file.path) {
+			if protection.isPending(file.path) {
+				skipped[file.path] = struct{}{}
+			}
+			continue
+		}
 		remove = append(remove, file)
 		current -= file.size
 	}
-	return remove
+	return remove, len(skipped)
 }
 
 func totalSize(files []cacheFile) int64 {

@@ -90,6 +90,7 @@ func (b *windowsWinFspBackend) Start(session *mountSession) error {
 	)
 	host := fuse.NewFileSystemHost(fs)
 	host.SetCapReaddirPlus(true)
+	host.SetUseIno(true)
 
 	b.fs = fs
 	b.host = host
