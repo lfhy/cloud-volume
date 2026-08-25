@@ -3,17 +3,36 @@
 // active-only poll, or stale physical metadata projections).
 part of 'remote_task_store.dart';
 
+// Small histories render in full on entry; larger retained histories use
+// explicit user-visible pages without allowing an unbounded initial request.
+const int _remoteTaskHistoryPageSize = 100;
+
 extension RemoteTaskStoreMergeLifecycle on RemoteTaskStore {
-  static const _initialHistoryRows = 100;
+  static const _initialHistoryRows = _remoteTaskHistoryPageSize;
+
+  /// A bounded page keeps large retained histories usable without hiding the
+  /// next-page control below an unbounded list of completed task rows.
+  int get loadedHistoryCount => _loadedRemoteHistoryCount;
+
+  int get historyTotal =>
+      _queue.reported ? _queue.history : _loadedRemoteHistoryCount;
+
+  int get remainingHistoryCount {
+    final remaining = historyTotal - loadedHistoryCount;
+    return remaining > 0 ? remaining : 0;
+  }
 
   /// True when a first history request or a later cursor can reveal rows that
   /// active-only polling intentionally left out of the list cache.
   bool get canLoadMoreHistory {
     if (_api == null) return false;
+    // Queue counts are authoritative for current bridge/Web API versions. A
+    // new terminal task can arrive through an active-only WebSocket poll after
+    // the old history cursor was exhausted, so compare the count before using
+    // cursor state to decide that pagination is complete.
+    if (_queue.reported) return historyTotal > loadedHistoryCount;
     if (_nextCursor.isNotEmpty) return true;
     if (_hasLoadedMore) return false;
-    final loadedHistory = _tasks.values.where(isRemoteTaskHistory).length;
-    if (_queue.reported) return _queue.history > loadedHistory;
     if (_hasServerTotal) return _total > _tasks.length;
     // Older bridge versions omitted both fields. Permit one explicit history
     // request, then let its exhausted cursor close the affordance.
@@ -45,6 +64,8 @@ extension RemoteTaskStoreMergeLifecycle on RemoteTaskStore {
         return;
       }
       if (_lastError != null) return;
+      var historyCursorVersion = _historyCursorVersion;
+      var cursorChanges = 0;
       final target = _queue.reported
           ? _queue.history.clamp(0, _initialHistoryRows).toInt()
           : 1;
@@ -53,15 +74,30 @@ extension RemoteTaskStoreMergeLifecycle on RemoteTaskStore {
         final loaded = _loadedRemoteHistoryCount;
         // Before any history is reached, use a normal page to walk past active
         // rows. Once history starts, cap the combined page to the remaining
-        // history capacity so a mixed page cannot exceed the 100-row preview.
+        // history capacity so a mixed page cannot exceed the initial preview.
         final remaining = target - loaded;
-        await loadMore(limit: loaded == 0 ? _initialHistoryRows : remaining);
+        await _loadMore(
+          limit: loaded == 0 ? _initialHistoryRows : remaining,
+          yieldOnCursorChange: true,
+        );
         if (generation != _bindingGeneration ||
             !identical(api, _api) ||
             historyEpoch != _historyEpoch) {
           return;
         }
-        if (_loadedRemoteHistoryCount == loaded && _nextCursor == cursor) {
+        // A history total growth shifts offsets. For initial loading, keep the
+        // compact budget by calculating the next request from the newly loaded
+        // history count instead of having loadMore repeat a full-size page.
+        // A perpetually busy queue gets one such adjustment, then returns
+        // control to the fixed pager rather than spinning at page entry.
+        final streamChanged = historyCursorVersion != _historyCursorVersion;
+        if (streamChanged) {
+          historyCursorVersion = _historyCursorVersion;
+          if (++cursorChanges > 1) return;
+        }
+        if (!streamChanged &&
+            _loadedRemoteHistoryCount == loaded &&
+            _nextCursor == cursor) {
           return;
         }
       }

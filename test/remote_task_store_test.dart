@@ -407,18 +407,162 @@ void main() {
     expect(RemoteTaskStore.instance.tasks.single.id, retained.id);
   });
 
-  test('initial history preview never exceeds 100 terminal rows', () async {
-    final api = _PagingGateway(activeCount: 1, historyCount: 500);
+  test(
+    'initial history page is compact and keeps the next page reachable',
+    () async {
+      final api = _PagingGateway(activeCount: 1, historyCount: 500);
+      RemoteTaskStore.instance.bindApi(api);
+
+      await RemoteTaskStore.instance.loadInitialHistory();
+
+      expect(
+        RemoteTaskStore.instance.tasks.where(isRemoteTaskHistory),
+        hasLength(100),
+      );
+      expect(RemoteTaskStore.instance.loadedHistoryCount, 100);
+      expect(RemoteTaskStore.instance.historyTotal, 500);
+      expect(RemoteTaskStore.instance.remainingHistoryCount, 400);
+      expect(RemoteTaskStore.instance.canLoadMoreHistory, isTrue);
+      expect(api.historyLimits, <int>[100, 1]);
+    },
+  );
+
+  test(
+    'loading the next history page advances the visible history count',
+    () async {
+      final api = _PagingGateway(activeCount: 0, historyCount: 150);
+      RemoteTaskStore.instance.bindApi(api);
+
+      await RemoteTaskStore.instance.loadInitialHistory();
+      expect(RemoteTaskStore.instance.loadedHistoryCount, 100);
+      expect(RemoteTaskStore.instance.remainingHistoryCount, 50);
+
+      await RemoteTaskStore.instance.loadMore();
+      expect(RemoteTaskStore.instance.loadedHistoryCount, 150);
+      expect(RemoteTaskStore.instance.remainingHistoryCount, 0);
+      expect(RemoteTaskStore.instance.canLoadMoreHistory, isFalse);
+      expect(api.historyLimits, <int>[100, 100]);
+    },
+  );
+
+  test(
+    'each new terminal task invalidates a stale exhausted history cursor',
+    () async {
+      final api = _PagingGateway(activeCount: 0, historyCount: 150);
+      RemoteTaskStore.instance.bindApi(api);
+
+      await RemoteTaskStore.instance.loadInitialHistory();
+      await RemoteTaskStore.instance.loadMore();
+      expect(RemoteTaskStore.instance.canLoadMoreHistory, isFalse);
+
+      api.addHistory('sync:paging:history-new');
+      await RemoteTaskStore.instance.pollActive();
+
+      expect(RemoteTaskStore.instance.canLoadMoreHistory, isTrue);
+      await RemoteTaskStore.instance.loadMore();
+      expect(
+        RemoteTaskStore.instance.tasks.map((task) => task.id),
+        contains('sync:paging:history-new'),
+      );
+      expect(RemoteTaskStore.instance.canLoadMoreHistory, isFalse);
+
+      api.addHistory('sync:paging:history-newer');
+      await RemoteTaskStore.instance.pollActive();
+
+      expect(RemoteTaskStore.instance.nextCursor, isEmpty);
+      expect(RemoteTaskStore.instance.canLoadMoreHistory, isTrue);
+      await RemoteTaskStore.instance.loadMore();
+      expect(
+        RemoteTaskStore.instance.tasks.map((task) => task.id),
+        contains('sync:paging:history-newer'),
+      );
+      expect(RemoteTaskStore.instance.canLoadMoreHistory, isFalse);
+    },
+  );
+
+  test(
+    'initial history load keeps its first page bounded when history grows',
+    () async {
+      final api = _PagingGateway(activeCount: 0, historyCount: 100);
+      RemoteTaskStore.instance.bindApi(api);
+      await RemoteTaskStore.instance.pollActive();
+      api.addHistoryDuringNextInitialPage('sync:paging:history-initial-race');
+
+      await RemoteTaskStore.instance.loadInitialHistory();
+
+      expect(RemoteTaskStore.instance.isLoadingInitialHistory, isFalse);
+      expect(
+        RemoteTaskStore.instance.tasks.where(isRemoteTaskHistory),
+        hasLength(100),
+      );
+      expect(RemoteTaskStore.instance.historyTotal, 101);
+      expect(RemoteTaskStore.instance.remainingHistoryCount, 1);
+      expect(RemoteTaskStore.instance.canLoadMoreHistory, isTrue);
+      expect(
+        RemoteTaskStore.instance.tasks.map((task) => task.id),
+        contains('sync:paging:history-initial-race'),
+      );
+    },
+  );
+
+  test('continuation retries through repeated terminal completions', () async {
+    final api = _PagingGateway(activeCount: 0, historyCount: 150);
     RemoteTaskStore.instance.bindApi(api);
 
     await RemoteTaskStore.instance.loadInitialHistory();
+    expect(RemoteTaskStore.instance.nextCursor, '100');
+    api.addHistoryDuringNextContinuation('sync:paging:history-race');
+    api.addHistoryDuringNextInitialPage('sync:paging:history-race-newer');
 
+    await RemoteTaskStore.instance.loadMore();
+
+    expect(RemoteTaskStore.instance.canLoadMoreHistory, isTrue);
     expect(
-      RemoteTaskStore.instance.tasks.where(isRemoteTaskHistory),
-      hasLength(100),
+      RemoteTaskStore.instance.tasks.map((task) => task.id),
+      contains('sync:paging:history-race'),
     );
-    expect(api.historyLimits, <int>[100, 1]);
+    expect(
+      RemoteTaskStore.instance.tasks.map((task) => task.id),
+      contains('sync:paging:history-race-newer'),
+    );
   });
+
+  test('history pagination yields after continual cursor shifts', () async {
+    final api = _PagingGateway(activeCount: 0, historyCount: 150);
+    RemoteTaskStore.instance.bindApi(api);
+    await RemoteTaskStore.instance.loadInitialHistory();
+    api.addHistoryDuringHistoryRequests(<String>[
+      'sync:paging:history-busy-one',
+      'sync:paging:history-busy-two',
+    ]);
+
+    await RemoteTaskStore.instance.loadMore().timeout(
+      const Duration(seconds: 1),
+    );
+
+    expect(RemoteTaskStore.instance.isLoadingMoreHistory, isFalse);
+    expect(RemoteTaskStore.instance.canLoadMoreHistory, isTrue);
+  });
+
+  test(
+    'initial history loading yields while the queue keeps changing',
+    () async {
+      final api = _PagingGateway(activeCount: 16, historyCount: 150);
+      RemoteTaskStore.instance.bindApi(api);
+      await RemoteTaskStore.instance.pollActive();
+      api.addHistoryDuringHistoryRequests(<String>[
+        'sync:paging:initial-busy-one',
+        'sync:paging:initial-busy-two',
+      ]);
+
+      await RemoteTaskStore.instance.loadInitialHistory().timeout(
+        const Duration(seconds: 1),
+      );
+
+      expect(RemoteTaskStore.instance.isLoadingInitialHistory, isFalse);
+      expect(RemoteTaskStore.instance.canLoadMoreHistory, isTrue);
+    },
+  );
 
   test('a failed first history page remains retryable', () async {
     const retained = RemoteTask(
@@ -788,13 +932,57 @@ class _PagingGateway extends Fake implements RemoteStorageGateway {
 
   final List<RemoteTask> _items;
   final int _activeCount;
-  final int _historyCount;
+  int _historyCount;
   final List<int> historyLimits = <int>[];
+  final List<String> _historyToAddDuringRequests = <String>[];
+  String? _historyToAddDuringInitialPage;
+  String? _historyToAddDuringContinuation;
+
+  void addHistory(String id) {
+    _items.insert(
+      _activeCount,
+      RemoteTask(
+        id: id,
+        kind: RemoteTaskKind.download,
+        status: RemoteTaskStatus.done,
+      ),
+    );
+    _historyCount++;
+  }
+
+  void addHistoryDuringNextContinuation(String id) {
+    _historyToAddDuringContinuation = id;
+  }
+
+  void addHistoryDuringNextInitialPage(String id) {
+    _historyToAddDuringInitialPage = id;
+  }
+
+  void addHistoryDuringHistoryRequests(Iterable<String> ids) {
+    _historyToAddDuringRequests.addAll(ids);
+  }
 
   @override
   Future<RemoteTaskPage> listRemoteTasks([
     RemoteTaskFilter filter = const RemoteTaskFilter(),
   ]) async {
+    if (filter.includeHistory && _historyToAddDuringRequests.isNotEmpty) {
+      addHistory(_historyToAddDuringRequests.removeAt(0));
+    }
+    if (filter.includeHistory &&
+        filter.cursor.isEmpty &&
+        _historyToAddDuringInitialPage != null) {
+      final id = _historyToAddDuringInitialPage!;
+      _historyToAddDuringInitialPage = null;
+      addHistory(id);
+    }
+    if (filter.includeHistory &&
+        filter.cursor.isNotEmpty &&
+        _historyToAddDuringContinuation != null) {
+      final id = _historyToAddDuringContinuation!;
+      _historyToAddDuringContinuation = null;
+      addHistory(id);
+    }
     final queue = RemoteTaskQueueCounts(
       active: _activeCount,
       history: _historyCount,

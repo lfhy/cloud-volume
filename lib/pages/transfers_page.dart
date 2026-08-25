@@ -17,19 +17,6 @@ part 'transfers_page_remote_actions.dart';
 part 'transfers_page_remote_filters.dart';
 part 'transfers_page_remote_header.dart';
 
-// A compact spinner makes automatic page-entry loading visible without
-// presenting a manual action that users should not need to click.
-Widget _buildInitialHistoryLoading() => const Padding(
-  padding: EdgeInsets.all(14),
-  child: Center(
-    child: SizedBox(
-      width: 16,
-      height: 16,
-      child: CircularProgressIndicator(strokeWidth: 2),
-    ),
-  ),
-);
-
 // Queue actions can process a large durable journal, so keep the active
 // request visible in its button instead of looking like a disabled no-op.
 Widget _batchActionButtonChild(

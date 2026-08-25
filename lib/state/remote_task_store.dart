@@ -42,6 +42,7 @@ class RemoteTaskStore extends ChangeNotifier {
   Future<void>? _inFlightRead;
   Future<void>? _initialHistoryLoad;
   bool _loadingInitialHistory = false;
+  bool _loadingMoreHistory = false;
   Duration? _pollInterval;
   Object? _lastError;
   DateTime? _lastFreshAt;
@@ -52,6 +53,7 @@ class RemoteTaskStore extends ChangeNotifier {
   bool _hasServerTotal = false;
   bool _hasLoadedMore = false;
   int _historyEpoch = 0;
+  int _historyCursorVersion = 0;
   int _bindingGeneration = 0;
   TaskEventsHandle? _events;
   RemoteTaskQueueCounts _queue = const RemoteTaskQueueCounts();
@@ -118,6 +120,23 @@ class RemoteTaskStore extends ChangeNotifier {
   RemoteTaskQueueCounts get queue => _queue;
   bool get isRefreshing => _polling;
   bool get isLoadingInitialHistory => _loadingInitialHistory;
+  bool get isLoadingMoreHistory => _loadingMoreHistory;
+
+  // An active-only WebSocket refresh has authoritative queue counts even when
+  // it omits terminal rows. A new history row shifts every offset cursor, so
+  // invalidate the prior stream and resume from page one on the next request.
+  bool _applyQueue(RemoteTaskQueueCounts next) {
+    final historyGrew =
+        _queue.reported && next.reported && next.history > _queue.history;
+    _queue = next;
+    if (historyGrew) {
+      _nextCursor = '';
+      _hasLoadedMore = false;
+      _historyCursorVersion++;
+      return true;
+    }
+    return false;
+  }
 
   List<RemoteTask> tasksForProfile(String profileId) => tasks
       .where((task) => task.profileId == profileId)
@@ -185,6 +204,7 @@ class RemoteTaskStore extends ChangeNotifier {
     _inFlightRead = null;
     _initialHistoryLoad = null;
     _loadingInitialHistory = false;
+    _loadingMoreHistory = false;
     _historyEpoch++;
     _tasks.clear();
     _nextCursor = '';
@@ -192,6 +212,7 @@ class RemoteTaskStore extends ChangeNotifier {
     _hasServerTotal = false;
     _queue = const RemoteTaskQueueCounts();
     _hasLoadedMore = false;
+    _historyCursorVersion = 0;
     _connectPushChannel();
     unawaited(pollActive());
     _ensurePolling();
@@ -266,45 +287,81 @@ class RemoteTaskStore extends ChangeNotifier {
     }
   }
 
-  Future<void> loadMore({int? limit}) async {
+  /// Requests the next explicit terminal-history page for the visible pager.
+  Future<void> loadMore({int? limit}) => _loadMore(limit: limit);
+
+  Future<void> _loadMore({int? limit, bool yieldOnCursorChange = false}) async {
     final api = _api;
-    if (api == null) return;
+    if (api == null || _loadingMoreHistory) return;
     final generation = _bindingGeneration;
     final historyEpoch = _historyEpoch;
+    var historyCursorVersion = _historyCursorVersion;
+    var restartedForCursorChange = false;
+    _loadingMoreHistory = true;
+    notifyListenersChanged();
     // Join any read already in progress, then start the requested history page
     // under the same gate. This prevents page-entry loading from becoming a
     // no-op when another page has just called refresh().
-    while (true) {
-      final inFlightRead = _inFlightRead;
-      if (inFlightRead != null) {
-        await inFlightRead;
+    try {
+      while (true) {
+        final inFlightRead = _inFlightRead;
+        if (inFlightRead != null) {
+          await inFlightRead;
+          if (_bindingGeneration != generation ||
+              !identical(api, _api) ||
+              _historyEpoch != historyEpoch) {
+            return;
+          }
+          if (_historyCursorVersion != historyCursorVersion) {
+            historyCursorVersion = _historyCursorVersion;
+            // Page-entry loading owns a compact terminal-row budget. Let its
+            // outer loop recalculate the remaining budget instead of retrying
+            // this request at the old page size after an offset shift.
+            if (yieldOnCursorChange) return;
+            if (restartedForCursorChange) return;
+            restartedForCursorChange = true;
+          }
+          continue;
+        }
+        // An active-only poll leaves no cursor even when history exists, so the
+        // first history request starts from page one explicitly.
+        if (_nextCursor.isEmpty && _hasLoadedMore) return;
+        final pageLimit = limit != null && limit > 0
+            ? limit
+            : _remoteTaskHistoryPageSize;
+        await refresh(
+          RemoteTaskFilter(
+            cursor: _nextCursor,
+            includeHistory: true,
+            limit: pageLimit,
+          ),
+        );
         if (_bindingGeneration != generation ||
             !identical(api, _api) ||
             _historyEpoch != historyEpoch) {
           return;
         }
-        continue;
-      }
-      // An active-only poll leaves no cursor even when history exists, so the
-      // first history request starts from page one explicitly.
-      if (_nextCursor.isEmpty && _hasLoadedMore) return;
-      final pageLimit = limit != null && limit > 0 ? limit : 100;
-      await refresh(
-        RemoteTaskFilter(
-          cursor: _nextCursor,
-          includeHistory: true,
-          limit: pageLimit,
-        ),
-      );
-      if (_bindingGeneration != generation ||
-          !identical(api, _api) ||
-          _historyEpoch != historyEpoch) {
+        if (_historyCursorVersion != historyCursorVersion) {
+          historyCursorVersion = _historyCursorVersion;
+          // The response already established a fresh cursor for its own
+          // snapshot. The initial loader must decide whether another page is
+          // needed, otherwise a bounded first page can be followed by a full
+          // second page when terminal history grows mid-request.
+          if (yieldOnCursorChange) return;
+          if (restartedForCursorChange) return;
+          restartedForCursorChange = true;
+          continue;
+        }
+        // refresh reports transport failures through lastError. Do not consume
+        // the one allowed first-history request until a page actually succeeds.
+        if (_lastError == null) _hasLoadedMore = true;
         return;
       }
-      // refresh reports transport failures through lastError. Do not consume
-      // the one allowed first-history request until a page actually succeeds.
-      if (_lastError == null) _hasLoadedMore = true;
-      return;
+    } finally {
+      if (generation == _bindingGeneration && identical(api, _api)) {
+        _loadingMoreHistory = false;
+        notifyListenersChanged();
+      }
     }
   }
 
@@ -393,6 +450,7 @@ class RemoteTaskStore extends ChangeNotifier {
     _inFlightRead = null;
     _initialHistoryLoad = null;
     _loadingInitialHistory = false;
+    _loadingMoreHistory = false;
     _lastError = null;
     _lastFreshAt = null;
     _freshness = '';
@@ -403,6 +461,7 @@ class RemoteTaskStore extends ChangeNotifier {
     _queue = const RemoteTaskQueueCounts();
     _hasLoadedMore = false;
     _historyEpoch = 0;
+    _historyCursorVersion = 0;
     _tasks.clear();
     _localTasks.clear();
     _executionTasks.clear();

@@ -402,6 +402,97 @@ void main() {
     RemoteTaskStore.instance.resetForTest();
   });
 
+  testWidgets('history pagination stays visible outside the scrolling rows', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _TransfersPageFakeApi()
+      ..respectActiveOnly = true
+      ..paginateHistory = true;
+    api.tasks.addAll(
+      List<RemoteTask>.generate(
+        124,
+        (index) => RemoteTask(
+          id: 'sync:test:paged-history-$index',
+          kind: RemoteTaskKind.download,
+          status: RemoteTaskStatus.done,
+          targetPath: 'history-$index.txt',
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Material(
+          child: TransfersPage(
+            api: api,
+            config: RemoteStorageConfig.empty(),
+            active: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('历史已显示 100 / 124'), findsOneWidget);
+    expect(find.text('加载下一页（还剩 24 条）'), findsOneWidget);
+
+    await tester.tap(find.text('加载下一页（还剩 24 条）'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(RemoteTaskStore.instance.loadedHistoryCount, 124);
+    expect(find.text('加载下一页（还剩 24 条）'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    RemoteTaskStore.instance.resetForTest();
+  });
+
+  testWidgets('small history queues render their complete count on entry', (
+    tester,
+  ) async {
+    final api = _TransfersPageFakeApi()
+      ..respectActiveOnly = true
+      ..paginateHistory = true;
+    api.tasks.addAll(
+      List<RemoteTask>.generate(
+        24,
+        (index) => RemoteTask(
+          id: 'sync:test:small-history-$index',
+          kind: RemoteTaskKind.download,
+          status: RemoteTaskStatus.done,
+          targetPath: 'small-history-$index.txt',
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Material(
+          child: TransfersPage(
+            api: api,
+            config: RemoteStorageConfig.empty(),
+            active: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(RemoteTaskStore.instance.loadedHistoryCount, 24);
+    expect(find.text('共 24 项'), findsOneWidget);
+    expect(find.textContaining('加载下一页'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    RemoteTaskStore.instance.resetForTest();
+  });
+
   testWidgets('activating tasks does not animate the sidebar during build', (
     tester,
   ) async {
@@ -458,6 +549,7 @@ class _TransfersPageFakeApi implements RemoteStorageGateway {
   final List<String> triggeredTaskIds = <String>[];
   final List<RemoteTask> tasks = <RemoteTask>[];
   bool respectActiveOnly = false;
+  bool paginateHistory = false;
   Future<void>? clearHistoryGate;
   Future<void>? triggerAllGate;
   int triggerAllCalls = 0;
@@ -476,8 +568,18 @@ class _TransfersPageFakeApi implements RemoteStorageGateway {
               task.status == RemoteTaskStatus.canceled,
         )
         .length;
+    final offset = int.tryParse(filter.cursor) ?? 0;
+    final pagedItems = paginateHistory && filter.includeHistory
+        ? items.skip(offset).take(filter.limit).toList(growable: false)
+        : List<RemoteTask>.from(items);
+    final nextCursor =
+        paginateHistory &&
+            filter.includeHistory &&
+            offset + pagedItems.length < items.length
+        ? '${offset + pagedItems.length}'
+        : '';
     return RemoteTaskPage(
-      items: List<RemoteTask>.from(items),
+      items: pagedItems,
       total: tasks.length,
       hasTotal: true,
       queue: RemoteTaskQueueCounts(
@@ -486,6 +588,7 @@ class _TransfersPageFakeApi implements RemoteStorageGateway {
         total: tasks.length,
         reported: true,
       ),
+      nextCursor: nextCursor,
     );
   }
 

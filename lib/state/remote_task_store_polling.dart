@@ -63,7 +63,7 @@ extension RemoteTaskStorePolling on RemoteTaskStore {
         );
         // Queue counts describe the complete queue, not just this active
         // response. A genuine all-zero report must still clear stale values.
-        _queue = page.queue;
+        _applyQueue(page.queue);
         _total = page.total;
         _hasServerTotal = page.hasTotal;
         _freshness = page.freshness;
@@ -107,6 +107,25 @@ extension RemoteTaskStorePolling on RemoteTaskStore {
       // A clear invalidates every cursor-derived history response that was
       // already in flight, so it cannot resurrect deleted rows afterward.
       if (filter.includeHistory && historyEpoch != _historyEpoch) return;
+      // A terminal completion can land after the active-only poll that gave us
+      // this offset. Its newest-first insertion shifts every later cursor, so
+      // invalidate a stale continuation rather than merging a skipped page.
+      final historyStreamInvalidated = _applyQueue(page.queue);
+      _total = page.total;
+      _hasServerTotal = page.hasTotal;
+      if (!_hasServerTotal && _total == 0 && _tasks.isNotEmpty) {
+        _total = _tasks.length;
+      }
+      _freshness = page.freshness;
+      _capabilities = Map<String, bool>.unmodifiable(page.capabilities);
+      if (filter.includeHistory &&
+          filter.cursor.isNotEmpty &&
+          historyStreamInvalidated) {
+        _lastError = null;
+        _lastFreshAt = DateTime.now();
+        notifyListenersChanged();
+        return;
+      }
       // A request without history or pagination never describes the full
       // task set, so it must not purge rows a loadMore call already merged.
       final completeSnapshot =
@@ -127,15 +146,9 @@ extension RemoteTaskStorePolling on RemoteTaskStore {
             page.hasTotal && page.total == 0 && page.items.isEmpty,
       );
       // Remember the server's unpaged total so the header can show the true
-      // queue size even while only the first 100 rows are cached locally.
+      // queue size even while only the first history page is cached locally.
       // The server always returns total (pre-pagination). Treat 0 as
       // empty; older binaries that omitted total fall back to cache size.
-      _total = page.total;
-      _hasServerTotal = page.hasTotal;
-      _queue = page.queue;
-      if (!_hasServerTotal && _total == 0 && _tasks.isNotEmpty) {
-        _total = _tasks.length;
-      }
       // Cursor ownership: a paged history request owns the cursor outright,
       // so an exhausted stream clears it and hides 加载更多历史. An active-only
       // poll may refresh the cursor but must never clear one that a previous
@@ -147,8 +160,6 @@ extension RemoteTaskStorePolling on RemoteTaskStore {
           !(filter.includeHistory && page.nextCursor.isEmpty)) {
         _nextCursor = page.nextCursor;
       }
-      _freshness = page.freshness;
-      _capabilities = Map<String, bool>.unmodifiable(page.capabilities);
       _lastError = null;
       _lastFreshAt = DateTime.now();
       notifyListenersChanged();

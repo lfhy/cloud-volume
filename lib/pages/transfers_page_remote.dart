@@ -9,13 +9,19 @@ extension _TransfersPageRemote on _TransfersPageState {
     int selectedVisible,
   ) {
     final canLoadHistory = store.canLoadMoreHistory;
+    final historyFilterVisible =
+        _remoteStatusFilter == _RemoteTaskStatusFilter.all ||
+        _remoteStatusFilter == _RemoteTaskStatusFilter.history;
+    final showHistoryPager =
+        historyFilterVisible &&
+        (store.isLoadingInitialHistory || canLoadHistory);
     if (store.lastError != null && store.tasks.isEmpty) {
       return _buildEmptyState(theme, '任务服务暂不可用', '统一远端任务列表暂时无法刷新，请稍后重试。');
     }
-    if (store.tasks.isEmpty && !canLoadHistory) {
+    if (store.tasks.isEmpty && !showHistoryPager) {
       return _buildEmptyState(theme, '暂无任务', '本地修改和远端操作会在这里显示。');
     }
-    if (visible.isEmpty && !canLoadHistory) {
+    if (visible.isEmpty && !showHistoryPager) {
       return _buildEmptyState(theme, '没有匹配结果', '调整筛选条件后再试。');
     }
     final allSelected =
@@ -66,21 +72,18 @@ extension _TransfersPageRemote on _TransfersPageState {
                       showDivider: true,
                     ),
                 ],
-                if (store.isLoadingInitialHistory)
-                  _buildInitialHistoryLoading()
-                else if (store.canLoadMoreHistory)
-                  Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: ShadButton.outline(
-                      onPressed: store.isRefreshing
-                          ? null
-                          : () => unawaited(store.loadMore()),
-                      child: Text(store.isRefreshing ? '正在加载...' : '加载更多历史'),
-                    ),
-                  ),
               ],
             ),
           ),
+          if (showHistoryPager)
+            _RemoteHistoryPager(
+              loaded: store.loadedHistoryCount,
+              total: store.historyTotal,
+              remaining: store.remainingHistoryCount,
+              initialLoading: store.isLoadingInitialHistory,
+              loading: store.isLoadingMoreHistory,
+              onLoadNext: () => unawaited(store.loadMore()),
+            ),
         ],
       ),
     );
@@ -185,7 +188,7 @@ class _RemoteListHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final label = visibleCount > 0 && visibleCount != totalCount
-        ? '共 $totalCount 项 · 已加载 $visibleCount'
+        ? '共 $totalCount 项 · 当前显示 $visibleCount'
         : '共 $totalCount 项';
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 7),
@@ -228,6 +231,75 @@ class _RemoteListHeader extends StatelessWidget {
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+// Fixed pager stays visible while rows scroll, avoiding a hidden action after
+// a full first history page fills the viewport.
+class _RemoteHistoryPager extends StatelessWidget {
+  const _RemoteHistoryPager({
+    required this.loaded,
+    required this.total,
+    required this.remaining,
+    required this.initialLoading,
+    required this.loading,
+    required this.onLoadNext,
+  });
+
+  final int loaded;
+  final int total;
+  final int remaining;
+  final bool initialLoading;
+  final bool loading;
+  final VoidCallback onLoadNext;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final busy = initialLoading || loading;
+    final progressLabel = total > 0 ? '历史已显示 $loaded / $total' : '正在读取历史';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(
+            color: theme.colorScheme.border.withValues(alpha: 0.7),
+            width: 0.6,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              progressLabel,
+              style: TextStyle(
+                fontSize: 11,
+                color: theme.colorScheme.mutedForeground,
+              ),
+            ),
+          ),
+          ShadButton.outline(
+            size: ShadButtonSize.sm,
+            onPressed: busy ? null : onLoadNext,
+            child: busy
+                ? const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      SizedBox(width: 7),
+                      Text('正在加载…'),
+                    ],
+                  )
+                : Text('加载下一页（还剩 $remaining 条）'),
+          ),
         ],
       ),
     );
