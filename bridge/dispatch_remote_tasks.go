@@ -89,8 +89,8 @@ func listRemoteTasks(args json.RawMessage) (any, error) {
 		return nil, err
 	}
 	defer releaseTaskNamespaceHandles(manager, handles)
-	// Retention compaction is throttled: the 30-day scan is O(n²) over the
-	// journal, which starves this same endpoint once history grows large.
+	// Retention compaction is throttled so polling does not repeatedly walk the
+	// journal, even though each individual pass is linear.
 	if _, err := manager.CompactTaskHistoryThrottled(input.ProfileID, input.Bucket); err != nil {
 		return nil, err
 	}

@@ -120,7 +120,10 @@ extension _TransfersPageRemoteActions on _TransfersPageState {
 
   Future<void> _clearRemoteHistory(RemoteTaskStore store) async {
     if (_runningBatchAction) return;
-    _remoteSetState(() => _runningBatchAction = true);
+    _remoteSetState(() {
+      _runningBatchAction = true;
+      _historyCleanupScope = _HistoryCleanupScope.all;
+    });
     try {
       final removed = await store.clearHistory();
       if (mounted) {
@@ -131,7 +134,10 @@ extension _TransfersPageRemoteActions on _TransfersPageState {
         showAppErrorToast(context, title: '清理失败', message: error.toString());
       }
     } finally {
-      _remoteSetState(() => _runningBatchAction = false);
+      _remoteSetState(() {
+        _runningBatchAction = false;
+        _historyCleanupScope = null;
+      });
     }
   }
 
@@ -145,7 +151,10 @@ extension _TransfersPageRemoteActions on _TransfersPageState {
         .map((task) => task.id)
         .toList(growable: false);
     if (taskIds.isEmpty) return;
-    _remoteSetState(() => _runningBatchAction = true);
+    _remoteSetState(() {
+      _runningBatchAction = true;
+      _historyCleanupScope = _HistoryCleanupScope.selected;
+    });
     try {
       final removed = await store.clearHistory(taskIds: taskIds);
       if (mounted) {
@@ -158,7 +167,10 @@ extension _TransfersPageRemoteActions on _TransfersPageState {
         showAppErrorToast(context, title: '清理失败', message: error.toString());
       }
     } finally {
-      _remoteSetState(() => _runningBatchAction = false);
+      _remoteSetState(() {
+        _runningBatchAction = false;
+        _historyCleanupScope = null;
+      });
     }
   }
 

@@ -1,5 +1,6 @@
 // Transfers page tests keep the header bulk actions wired to queue state.
 
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -103,7 +104,8 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final api = _TransfersPageFakeApi();
+    final cleanup = Completer<void>();
+    final api = _TransfersPageFakeApi()..clearHistoryGate = cleanup.future;
     const done = RemoteTask(
       id: 'sync:test:old-upload',
       kind: RemoteTaskKind.upload,
@@ -126,6 +128,13 @@ void main() {
     await tester.pump();
     expect(find.text('清理历史 1'), findsOneWidget);
     await tester.tap(find.text('清理历史 1'));
+    await tester.pump();
+
+    expect(find.text('正在清理历史 1…'), findsOneWidget);
+    expect(find.text('正在清理全部历史 1…'), findsNothing);
+
+    cleanup.complete();
+    await tester.pump();
     await tester.pump();
 
     expect(api.clearedTaskIds, [done.id]);
@@ -184,6 +193,54 @@ void main() {
       ]),
     );
     expect(RemoteTaskStore.instance.tasks, isEmpty);
+    await tester.pumpWidget(const SizedBox.shrink());
+    RemoteTaskStore.instance.resetForTest();
+  });
+
+  testWidgets('clear-all history shows a spinner until cleanup finishes', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final cleanup = Completer<void>();
+    final api = _TransfersPageFakeApi()
+      ..respectActiveOnly = true
+      ..clearHistoryGate = cleanup.future;
+    api.tasks.add(
+      const RemoteTask(
+        id: 'sync:test:slow-history',
+        kind: RemoteTaskKind.download,
+        status: RemoteTaskStatus.done,
+        targetPath: 'slow.txt',
+      ),
+    );
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Material(
+          child: TransfersPage(
+            api: api,
+            config: RemoteStorageConfig.empty(),
+            active: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    await tester.tap(find.text('清理全部历史 1'));
+    await tester.pump();
+
+    expect(find.text('正在清理全部历史 1…'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    cleanup.complete();
+    await tester.pump();
+    await tester.pump();
     await tester.pumpWidget(const SizedBox.shrink());
     RemoteTaskStore.instance.resetForTest();
   });
@@ -331,6 +388,7 @@ class _TransfersPageFakeApi implements RemoteStorageGateway {
   final List<String> clearedTaskIds = <String>[];
   final List<RemoteTask> tasks = <RemoteTask>[];
   bool respectActiveOnly = false;
+  Future<void>? clearHistoryGate;
 
   @override
   Future<RemoteTaskPage> listRemoteTasks([
@@ -381,6 +439,7 @@ class _TransfersPageFakeApi implements RemoteStorageGateway {
     String bucket = '',
     List<String> taskIds = const <String>[],
   }) async {
+    await clearHistoryGate;
     final ids = taskIds.isEmpty
         ? tasks
               .where(isRemoteTaskHistory)

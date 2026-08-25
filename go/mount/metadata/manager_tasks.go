@@ -308,8 +308,8 @@ func (m *Manager) ClearTaskHistoryIDsFor(profileID, bucket string, taskIDs []str
 	return removed, nil
 }
 
-// Task-history retention compaction throttling: list polling must not run a
-// full O(n²) journal dependency scan on every request.
+// Task-history retention compaction throttling keeps list polling from doing
+// repeated journal/index work on every request.
 var (
 	compactMu    sync.Mutex
 	compactLast  = map[string]time.Time{}

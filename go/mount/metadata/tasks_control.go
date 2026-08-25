@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Task control errors distinguish an absent task from a task that is unsafe to
@@ -172,80 +171,6 @@ func (s *Service) TriggerTask(taskID string) (Task, error) {
 	return s.GetTask(taskID)
 }
 
-// ClearTaskHistory removes terminal journal entries older than before across
-// all retained namespaces. It reports distinct task groups (matching the
-// UI-selected path) rather than raw journal ops.
-func (s *Service) ClearTaskHistory(before time.Time) (int, error) {
-	s.operationMu.RLock()
-	clearedGroups := make(map[string]struct{})
-	err := s.store.update(func(tx boltTxT) error {
-		journal := tx.Bucket([]byte(bucketJournal))
-		var remove []Op
-		if err := journal.ForEach(func(_, value []byte) error {
-			var op Op
-			if err := decodeJSON(value, &op); err != nil {
-				return err
-			}
-			at, terminal := taskTerminalAt(op)
-			if terminal && (before.IsZero() || at.Before(before)) && canCompactTaskOp(tx, op) {
-				remove = append(remove, op)
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-		for _, op := range remove {
-			if err := journal.Delete(encodeUint64(op.Seq)); err != nil {
-				return err
-			}
-			if err := tx.Bucket([]byte(bucketReadyOps)).Delete(readyKey(op)); err != nil {
-				return err
-			}
-			if err := tx.Bucket([]byte(bucketInodeOps)).Delete(inodeOpKey(op.InodeID, op.Seq)); err != nil {
-				return err
-			}
-			if err := removeTaskOpIndex(tx, op); err != nil {
-				return err
-			}
-			if op.TaskGroupID != "" {
-				clearedGroups[op.TaskGroupID] = struct{}{}
-			} else {
-				// Legacy ops without a group id count per op.
-				clearedGroups[fmt.Sprintf("seq-%d", op.Seq)] = struct{}{}
-			}
-		}
-		return nil
-	})
-	s.operationMu.RUnlock()
-	if err == nil && len(clearedGroups) > 0 {
-		s.NotifyTaskChanged()
-	}
-	return len(clearedGroups), err
-}
-
-// canCompactTaskOp preserves the dependency barrier promised by the task API:
-// a terminal event is retained while a later journal event can still refer to
-// its inode, parent edge, or staged generation.
-func canCompactTaskOp(tx boltTxT, candidate Op) bool {
-	if candidate.Type == OpWrite {
-		if tx.Bucket([]byte(bucketContentRefs)).Get(contentRefKey(candidate.InodeID, candidate.ContentGeneration)) != nil {
-			return false
-		}
-	}
-	return tx.Bucket([]byte(bucketJournal)).ForEach(func(_, raw []byte) error {
-		var later Op
-		if decodeJSON(raw, &later) != nil || later.Seq <= candidate.Seq || !opStateUnsettled(later.State) {
-			return nil
-		}
-		if later.InodeID == candidate.InodeID || later.OldParent == candidate.InodeID || later.NewParent == candidate.InodeID {
-			return errKeepTaskHistory
-		}
-		return nil
-	}) == nil
-}
-
-var errKeepTaskHistory = fmt.Errorf("metadata: retain task history")
-
 func (s *Service) taskOpsForControl(tx boltTxT, taskID string) ([]Op, error) {
 	seq, group, segmented, err := taskSequence(s.NamespaceID(), taskID)
 	if err != nil {
@@ -363,15 +288,4 @@ func taskSegmentOps(tx boltTxT, first Op, group string) ([]Op, error) {
 	}
 	sort.Slice(matched, func(i, j int) bool { return matched[i].Seq < matched[j].Seq })
 	return matched, nil
-}
-
-func taskTerminalAt(op Op) (time.Time, bool) {
-	switch op.State {
-	case OpStateApplied:
-		return time.Unix(0, op.AppliedAtUnixNano), true
-	case OpStateCanceled:
-		return time.Unix(0, op.CanceledAtUnixNano), true
-	default:
-		return time.Time{}, false
-	}
 }

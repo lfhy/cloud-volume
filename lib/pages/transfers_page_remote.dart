@@ -57,7 +57,10 @@ extension _TransfersPageRemote on _TransfersPageState {
                       : () => unawaited(
                           _clearSelectedRemoteHistory(store, selected),
                         ),
-                  child: Text('清理历史 $clearable'),
+                  child: _historyCleanupButtonChild(
+                    _historyCleanupScope == _HistoryCleanupScope.selected,
+                    '清理历史 $clearable',
+                  ),
                 ),
               ],
             ],
@@ -68,7 +71,10 @@ extension _TransfersPageRemote on _TransfersPageState {
                 onPressed: _runningBatchAction
                     ? null
                     : () => unawaited(_clearRemoteHistory(store)),
-                child: Text('清理全部历史 $historyTotal'),
+                child: _historyCleanupButtonChild(
+                  _historyCleanupScope == _HistoryCleanupScope.all,
+                  '清理全部历史 $historyTotal',
+                ),
               ),
             ],
           ],
@@ -80,41 +86,6 @@ extension _TransfersPageRemote on _TransfersPageState {
         const SizedBox(height: 16),
         Expanded(
           child: _buildRemoteList(theme, store, visible, selectedVisible),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildRemoteFilters() {
-    return Row(
-      children: [
-        Expanded(
-          child: ShadInput(
-            controller: _searchController,
-            placeholder: const Text('搜索操作、路径、存储桶或账号'),
-          ),
-        ),
-        const SizedBox(width: 12),
-        _remoteDropdown<_RemoteTaskStatusFilter>(
-          value: _remoteStatusFilter,
-          items: _RemoteTaskStatusFilter.values,
-          labelBuilder: (value) => value.label,
-          onChanged: (value) {
-            if (value != null) {
-              _remoteSetState(() => _remoteStatusFilter = value);
-            }
-          },
-        ),
-        const SizedBox(width: 12),
-        _remoteDropdown<_RemoteTaskKindFilter>(
-          value: _remoteKindFilter,
-          items: _RemoteTaskKindFilter.values,
-          labelBuilder: (value) => value.label,
-          onChanged: (value) {
-            if (value != null) {
-              _remoteSetState(() => _remoteKindFilter = value);
-            }
-          },
         ),
       ],
     );

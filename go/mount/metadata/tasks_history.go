@@ -2,7 +2,6 @@ package metadata
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 )
 
@@ -40,12 +39,7 @@ func (s *Service) ClearTaskHistoryIDs(taskIDs []string) (int, error) {
 			if err := deleteTaskHistoryOp(tx, op); err != nil {
 				return err
 			}
-			if op.TaskGroupID != "" {
-				removedGroups[op.TaskGroupID] = struct{}{}
-			} else {
-				// Legacy ops without a group id count per op.
-				removedGroups[fmt.Sprintf("seq-%d", op.Seq)] = struct{}{}
-			}
+			removedGroups[taskHistoryGroupKey(op)] = struct{}{}
 		}
 		return nil
 	})
