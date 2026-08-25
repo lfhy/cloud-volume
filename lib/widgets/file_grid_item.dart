@@ -89,7 +89,12 @@ class FileGridItem extends StatelessWidget {
                                   behavior: HitTestBehavior.opaque,
                                   onTap: onTitleTap,
                                   child: Text(
-                                    compactDisplayName(title),
+                                    // 名称截断仅用于 Android 窄屏卡片；
+                                    // 桌面端保持完整文件名。
+                                    Theme.of(context).platform ==
+                                            TargetPlatform.android
+                                        ? compactDisplayName(title)
+                                        : title,
                                     style: TextStyle(
                                       fontSize: 11.5,
                                       fontWeight: FontWeight.w500,

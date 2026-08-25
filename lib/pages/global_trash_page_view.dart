@@ -39,14 +39,19 @@ extension _GlobalTrashPageView on _GlobalTrashPageState {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // 桌面端保持上游行为：标题始终显示。Android 窄屏在选中条目后
+              // 隐藏标题文字（占位保留），为操作区腾出宽度。
               Expanded(
-                child: Text(
-                  '回收站',
-                  style: theme.textTheme.h3.copyWith(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 22,
-                  ),
-                ),
+                child: _selectedIds.isEmpty ||
+                        defaultTargetPlatform != TargetPlatform.android
+                    ? Text(
+                        '回收站',
+                        style: theme.textTheme.h3.copyWith(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 22,
+                        ),
+                      )
+                    : const SizedBox.shrink(),
               ),
               const SizedBox(width: 16),
               // 操作区按内容宽度布局，上限 360px（与 PageHeaderActions 阈值相等）。

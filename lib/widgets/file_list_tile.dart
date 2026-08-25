@@ -146,7 +146,11 @@ class _FileListTileState extends State<FileListTile> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          compactDisplayName(widget.title),
+                          // 名称截断仅用于紧凑（Android 窄屏）行；桌面端
+                          // 列表保持完整文件名。
+                          widget.compact
+                              ? compactDisplayName(widget.title)
+                              : widget.title,
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w500,

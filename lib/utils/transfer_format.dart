@@ -32,7 +32,20 @@ String formatTransferCreatedAt(String raw, {DateTime? now}) {
     return '';
   }
   final local = parsed.toLocal();
-  return '${local.year}-${_twoDigits(local.month)}-${_twoDigits(local.day)} ${_formatClock(local)}';
+  final current = now ?? DateTime.now();
+  if (_isSameDay(local, current)) {
+    return '创建于今天 ${_formatClock(local)}';
+  }
+  if (local.year == current.year) {
+    return '创建于 ${_twoDigits(local.month)}-${_twoDigits(local.day)} ${_formatClock(local)}';
+  }
+  return '创建于 ${local.year}-${_twoDigits(local.month)}-${_twoDigits(local.day)} ${_formatClock(local)}';
+}
+
+bool _isSameDay(DateTime left, DateTime right) {
+  return left.year == right.year &&
+      left.month == right.month &&
+      left.day == right.day;
 }
 
 String _formatClock(DateTime value) {

@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:remote_storage/state/transfer_queue.dart';
 import 'package:remote_storage/theme/list_interaction_colors.dart';
 import 'package:remote_storage/utils/transfer_format.dart';
-import 'package:remote_storage/utils/display_name.dart';
 import 'package:remote_storage/widgets/app_tooltip.dart';
 import 'package:remote_storage/widgets/list_selection_controls.dart';
 import 'package:remote_storage/widgets/page_header_actions.dart';
@@ -157,7 +156,7 @@ class _TransferTaskRowState extends State<TransferTaskRow> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      compactDisplayName(widget.task.displayName, maxLength: 22),
+                      widget.task.displayName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -180,11 +179,8 @@ class _TransferTaskRowState extends State<TransferTaskRow> {
                 ),
               ),
               const SizedBox(width: 12),
-              Wrap(
-                alignment: WrapAlignment.end,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 4,
-                runSpacing: 2,
+              Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   if (widget.onCancelPressed != null)
                     AppTooltip(
@@ -242,6 +238,7 @@ class _TransferTaskRowState extends State<TransferTaskRow> {
                         onPressed: widget.onRemovePressed,
                       ),
                     ),
+                  const SizedBox(width: 8),
                   TransferStatusBadge(task: widget.task),
                 ],
               ),
@@ -414,7 +411,7 @@ class TransferTaskListHeader extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              '全选',
+              allVisibleSelected ? '取消全选当前结果' : '全选当前结果',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
