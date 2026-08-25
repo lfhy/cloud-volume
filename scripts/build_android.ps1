@@ -3,7 +3,7 @@ param(
   [string]$FlutterRoot = $(if ($env:FLUTTER_ROOT) { $env:FLUTTER_ROOT } else { Join-Path $HOME 'dev\flutter' }),
   [switch]$Debug,
   [switch]$SplitPerAbi,
-  [string]$OutputName = $(if ($Debug) { 'cloud-volumn-debug.apk' } else { 'cloud-volumn-release.apk' })
+  [string]$OutputName = $(if ($Debug) { 'cloud-volume-debug.apk' } else { 'cloud-volume-release.apk' })
 )
 
 Set-StrictMode -Version Latest
