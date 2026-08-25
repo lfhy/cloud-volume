@@ -29,10 +29,11 @@ if (-not (Test-Path -LiteralPath $compiler)) {
 
 New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
 $env:GOOS = 'android'
-$env:GOARCH = switch ($Abi) {
+$goArch = switch ($Abi) {
   'arm64-v8a' { 'arm64' }
   'x86_64' { 'amd64' }
 }
+$env:GOARCH = $goArch
 $env:CGO_ENABLED = '1'
 $env:CC = $compiler
 $env:GOPROXY = 'https://goproxy.cn,direct'
@@ -40,7 +41,7 @@ $env:GOSUMDB = 'sum.golang.google.cn'
 
 Push-Location $repoRoot
 try {
-  & go build -buildmode=c-shared -ldflags '-X main.buildArch=arm64' -o $library ./bridge
+  & go build -buildmode=c-shared -ldflags "-X main.buildArch=$goArch" -o $library ./bridge
   if ($LASTEXITCODE -ne 0) {
     throw "Android bridge build failed with exit code $LASTEXITCODE."
   }
