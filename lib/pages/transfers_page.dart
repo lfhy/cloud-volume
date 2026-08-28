@@ -7,6 +7,7 @@ import 'package:remote_storage/models/remote_storage_config.dart';
 import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/services/remote_storage_gateway.dart';
 import 'package:remote_storage/state/remote_task_store.dart';
+import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:remote_storage/widgets/app_toast.dart';
 import 'package:remote_storage/widgets/list_selection_controls.dart';
 import 'package:remote_storage/widgets/remote_task_style_helpers.dart';
@@ -29,11 +30,7 @@ Widget _batchActionButtonChild(
   return Row(
     mainAxisSize: MainAxisSize.min,
     children: [
-      const SizedBox(
-        width: 14,
-        height: 14,
-        child: CircularProgressIndicator(strokeWidth: 2),
-      ),
+      const AppLoadingIndicator(size: 14, strokeWidth: 2),
       const SizedBox(width: 7),
       Text(loadingLabel ?? '正在$label…'),
     ],

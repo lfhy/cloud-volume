@@ -9,6 +9,7 @@ import 'package:remote_storage/models/config_backup.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
 import 'package:remote_storage/services/app_modal.dart';
 import 'package:remote_storage/services/remote_storage_gateway.dart';
+import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:remote_storage/widgets/app_toast.dart';
 import 'package:remote_storage/widgets/settings_config_backup_cards.dart';
 import 'package:remote_storage/widgets/settings_config_backup_history_dialog.dart';
@@ -286,7 +287,7 @@ class _SettingsConfigBackupSectionState
             ),
           ),
           const SizedBox(height: 14),
-          const LinearProgressIndicator(),
+          const AppLoadingIndicator(size: 14, strokeWidth: 2),
         ],
       );
     }

@@ -22,6 +22,7 @@ import 'package:remote_storage/models/sync_profile.dart';
 import 'package:remote_storage/pages/transfers_page.dart';
 import 'package:remote_storage/services/remote_storage_api.dart';
 import 'package:remote_storage/state/remote_task_store.dart';
+import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:remote_storage/widgets/list_selection_controls.dart';
 import 'package:remote_storage/widgets/sidebar_transfer_status.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -153,7 +154,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('正在同步…'), findsOneWidget);
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.byType(AppLoadingIndicator), findsOneWidget);
 
     triggered.complete();
     await tester.pump();
@@ -305,7 +306,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('正在清理全部历史 1…'), findsOneWidget);
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.byType(AppLoadingIndicator), findsOneWidget);
 
     cleanup.complete();
     await tester.pump();

@@ -17,6 +17,7 @@ import 'package:remote_storage/theme/list_interaction_colors.dart';
 import 'package:remote_storage/widgets/cloud_storage_account_form_field.dart';
 import 'package:remote_storage/widgets/measure_size.dart';
 import 'package:remote_storage/widgets/remote_directory_picker_dialog.dart';
+import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 export 'package:remote_storage/models/cloud_storage_account_draft.dart';
@@ -351,7 +352,7 @@ class _CloudStorageAccountDialogState extends State<CloudStorageAccountDialog> {
       0 => stepProtocolPicker(theme: theme, self: this),
       1 =>
         _loadingBuckets
-            ? const Center(child: CircularProgressIndicator())
+            ? const Center(child: AppLoadingIndicator())
             : stepConnectionFields(theme: theme, self: this),
       _ => stepBucketVisibility(theme: theme, self: this),
     };

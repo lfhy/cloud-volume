@@ -10,6 +10,7 @@ import 'package:remote_storage/widgets/app_toast.dart';
 import 'package:remote_storage/widgets/file_list_tile.dart';
 import 'package:remote_storage/widgets/local_cloudpan_file_icon.dart';
 import 'package:remote_storage/widgets/whitesur_file_icon.dart';
+import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:remote_storage/services/desktop_overlay.dart';
 import 'package:remote_storage/services/remote_directory_picker_window_service.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -299,7 +300,7 @@ class _RemoteDirectoryPickerDialogState
       return _buildBucketList(theme);
     }
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: AppLoadingIndicator());
     }
     if (_error != null) {
       return Center(

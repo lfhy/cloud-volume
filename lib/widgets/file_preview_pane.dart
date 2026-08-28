@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:remote_storage/models/file_preview_source.dart';
 import 'package:remote_storage/widgets/local_preview_image.dart';
+import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 class FilePreviewPane extends StatelessWidget {
@@ -24,7 +25,9 @@ class FilePreviewPane extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (loading) {
-      return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+      return const Center(
+        child: AppLoadingIndicator(size: 22, strokeWidth: 2.4),
+      );
     }
     if (errorText != null) {
       return message(context, Icons.error_outline, errorText!);

@@ -157,8 +157,7 @@ extension _ConfigSetupRestore on _ConfigSetupPageState {
                     if (snapshots.isEmpty && errorMessage.isEmpty)
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 28),
-                        child: Center(
-                            child: CircularProgressIndicator(strokeWidth: 2)),
+                        child: Center(child: AppLoadingIndicator()),
                       )
                     else if (snapshots.isEmpty && errorMessage.isNotEmpty)
                       Padding(

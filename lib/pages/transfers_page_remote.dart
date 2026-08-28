@@ -42,38 +42,44 @@ extension _TransfersPageRemote on _TransfersPageState {
             onToggleAll: () => _toggleRemoteVisibleSelection(visible),
           ),
           Expanded(
-            child: ListView(
-              children: [
-                for (final section in sections) ...[
-                  _RemoteSectionHeader(
-                    label: section.label,
-                    count: section.tasks.length,
-                  ),
-                  for (final task in section.tasks)
-                    RemoteTaskRow(
-                      key: ValueKey<String>(task.id),
-                      task: task,
-                      selected: _selectedTaskIds.contains(task.id),
-                      onToggleSelected: () => _toggleTaskSelection(task.id),
-                      onCancel: task.cancelable
-                          ? () => _cancelRemoteTask(store, task)
-                          : null,
-                      onRetry: task.retryable
-                          ? () => _retryRemoteTask(store, task)
-                          : null,
-                      onTrigger: task.triggerable
-                          ? () => _triggerRemoteTask(store, task)
-                          : null,
-                      onExpanded: (expanded) {
-                        if (expanded) {
-                          unawaited(store.loadDetails(task.id));
-                        }
-                      },
-                      showDivider: true,
-                    ),
-                ],
-              ],
-            ),
+            // Standard body-loading view while the first history page reads;
+            // the fixed pager footer below stays reachable per the pager rule.
+            child:
+                store.tasks.isEmpty && store.isLoadingInitialHistory
+                    ? const _RemoteInitialLoading()
+                    : ListView(
+                        children: [
+                          for (final section in sections) ...[
+                            _RemoteSectionHeader(
+                              label: section.label,
+                              count: section.tasks.length,
+                            ),
+                            for (final task in section.tasks)
+                              RemoteTaskRow(
+                                key: ValueKey<String>(task.id),
+                                task: task,
+                                selected: _selectedTaskIds.contains(task.id),
+                                onToggleSelected: () =>
+                                    _toggleTaskSelection(task.id),
+                                onCancel: task.cancelable
+                                    ? () => _cancelRemoteTask(store, task)
+                                    : null,
+                                onRetry: task.retryable
+                                    ? () => _retryRemoteTask(store, task)
+                                    : null,
+                                onTrigger: task.triggerable
+                                    ? () => _triggerRemoteTask(store, task)
+                                    : null,
+                                onExpanded: (expanded) {
+                                  if (expanded) {
+                                    unawaited(store.loadDetails(task.id));
+                                  }
+                                },
+                                showDivider: true,
+                              ),
+                          ],
+                        ],
+                      ),
           ),
           if (showHistoryPager)
             _RemoteHistoryPager(
@@ -237,10 +243,33 @@ class _RemoteListHeader extends StatelessWidget {
   }
 }
 
+// Standard page-body loading view (file-manager pattern): centered spinner
+// plus message, shown while the first history page reads and no rows exist.
+class _RemoteInitialLoading extends StatelessWidget {
+  const _RemoteInitialLoading();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const AppLoadingIndicator(size: 22, strokeWidth: 2.4),
+          const SizedBox(height: 12),
+          Text(
+            '正在加载任务…',
+            style: theme.textTheme.p.copyWith(fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // Fixed pager stays visible while rows scroll, avoiding a hidden action after
 // a full first history page fills the viewport.
-class _RemoteHistoryPager extends StatelessWidget {
-  const _RemoteHistoryPager({
+class _RemoteHistoryPager extends StatelessWidget {  const _RemoteHistoryPager({
     required this.loaded,
     required this.total,
     required this.remaining,
@@ -289,11 +318,7 @@ class _RemoteHistoryPager extends StatelessWidget {
                 ? const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
+                      AppLoadingIndicator(size: 14, strokeWidth: 2),
                       SizedBox(width: 7),
                       Text('正在加载…'),
                     ],

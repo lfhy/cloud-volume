@@ -10,6 +10,7 @@ import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/models/remote_task_display.dart';
 import 'package:remote_storage/theme/list_interaction_colors.dart';
 import 'package:remote_storage/utils/transfer_format.dart';
+import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:remote_storage/widgets/app_tooltip.dart';
 import 'package:remote_storage/widgets/list_selection_controls.dart';
 import 'package:remote_storage/widgets/remote_task_style_helpers.dart';
@@ -280,13 +281,10 @@ class _TaskRightSide extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (showsSpinner) ...[
-          SizedBox(
-            width: 12,
-            height: 12,
-            child: CircularProgressIndicator(
-              strokeWidth: 1.6,
-              color: theme.colorScheme.primary,
-            ),
+          AppLoadingIndicator(
+            size: 12,
+            strokeWidth: 1.6,
+            color: theme.colorScheme.primary,
           ),
           const SizedBox(width: 8),
         ],
@@ -305,11 +303,7 @@ class _TaskRightSide extends StatelessWidget {
         ),
         if (acting) ...[
           const SizedBox(width: 8),
-          const SizedBox(
-            width: 14,
-            height: 14,
-            child: CircularProgressIndicator(strokeWidth: 1.6),
-          ),
+          const AppLoadingIndicator(size: 14, strokeWidth: 1.6),
         ],
       ],
     );

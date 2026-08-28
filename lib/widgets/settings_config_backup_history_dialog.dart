@@ -10,6 +10,7 @@ import 'package:remote_storage/utils/bridge_error_text.dart';
 import 'package:remote_storage/widgets/app_toast.dart';
 import 'package:remote_storage/widgets/config_backup_restore.dart';
 import 'package:remote_storage/widgets/settings_config_backup_labels.dart';
+import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 class ConfigBackupHistoryDialog extends StatefulWidget {
@@ -224,7 +225,7 @@ class _ConfigBackupHistoryDialogState extends State<ConfigBackupHistoryDialog> {
             if (_loading && _snapshots.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 36),
-                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                child: Center(child: AppLoadingIndicator()),
               )
             else if (_snapshots.isEmpty)
               Padding(

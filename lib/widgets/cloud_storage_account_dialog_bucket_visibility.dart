@@ -18,7 +18,7 @@ Widget stepBucketVisibility({
   required _CloudStorageAccountDialogState self,
 }) {
   if (self._loadingBuckets) {
-    return const Center(child: CircularProgressIndicator());
+    return const Center(child: AppLoadingIndicator());
   }
   final all = self._availableBuckets;
   return Column(

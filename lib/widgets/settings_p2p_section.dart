@@ -9,6 +9,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
 import 'package:remote_storage/services/remote_storage_api.dart';
+import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 /// P2P 设置卡片：展示局域网同步开关、分块大小和已发现设备。
@@ -250,11 +251,7 @@ class _SettingsP2PSectionState extends State<SettingsP2PSection> {
           else if (_peers.isEmpty && _loadingPeers)
             const Padding(
               padding: EdgeInsets.only(top: 2),
-              child: SizedBox(
-                width: 15,
-                height: 15,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
+              child: AppLoadingIndicator(size: 15, strokeWidth: 2),
             )
           else
             ..._peers.map((p) => _PeerRow(peer: p, theme: theme)),

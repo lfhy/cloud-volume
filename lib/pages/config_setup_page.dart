@@ -17,6 +17,7 @@ import 'package:remote_storage/utils/bridge_error_text.dart';
 import 'package:remote_storage/widgets/config_left_panel.dart';
 import 'package:remote_storage/widgets/config_right_form.dart';
 import 'package:remote_storage/widgets/config_storage_type_step.dart';
+import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 part 'config_setup_baidu_auth.dart';

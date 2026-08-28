@@ -16,6 +16,7 @@ import 'package:remote_storage/widgets/desktop_modal_parent_focus_relay.dart';
 import 'package:remote_storage/widgets/desktop_modal_scrim.dart';
 import 'package:remote_storage/widgets/desktop_modal_shell.dart';
 import 'package:remote_storage/widgets/desktop_modal_window_focus_gate.dart';
+import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -191,7 +192,7 @@ class _ModalSubWindowBodyState<T> extends State<_ModalSubWindowBody<T>> {
 
   Widget _buildBody(ShadThemeData theme) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: AppLoadingIndicator());
     }
     if (_error != null || _data == null) {
       return Center(

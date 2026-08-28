@@ -20,6 +20,7 @@ import 'package:remote_storage/widgets/cloud_storage_account_form_field.dart';
 import 'package:remote_storage/widgets/cloud_storage_account_dialog.dart'
     show BucketSelectionCheckbox;
 import 'package:remote_storage/widgets/remote_directory_picker_dialog.dart';
+import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 /// Opens a modal that lists every bucket for [config], lets the user toggle
@@ -145,7 +146,7 @@ class _BucketVisibilityDialogState extends State<_BucketVisibilityDialog> {
     if (_loading) {
       return const SizedBox(
         height: 220,
-        child: Center(child: CircularProgressIndicator()),
+        child: Center(child: AppLoadingIndicator()),
       );
     }
     return Column(
