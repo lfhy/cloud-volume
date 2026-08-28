@@ -437,9 +437,9 @@ class _TaskDetails extends StatelessWidget {
     final base = valueColor ?? theme.colorScheme.mutedForeground;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 1.5),
+      // No maxLines: this panel is the only full-text surface for long
+      // provider errors and dependency reasons, so values must wrap.
       child: Text.rich(
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
         TextSpan(
           children: [
             TextSpan(
@@ -474,6 +474,7 @@ class _TaskDetails extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
           fontSize: 10.5,
+          fontFamily: 'monospace',
           color: theme.colorScheme.mutedForeground.withValues(alpha: 0.75),
         ),
       ),
