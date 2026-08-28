@@ -1,4 +1,7 @@
 // Unified task rows render effective remote operations with optional raw detail.
+// Layout contract: the title text column starts at 80px from the row edge
+// (12 padding + 18 checkbox + 10 gap + 28 kind chip + 12 gap); the expanded
+// detail block and row divider inset to the same value so all rows align.
 
 import 'dart:async';
 
@@ -9,7 +12,11 @@ import 'package:remote_storage/theme/list_interaction_colors.dart';
 import 'package:remote_storage/utils/transfer_format.dart';
 import 'package:remote_storage/widgets/app_tooltip.dart';
 import 'package:remote_storage/widgets/list_selection_controls.dart';
+import 'package:remote_storage/widgets/remote_task_style_helpers.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
+
+/// Left inset (px) at which row content (title/details/divider) aligns.
+const double _taskContentIndent = 80;
 
 class RemoteTaskStatusBadge extends StatelessWidget {
   const RemoteTaskStatusBadge({super.key, required this.task});
@@ -19,19 +26,21 @@ class RemoteTaskStatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    final color = _statusColor(theme, task.status);
+    final color = remoteTaskStatusColor(theme, task.status);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(8),
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.25), width: 0.5),
       ),
       child: Text(
-        _statusLabel(task),
+        remoteTaskStatusLabel(task),
         style: TextStyle(
           fontSize: 10.5,
           fontWeight: FontWeight.w600,
           color: color,
+          letterSpacing: 0.2,
         ),
       ),
     );
@@ -75,6 +84,14 @@ class _RemoteTaskRowState extends State<RemoteTaskRow> {
     final theme = ShadTheme.of(context);
     final colors = ListInteractionColors.fromTheme(theme);
     final task = widget.task;
+    // All unsettled-but-moving states get one compact spinner; the badge text
+    // stays static, so this is the row's only motion cue.
+    final showsSpinner =
+        task.status == RemoteTaskStatus.running ||
+        task.status == RemoteTaskStatus.verifying ||
+        task.status == RemoteTaskStatus.cancelRequested ||
+        task.status == RemoteTaskStatus.reconciling;
+
     return MouseRegion(
       cursor: _hovered ? SystemMouseCursors.click : SystemMouseCursors.basic,
       onEnter: (_) => setState(() => _hovered = true),
@@ -95,76 +112,56 @@ class _RemoteTaskRowState extends State<RemoteTaskRow> {
             hovered: _hovered,
             pressed: _pressed,
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Column(
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: ListSelectionControl(
-                      selected: widget.selected,
-                      onTap: widget.onToggleSelected,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Icon(
-                      _kindIcon(task.kind),
-                      size: 18,
-                      color: _kindColor(task.kind),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(child: _TaskText(task: task)),
-                  const SizedBox(width: 12),
-                  // A compact spinner marks active work; byte-level progress
-                  // lives in the row subtitle instead of a separate bar.
-                  if (task.status == RemoteTaskStatus.running ||
-                      task.status == RemoteTaskStatus.verifying)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 9,
+                ),
+                child: Row(
+                  children: [
                     Padding(
-                      padding: const EdgeInsets.only(right: 10),
-                      child: SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: Center(
-                          child: SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: theme.colorScheme.primary,
-                            ),
-                          ),
-                        ),
+                      padding: const EdgeInsets.only(top: 5),
+                      child: ListSelectionControl(
+                        selected: widget.selected,
+                        onTap: widget.onToggleSelected,
                       ),
                     ),
-                  _TaskActions(
-                    task: task,
-                    acting: _acting,
-                    onCancel: widget.onCancel == null
-                        ? null
-                        : () => _run(widget.onCancel!),
-                    onRetry: widget.onRetry == null
-                        ? null
-                        : () => _run(widget.onRetry!),
-                    onTrigger: widget.onTrigger == null
-                        ? null
-                        : () => _run(widget.onTrigger!),
-                    onExpand: _toggleExpanded,
-                    expanded: _expanded,
-                  ),
-                ],
+                    const SizedBox(width: 10),
+                    _KindIconChip(kind: task.kind),
+                    const SizedBox(width: 12),
+                    Expanded(child: _TaskText(task: task)),
+                    const SizedBox(width: 16),
+                    _TaskRightSide(
+                      task: task,
+                      showsSpinner: showsSpinner,
+                      acting: _acting,
+                      onCancel: widget.onCancel == null
+                          ? null
+                          : () => _run(widget.onCancel!),
+                      onRetry: widget.onRetry == null
+                          ? null
+                          : () => _run(widget.onRetry!),
+                      onTrigger: widget.onTrigger == null
+                          ? null
+                          : () => _run(widget.onTrigger!),
+                      onExpand: _toggleExpanded,
+                      expanded: _expanded,
+                    ),
+                  ],
+                ),
               ),
               if (_expanded) _TaskDetails(task: task),
               if (widget.showDivider)
                 Padding(
-                  padding: const EdgeInsets.only(top: 10),
+                  padding: const EdgeInsets.only(
+                    left: _taskContentIndent,
+                    right: 12,
+                  ),
                   child: Divider(
                     height: 1,
-                    color: theme.colorScheme.border.withValues(alpha: 0.55),
+                    color: theme.colorScheme.border.withValues(alpha: 0.45),
                   ),
                 ),
             ],
@@ -190,6 +187,28 @@ class _RemoteTaskRowState extends State<RemoteTaskRow> {
   }
 }
 
+/// Rounded chip behind the kind icon: gives every operation type an instant
+/// color identity that also reappears as the detail-panel accent.
+class _KindIconChip extends StatelessWidget {
+  const _KindIconChip({required this.kind});
+
+  final RemoteTaskKind kind;
+
+  @override
+  Widget build(BuildContext context) {
+    final iconColor = remoteTaskKindColor(kind);
+    return Container(
+      width: 28,
+      height: 28,
+      decoration: BoxDecoration(
+        color: iconColor.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Icon(remoteTaskKindIcon(kind), size: 14, color: iconColor),
+    );
+  }
+}
+
 class _TaskText extends StatelessWidget {
   const _TaskText({required this.task});
 
@@ -198,11 +217,12 @@ class _TaskText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    final action = _kindLabel(task.kind);
+    final action = remoteTaskKindLabel(task.kind);
     final target = task.operationPath;
-    final subtitle = _taskSubtitle(task);
+    final subtitle = remoteTaskSubtitle(task);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
         Text(
           target.isEmpty ? action : '$action $target',
@@ -214,25 +234,28 @@ class _TaskText extends StatelessWidget {
             color: theme.colorScheme.foreground,
           ),
         ),
-        const SizedBox(height: 3),
-        Text(
-          subtitle,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 11,
-            color: theme.colorScheme.mutedForeground,
+        if (subtitle.isNotEmpty) ...[
+          const SizedBox(height: 2),
+          Text(
+            subtitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11,
+              color: theme.colorScheme.mutedForeground,
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
 }
 
-
-class _TaskActions extends StatelessWidget {
-  const _TaskActions({
+/// Right-side controls: activity spinner, status badge, then ghost actions.
+class _TaskRightSide extends StatelessWidget {
+  const _TaskRightSide({
     required this.task,
+    required this.showsSpinner,
     required this.acting,
     required this.onCancel,
     required this.onRetry,
@@ -242,6 +265,7 @@ class _TaskActions extends StatelessWidget {
   });
 
   final RemoteTask task;
+  final bool showsSpinner;
   final bool acting;
   final VoidCallback? onCancel;
   final VoidCallback? onRetry;
@@ -255,6 +279,19 @@ class _TaskActions extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        if (showsSpinner) ...[
+          SizedBox(
+            width: 12,
+            height: 12,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.6,
+              color: theme.colorScheme.primary,
+            ),
+          ),
+          const SizedBox(width: 8),
+        ],
+        RemoteTaskStatusBadge(task: task),
+        const SizedBox(width: 8),
         if (onCancel != null)
           _iconAction('取消任务', LucideIcons.circleX, onCancel!),
         if (onRetry != null)
@@ -266,23 +303,14 @@ class _TaskActions extends StatelessWidget {
           expanded ? LucideIcons.chevronUp : LucideIcons.chevronDown,
           onExpand,
         ),
-        const SizedBox(width: 8),
-        if (acting)
-          SizedBox(
-            width: 56,
-            child: Center(
-              child: SizedBox(
-                width: 15,
-                height: 15,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: theme.colorScheme.mutedForeground,
-                ),
-              ),
-            ),
-          )
-        else
-          RemoteTaskStatusBadge(task: task),
+        if (acting) ...[
+          const SizedBox(width: 8),
+          const SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 1.6),
+          ),
+        ],
       ],
     );
   }
@@ -291,16 +319,18 @@ class _TaskActions extends StatelessWidget {
     return AppTooltip(
       message: message,
       child: ShadIconButton.ghost(
-        icon: Icon(icon, size: 16),
+        icon: Icon(icon, size: 15),
         width: 28,
         height: 28,
-        iconSize: 16,
+        iconSize: 15,
         onPressed: acting ? null : onPressed,
       ),
     );
   }
 }
 
+/// Expanded detail block under a row. A thin kind-colored accent bar on the
+/// left ties the panel to its row; body uses muted key/value lines.
 class _TaskDetails extends StatelessWidget {
   const _TaskDetails({required this.task});
 
@@ -310,186 +340,143 @@ class _TaskDetails extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final events = task.events;
+    final accent = remoteTaskKindColor(task.kind);
     return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(left: 40, top: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      margin: const EdgeInsets.only(
+        left: _taskContentIndent,
+        right: 12,
+        bottom: 4,
+      ),
       decoration: BoxDecoration(
-        color: theme.colorScheme.secondary,
-        borderRadius: BorderRadius.circular(8),
+        color: theme.colorScheme.muted.withValues(alpha: 0.4),
+        borderRadius: const BorderRadius.horizontal(right: Radius.circular(6)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (task.blockedReason.isNotEmpty)
-            _detailLine('依赖', task.blockedReason),
-          if (task.mountReadRange.isNotEmpty)
-            _detailLine('读取范围', task.mountReadRange)
-          else if (task.phaseLabel.isNotEmpty)
-            _detailLine('阶段', task.phaseLabel),
-          if (task.sourceTargetSummary.isNotEmpty)
-            _detailLine('路径', task.sourceTargetSummary),
-          if (task.localPath.isNotEmpty) _detailLine('本地路径', task.localPath),
-          if (task.progress.currentKey.isNotEmpty &&
-              task.progress.currentFileTotalBytes > 0)
-            _detailLine(
-              '当前文件',
-              '${task.progress.currentKey} '
-                  '${formatBytes(task.progress.currentFileBytesCompleted)} / '
-                  '${formatBytes(task.progress.currentFileTotalBytes)}',
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(width: 3, color: accent),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (task.blockedReason.isNotEmpty)
+                      _detailLine(
+                        context,
+                        '依赖',
+                        task.blockedReason,
+                        valueColor: Colors.amber.shade700,
+                      ),
+                    if (task.mountReadRange.isNotEmpty)
+                      _detailLine(context, '读取范围', task.mountReadRange)
+                    else if (task.phaseLabel.isNotEmpty)
+                      _detailLine(context, '阶段', task.phaseLabel),
+                    if (task.sourceTargetSummary.isNotEmpty)
+                      _detailLine(context, '路径', task.sourceTargetSummary),
+                    if (task.localPath.isNotEmpty)
+                      _detailLine(context, '本地路径', task.localPath),
+                    if (task.progress.currentKey.isNotEmpty &&
+                        task.progress.currentFileTotalBytes > 0)
+                      _detailLine(
+                        context,
+                        '当前文件',
+                        '${task.progress.currentKey} '
+                            '${formatBytes(task.progress.currentFileBytesCompleted)} / '
+                            '${formatBytes(task.progress.currentFileTotalBytes)}',
+                      ),
+                    if (task.progress.currentPart > 0 &&
+                        task.progress.totalParts > 0)
+                      _detailLine(
+                        context,
+                        '分块',
+                        '第 ${task.progress.currentPart} / ${task.progress.totalParts} 块'
+                            '${task.progress.currentRange.isEmpty ? '' : ' · ${task.progress.currentRange}'}',
+                      ),
+                    if (task.error.isNotEmpty)
+                      _detailLine(
+                        context,
+                        '错误',
+                        task.error,
+                        valueColor: theme.colorScheme.destructive,
+                      ),
+                    if (task.remoteOutcome.isNotEmpty)
+                      _detailLine(context, '远端结果', task.remoteOutcome),
+                    if (events.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      for (final event in events) _eventLine(context, event),
+                    ] else if (task.rawEventCount > 0)
+                      _detailLine(context, '原始操作', '${task.rawEventCount} 条记录'),
+                    if (task.physicalTaskIds.isNotEmpty)
+                      _detailLine(
+                        context,
+                        '传输',
+                        task.physicalTaskIds.join('  ·  '),
+                      ),
+                  ],
+                ),
+              ),
             ),
-          if (task.progress.currentPart > 0 && task.progress.totalParts > 0)
-            _detailLine(
-              '分块',
-              '第 ${task.progress.currentPart} / ${task.progress.totalParts} 块'
-                  '${task.progress.currentRange.isEmpty ? '' : ' · ${task.progress.currentRange}'}',
-            ),
-          if (task.error.isNotEmpty) _detailLine('错误', task.error),
-          if (task.remoteOutcome.isNotEmpty)
-            _detailLine('远端结果', task.remoteOutcome),
-          if (events.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            for (final event in events) _eventLine(event),
-          ] else if (task.rawEventCount > 0)
-            _detailLine('原始操作', '${task.rawEventCount} 条记录'),
-          if (task.physicalTaskIds.isNotEmpty)
-            _detailLine('传输', task.physicalTaskIds.join('  ·  ')),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  Widget _detailLine(String label, String value) {
+  Widget _detailLine(
+    BuildContext context,
+    String label,
+    String value, {
+    Color? valueColor,
+  }) {
+    final theme = ShadTheme.of(context);
+    final base = valueColor ?? theme.colorScheme.mutedForeground;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Text('$label：$value', style: const TextStyle(fontSize: 11)),
+      padding: const EdgeInsets.symmetric(vertical: 1.5),
+      child: Text.rich(
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        TextSpan(
+          children: [
+            TextSpan(
+              text: '$label：',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: base.withValues(alpha: 0.7),
+              ),
+            ),
+            TextSpan(
+              text: value,
+              style: TextStyle(fontSize: 11, color: base),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
-  Widget _eventLine(RemoteTaskEvent event) {
+  Widget _eventLine(BuildContext context, RemoteTaskEvent event) {
+    final theme = ShadTheme.of(context);
     final target = event.targetPath.isNotEmpty
         ? event.targetPath
         : event.sourcePath;
     final folded = event.folded ? '（已合并）' : '';
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
+      padding: const EdgeInsets.symmetric(vertical: 1.5),
       child: Text(
         '#${event.sequence} ${event.kind} $target $folded',
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: 11),
+        style: TextStyle(
+          fontSize: 10.5,
+          color: theme.colorScheme.mutedForeground.withValues(alpha: 0.75),
+        ),
       ),
     );
   }
 }
-
-String remoteTaskSpeedSummary(Iterable<RemoteTask> tasks) {
-  final upload = tasks
-      .where(
-        (task) =>
-            task.status == RemoteTaskStatus.running &&
-            (task.kind == RemoteTaskKind.upload ||
-                task.kind == RemoteTaskKind.write),
-      )
-      .fold<double>(0, (sum, task) => sum + task.progress.speedBytes);
-  final download = tasks
-      .where(
-        (task) =>
-            task.status == RemoteTaskStatus.running &&
-            task.kind == RemoteTaskKind.download,
-      )
-      .fold<double>(0, (sum, task) => sum + task.progress.speedBytes);
-  final parts = <String>[
-    if (upload > 0) '↑ ${formatBytesPerSecond(upload)}',
-    if (download > 0) '↓ ${formatBytesPerSecond(download)}',
-  ];
-  return parts.isEmpty ? '' : parts.join('  ');
-}
-
-String _taskSubtitle(RemoteTask task) {
-  if (task.status == RemoteTaskStatus.blocked &&
-      task.blockedReason.isNotEmpty) {
-    return task.blockedReason;
-  }
-  if (task.status == RemoteTaskStatus.retryWait &&
-      task.nextRetryAt.isNotEmpty) {
-    return '将在 ${task.nextRetryAt} 重试';
-  }
-  if (task.error.isNotEmpty) return task.error;
-  if (task.isMountRead) {
-    final parts = <String>[
-      if (task.mountReadRange.isNotEmpty) '读取范围 ${task.mountReadRange}',
-      if (task.progress.totalBytes > 0)
-        '${formatBytes(task.progress.bytesCompleted)} / ${formatBytes(task.progress.totalBytes)}',
-    ];
-    return parts.isEmpty ? '挂载读取' : parts.join(' · ');
-  }
-  if (task.progress.totalBytes > 0) {
-    return '${formatBytes(task.progress.bytesCompleted)} / ${formatBytes(task.progress.totalBytes)}';
-  }
-  if (task.progress.totalItems > 0) {
-    return '${task.progress.itemsCompleted} / ${task.progress.totalItems} 个对象';
-  }
-  return task.phaseLabel.isNotEmpty ? task.phaseLabel : _statusLabel(task);
-}
-
-String _statusLabel(RemoteTask task) => switch (task.status) {
-  RemoteTaskStatus.waiting => '等待同步',
-  RemoteTaskStatus.blocked => '等待依赖',
-  RemoteTaskStatus.running =>
-    task.progress.speedBytes > 0
-        ? formatBytesPerSecond(task.progress.speedBytes)
-        : '执行中',
-  RemoteTaskStatus.verifying => '验证远端',
-  RemoteTaskStatus.retryWait => '等待重试',
-  RemoteTaskStatus.failed => '失败',
-  RemoteTaskStatus.conflict => '冲突',
-  RemoteTaskStatus.done => '已完成',
-  RemoteTaskStatus.cancelRequested => '正在取消',
-  RemoteTaskStatus.reconciling => '正在对账',
-  RemoteTaskStatus.canceled => '已取消',
-};
-
-Color _statusColor(ShadThemeData theme, RemoteTaskStatus status) =>
-    switch (status) {
-      RemoteTaskStatus.running ||
-      RemoteTaskStatus.verifying => theme.colorScheme.primary,
-      RemoteTaskStatus.failed ||
-      RemoteTaskStatus.conflict => theme.colorScheme.destructive,
-      RemoteTaskStatus.done => const Color(0xff15803d),
-      _ => theme.colorScheme.mutedForeground,
-    };
-
-IconData _kindIcon(RemoteTaskKind kind) => switch (kind) {
-  RemoteTaskKind.mkdir => LucideIcons.folderPlus,
-  RemoteTaskKind.write || RemoteTaskKind.upload => LucideIcons.upload,
-  RemoteTaskKind.download => LucideIcons.download,
-  RemoteTaskKind.rename || RemoteTaskKind.move => LucideIcons.moveRight,
-  RemoteTaskKind.copy => LucideIcons.copy,
-  RemoteTaskKind.delete => LucideIcons.trash2,
-  RemoteTaskKind.appUpdate => LucideIcons.refreshCw,
-  RemoteTaskKind.unknown => LucideIcons.arrowLeftRight,
-};
-
-Color _kindColor(RemoteTaskKind kind) => switch (kind) {
-  RemoteTaskKind.write || RemoteTaskKind.upload => const Color(0xff2563eb),
-  RemoteTaskKind.download => const Color(0xff0f766e),
-  RemoteTaskKind.copy => const Color(0xff7c3aed),
-  RemoteTaskKind.rename || RemoteTaskKind.move => const Color(0xffc2410c),
-  RemoteTaskKind.delete => const Color(0xffdc2626),
-  RemoteTaskKind.appUpdate => const Color(0xff0369a1),
-  _ => const Color(0xff64748b),
-};
-
-String _kindLabel(RemoteTaskKind kind) => switch (kind) {
-  RemoteTaskKind.mkdir => '创建目录',
-  RemoteTaskKind.write => '写入文件',
-  RemoteTaskKind.upload => '上传',
-  RemoteTaskKind.download => '下载',
-  RemoteTaskKind.rename => '重命名',
-  RemoteTaskKind.copy => '复制',
-  RemoteTaskKind.move => '移动',
-  RemoteTaskKind.delete => '删除',
-  RemoteTaskKind.appUpdate => '应用更新',
-  RemoteTaskKind.unknown => '远端操作',
-};
