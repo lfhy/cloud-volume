@@ -44,42 +44,41 @@ extension _TransfersPageRemote on _TransfersPageState {
           Expanded(
             // Standard body-loading view while the first history page reads;
             // the fixed pager footer below stays reachable per the pager rule.
-            child:
-                store.tasks.isEmpty && store.isLoadingInitialHistory
-                    ? const _RemoteInitialLoading()
-                    : ListView(
-                        children: [
-                          for (final section in sections) ...[
-                            _RemoteSectionHeader(
-                              label: section.label,
-                              count: section.tasks.length,
-                            ),
-                            for (final task in section.tasks)
-                              RemoteTaskRow(
-                                key: ValueKey<String>(task.id),
-                                task: task,
-                                selected: _selectedTaskIds.contains(task.id),
-                                onToggleSelected: () =>
-                                    _toggleTaskSelection(task.id),
-                                onCancel: task.cancelable
-                                    ? () => _cancelRemoteTask(store, task)
-                                    : null,
-                                onRetry: task.retryable
-                                    ? () => _retryRemoteTask(store, task)
-                                    : null,
-                                onTrigger: task.triggerable
-                                    ? () => _triggerRemoteTask(store, task)
-                                    : null,
-                                onExpanded: (expanded) {
-                                  if (expanded) {
-                                    unawaited(store.loadDetails(task.id));
-                                  }
-                                },
-                                showDivider: true,
-                              ),
-                          ],
-                        ],
-                      ),
+            child: store.tasks.isEmpty && store.isLoadingInitialHistory
+                ? const _RemoteInitialLoading()
+                : ListView(
+                    children: [
+                      for (final section in sections) ...[
+                        _RemoteSectionHeader(
+                          label: section.label,
+                          count: section.tasks.length,
+                        ),
+                        for (final task in section.tasks)
+                          RemoteTaskRow(
+                            key: ValueKey<String>(task.id),
+                            task: task,
+                            selected: _selectedTaskIds.contains(task.id),
+                            onToggleSelected: () =>
+                                _toggleTaskSelection(task.id),
+                            onCancel: task.cancelable
+                                ? () => _cancelRemoteTask(store, task)
+                                : null,
+                            onRetry: task.retryable
+                                ? () => _retryRemoteTask(store, task)
+                                : null,
+                            onTrigger: task.triggerable
+                                ? () => _triggerRemoteTask(store, task)
+                                : null,
+                            onExpanded: (expanded) {
+                              if (expanded) {
+                                unawaited(store.loadDetails(task.id));
+                              }
+                            },
+                            showDivider: true,
+                          ),
+                      ],
+                    ],
+                  ),
           ),
           if (showHistoryPager)
             _RemoteHistoryPager(
@@ -269,7 +268,8 @@ class _RemoteInitialLoading extends StatelessWidget {
 
 // Fixed pager stays visible while rows scroll, avoiding a hidden action after
 // a full first history page fills the viewport.
-class _RemoteHistoryPager extends StatelessWidget {  const _RemoteHistoryPager({
+class _RemoteHistoryPager extends StatelessWidget {
+  const _RemoteHistoryPager({
     required this.loaded,
     required this.total,
     required this.remaining,
