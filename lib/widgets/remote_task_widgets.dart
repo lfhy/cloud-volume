@@ -7,12 +7,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:remote_storage/models/remote_task.dart';
-import 'package:remote_storage/models/remote_task_display.dart';
 import 'package:remote_storage/theme/list_interaction_colors.dart';
-import 'package:remote_storage/utils/transfer_format.dart';
 import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:remote_storage/widgets/app_tooltip.dart';
 import 'package:remote_storage/widgets/list_selection_controls.dart';
+import 'package:remote_storage/widgets/remote_task_details.dart';
 import 'package:remote_storage/widgets/remote_task_style_helpers.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
@@ -153,7 +152,7 @@ class _RemoteTaskRowState extends State<RemoteTaskRow> {
                   ],
                 ),
               ),
-              if (_expanded) _TaskDetails(task: task),
+              if (_expanded) RemoteTaskDetails(task: task),
               if (widget.showDivider)
                 Padding(
                   padding: const EdgeInsets.only(
@@ -322,165 +321,6 @@ class _TaskRightSide extends StatelessWidget {
         height: 28,
         iconSize: 15,
         onPressed: acting ? null : onPressed,
-      ),
-    );
-  }
-}
-
-/// Expanded detail block under a row. A thin kind-colored accent bar on the
-/// left ties the panel to its row; body uses muted key/value lines.
-class _TaskDetails extends StatelessWidget {
-  const _TaskDetails({required this.task});
-
-  final RemoteTask task;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-    final events = task.events;
-    final accent = remoteTaskKindColor(task.kind);
-    return Container(
-      margin: const EdgeInsets.only(
-        left: _taskContentIndent,
-        right: 12,
-        bottom: 4,
-      ),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.muted.withValues(alpha: 0.4),
-        borderRadius: const BorderRadius.horizontal(right: Radius.circular(6)),
-      ),
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Container(width: 3, color: accent),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Op context moved out of the row title lives here.
-                    _detailLine(context, '操作', remoteTaskKindLabel(task.kind)),
-                    if (task.bucket.trim().isNotEmpty)
-                      _detailLine(context, '所属桶', task.bucket),
-                    if (task.operationPath.isNotEmpty)
-                      _detailLine(context, '完整路径', task.operationPath),
-                    if (task.blockedReason.isNotEmpty)
-                      _detailLine(
-                        context,
-                        '依赖',
-                        remoteTaskBlockedReasonLabel(task),
-                        valueColor: Colors.amber.shade700,
-                      ),
-                    if (task.mountReadRange.isNotEmpty)
-                      _detailLine(context, '读取范围', task.mountReadRange)
-                    else if (task.phaseLabel.isNotEmpty)
-                      _detailLine(context, '阶段', task.phaseLabel),
-                    if (task.sourceTargetSummary.isNotEmpty)
-                      _detailLine(context, '路径', task.sourceTargetSummary),
-                    if (task.localPath.isNotEmpty)
-                      _detailLine(context, '本地路径', task.localPath),
-                    if (task.progress.currentKey.isNotEmpty &&
-                        task.progress.currentFileTotalBytes > 0)
-                      _detailLine(
-                        context,
-                        '当前文件',
-                        '${task.progress.currentKey} '
-                            '${formatBytes(task.progress.currentFileBytesCompleted)} / '
-                            '${formatBytes(task.progress.currentFileTotalBytes)}',
-                      ),
-                    if (task.progress.currentPart > 0 &&
-                        task.progress.totalParts > 0)
-                      _detailLine(
-                        context,
-                        '分块',
-                        '第 ${task.progress.currentPart} / ${task.progress.totalParts} 块'
-                            '${task.progress.currentRange.isEmpty ? '' : ' · ${task.progress.currentRange}'}',
-                      ),
-                    if (task.error.isNotEmpty)
-                      _detailLine(
-                        context,
-                        '错误',
-                        task.error,
-                        valueColor: theme.colorScheme.destructive,
-                      ),
-                    if (task.remoteOutcome.isNotEmpty)
-                      _detailLine(context, '远端结果', task.remoteOutcome),
-                    if (events.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      for (final event in events) _eventLine(context, event),
-                    ] else if (task.rawEventCount > 0)
-                      _detailLine(context, '原始操作', '${task.rawEventCount} 条记录'),
-                    if (task.physicalTaskIds.isNotEmpty)
-                      _detailLine(
-                        context,
-                        '传输',
-                        task.physicalTaskIds.join('  ·  '),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _detailLine(
-    BuildContext context,
-    String label,
-    String value, {
-    Color? valueColor,
-  }) {
-    final theme = ShadTheme.of(context);
-    final base = valueColor ?? theme.colorScheme.mutedForeground;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 1.5),
-      // No maxLines: this panel is the only full-text surface for long
-      // provider errors and dependency reasons, so values must wrap.
-      child: Text.rich(
-        TextSpan(
-          children: [
-            TextSpan(
-              text: '$label：',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: base.withValues(alpha: 0.7),
-              ),
-            ),
-            TextSpan(
-              text: value,
-              style: TextStyle(fontSize: 11, color: base),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _eventLine(BuildContext context, RemoteTaskEvent event) {
-    final theme = ShadTheme.of(context);
-    final target = event.targetPath.isNotEmpty
-        ? event.targetPath
-        : event.sourcePath;
-    final folded = event.folded ? '（已合并）' : '';
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 1.5),
-      child: Text(
-        '#${event.sequence} ${event.kind} $target $folded',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontSize: 10.5,
-          fontFamily: 'monospace',
-          color: theme.colorScheme.mutedForeground.withValues(alpha: 0.75),
-        ),
       ),
     );
   }

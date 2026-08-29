@@ -117,6 +117,19 @@ void main() {
     });
   });
 
+  group('journal event kinds localize', () {
+    test('known kinds map to compact Chinese verbs', () {
+      expect(remoteTaskEventKindLabel('write'), '写入');
+      expect(remoteTaskEventKindLabel('mkdir'), '创建目录');
+      expect(remoteTaskEventKindLabel('rename'), '重命名');
+      expect(remoteTaskEventKindLabel('delete'), '删除');
+    });
+
+    test('unknown kinds pass through unchanged', () {
+      expect(remoteTaskEventKindLabel('custom'), 'custom');
+    });
+  });
+
   group('remoteTaskEntryName derives the row title', () {
     test('takes the last path segment', () {
       expect(

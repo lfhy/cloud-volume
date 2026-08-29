@@ -57,7 +57,9 @@ String remoteTaskSubtitle(RemoteTask task) {
   if (task.progress.totalItems > 0) {
     return '${task.progress.itemsCompleted} / ${task.progress.totalItems} 个对象';
   }
-  return task.phaseLabel.isNotEmpty ? task.phaseLabel : remoteTaskStatusLabel(task);
+  return task.phaseLabel.isNotEmpty
+      ? task.phaseLabel
+      : remoteTaskStatusLabel(task);
 }
 
 /// Metadata blocked reasons are fixed English wire strings; map the known
@@ -69,6 +71,20 @@ String remoteTaskBlockedReasonLabel(RemoteTask task) {
   }
   return reason;
 }
+
+/// Journal event kinds are English wire strings (go/mount/metadata/tasks.go:
+/// mkdir/write/rename/delete); map known ones to compact Chinese verbs and
+/// pass anything else through.
+String remoteTaskEventKindLabel(String kind) =>
+    switch (kind.trim().toLowerCase()) {
+      'mkdir' => '创建目录',
+      'write' => '写入',
+      'rename' => '重命名',
+      'delete' => '删除',
+      'move' => '移动',
+      'copy' => '复制',
+      _ => kind,
+    };
 
 /// Row title: the entry name only (last non-empty path segment) so the row
 /// reads like a file listing; the full path/op/bucket live in the detail
