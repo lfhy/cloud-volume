@@ -25,7 +25,11 @@ class RemoteTaskDetails extends StatelessWidget {
     final events = task.events;
     final accent = remoteTaskKindColor(task.kind);
     return Container(
-      margin: const EdgeInsets.only(left: 80, right: 12, bottom: 4),
+      margin: const EdgeInsets.only(
+        left: remoteTaskContentIndent,
+        right: 12,
+        bottom: 4,
+      ),
       decoration: BoxDecoration(
         color: theme.colorScheme.muted.withValues(alpha: 0.4),
         borderRadius: const BorderRadius.horizontal(right: Radius.circular(6)),
@@ -133,6 +137,9 @@ class RemoteTaskDetails extends StatelessWidget {
             width: _detailLabelWidth,
             child: Text(
               label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              softWrap: false,
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,

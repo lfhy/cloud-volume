@@ -15,9 +15,6 @@ import 'package:remote_storage/widgets/remote_task_details.dart';
 import 'package:remote_storage/widgets/remote_task_style_helpers.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
-/// Left inset (px) at which row content (title/details/divider) aligns.
-const double _taskContentIndent = 80;
-
 class RemoteTaskStatusBadge extends StatelessWidget {
   const RemoteTaskStatusBadge({super.key, required this.task});
 
@@ -156,7 +153,7 @@ class _RemoteTaskRowState extends State<RemoteTaskRow> {
               if (widget.showDivider)
                 Padding(
                   padding: const EdgeInsets.only(
-                    left: _taskContentIndent,
+                    left: remoteTaskContentIndent,
                     right: 12,
                   ),
                   child: Divider(

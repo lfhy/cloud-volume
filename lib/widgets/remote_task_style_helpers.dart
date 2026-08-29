@@ -72,6 +72,11 @@ String remoteTaskBlockedReasonLabel(RemoteTask task) {
   return reason;
 }
 
+/// Shared content indent for task rows: 12 row padding + 18 checkbox +
+/// 10 gap + 28 kind chip + 12 gap. The row title, expanded detail panel,
+/// and row divider must all inset by this value to stay column-aligned.
+const double remoteTaskContentIndent = 80;
+
 /// Journal event kinds are English wire strings (go/mount/metadata/tasks.go:
 /// mkdir/write/rename/delete); map known ones to compact Chinese verbs and
 /// pass anything else through.
@@ -83,6 +88,7 @@ String remoteTaskEventKindLabel(String kind) =>
       'delete' => '删除',
       'move' => '移动',
       'copy' => '复制',
+      'unknown' => '未知操作',
       _ => kind,
     };
 
