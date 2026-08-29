@@ -24,7 +24,7 @@
 
 | 域 | 职责摘要 |
 |---|---|
-| [app_shell](features/app_shell.md) | 窗口关闭/托盘退出确认、macOS 窗口生命周期与常量、侧栏导航结构、应用图标生成链、响应式页面头部操作区。 |
+| [app_shell](features/app_shell.md) | 窗口关闭/托盘退出确认、macOS 窗口生命周期与常量、侧栏导航结构(安卓底栏与桌面侧栏共享主题化调色板)、应用图标生成链、响应式页面头部操作区。 |
 | [ui_rules](features/ui_rules.md) | Flutter 组织规范、hover 可点击行 binding(StatefulWidget + `_hovered` + 中性洗色)、`AppLoadingIndicator` 分档、设置卡视觉一致性。 |
 | [app_modal](features/app_modal.md) | 统一拟态框(`showAppModal*` 唯一入口)与全量模态清单;debug 桌面子窗口壳(`DesktopModalSubWindowApp`、内容自适应缩放)。 |
 | [settings](features/settings.md) | 设置页两栏锚点布局、四级诊断日志、应用内自动更新(镜像规则/完整性校验/续传重试/Windows 绿色 ZIP)、全局与每账号代理、远端配置备份。 |

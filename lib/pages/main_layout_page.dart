@@ -17,8 +17,10 @@ import 'package:remote_storage/pages/transfers_page.dart';
 import 'package:remote_storage/services/remote_storage_api.dart';
 import 'package:remote_storage/state/transfer_queue.dart';
 import 'package:remote_storage/state/sync_profile_notifier.dart';
+import 'package:remote_storage/theme/sidebar_palette.dart';
 import 'package:remote_storage/theme/theme_controller.dart';
 import 'package:remote_storage/widgets/app_brand_mark.dart';
+import 'package:remote_storage/widgets/mobile_navigation_bar.dart';
 import 'package:remote_storage/widgets/sidebar_transfer_status.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
@@ -115,69 +117,74 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
     );
   }
 
-  // Mobile navigation replaces the desktop rail without duplicating pages.
+  // Mobile navigation replaces the desktop rail without duplicating pages; it
+  // shares the desktop sidebar's theme-following gradient and selection pill.
   Widget _buildMobileNavigation() {
-    final items = <SidebarItem>[
-      SidebarItem.fileManager,
-      SidebarItem.storage,
-      SidebarItem.trash,
-      SidebarItem.transfers,
-      SidebarItem.settings,
-    ];
-    final selected = items.indexOf(_effectiveSelectedItem);
-    return NavigationBar(
-      selectedIndex: selected < 0 ? 0 : selected,
-      onDestinationSelected: (index) {
-        if (index < items.length) widget.onSelectedItemChanged(items[index]);
-      },
-      labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-      destinations: const [
-        NavigationDestination(icon: Icon(LucideIcons.folderOpen), label: '文件'),
-        NavigationDestination(icon: Icon(LucideIcons.cloudCog), label: '账号'),
-        NavigationDestination(icon: Icon(LucideIcons.trash2), label: '回收站'),
-        NavigationDestination(icon: Icon(LucideIcons.arrowLeftRight), label: '任务'),
-        NavigationDestination(icon: Icon(LucideIcons.settings2), label: '设置'),
+    return MobileNavigationBar<SidebarItem>(
+      accent: ThemeController.of(context).accent.color,
+      selectedValue: _effectiveSelectedItem,
+      onSelected: widget.onSelectedItemChanged,
+      items: const [
+        MobileNavItem(
+          value: SidebarItem.fileManager,
+          icon: LucideIcons.folderOpen,
+          label: '文件',
+        ),
+        MobileNavItem(
+          value: SidebarItem.storage,
+          icon: LucideIcons.cloudCog,
+          label: '账号',
+        ),
+        MobileNavItem(
+          value: SidebarItem.trash,
+          icon: LucideIcons.trash2,
+          label: '回收站',
+        ),
+        MobileNavItem(
+          value: SidebarItem.transfers,
+          icon: LucideIcons.arrowLeftRight,
+          label: '任务',
+        ),
+        MobileNavItem(
+          value: SidebarItem.settings,
+          icon: LucideIcons.settings2,
+          label: '设置',
+        ),
       ],
     );
   }
 
   Widget _buildSidebar() {
-    final ac = ThemeController.of(context).accent.color;
-    final bgTop = Color.lerp(const Color(0xffeef3ff), ac, 0.08)!;
-    final bgBottom = Color.lerp(const Color(0xfff8faff), ac, 0.03)!;
-    final muted = Color.lerp(const Color(0xff64748b), ac, 0.06)!;
+    final palette =
+        SidebarPalette.of(ThemeController.of(context).accent.color);
+    final ac = palette.accent;
+    final muted = palette.muted;
 
     return Container(
       width: 236,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [bgTop, bgBottom],
-        ),
-      ),
+      decoration: BoxDecoration(gradient: palette.background),
       child: Stack(
         children: [
           // 装饰圆形。
           Positioned(
             top: -40,
             right: -30,
-            child: _circle(140, ac.withValues(alpha: 0.06)),
+            child: palette.decorCircle(140, 0.06),
           ),
           Positioned(
             bottom: 80,
             left: -40,
-            child: _circle(120, ac.withValues(alpha: 0.04)),
+            child: palette.decorCircle(120, 0.04),
           ),
           Positioned(
             top: 280,
             right: 20,
-            child: _circle(50, ac.withValues(alpha: 0.03)),
+            child: palette.decorCircle(50, 0.03),
           ),
           Positioned(
             bottom: 200,
             right: -20,
-            child: _circle(80, ac.withValues(alpha: 0.06)),
+            child: palette.decorCircle(80, 0.06),
           ),
           // 前景内容。
           Padding(
@@ -275,14 +282,6 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _circle(double size, Color color) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(shape: BoxShape.circle, color: color),
     );
   }
 
