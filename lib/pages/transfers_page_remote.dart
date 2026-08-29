@@ -328,7 +328,9 @@ class _RemoteHistoryPager extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 16),
-          ShadButton.outline(
+          // Ghost keeps the in-list continuation chromeless — it reads as a
+          // list footer action, not a bordered toolbar button.
+          ShadButton.ghost(
             size: ShadButtonSize.sm,
             onPressed: onLoadNext,
             child: Text('加载下一页（还剩 $remaining 条）'),
