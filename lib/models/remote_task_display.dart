@@ -27,6 +27,10 @@ extension RemoteTaskDisplay on RemoteTask {
   }
 
   String get phaseLabel => switch (phaseDetail.trim().toLowerCase()) {
+    // Metadata tasks report the owning subsystem (provider/verification/
+    // dependency/history), not a user-facing phase; the status badge already
+    // covers those states, so suppress them instead of leaking raw English.
+    'provider' || 'verification' || 'dependency' || 'history' => '',
     'queued' || 'sync_wait' || 'upload_wait' => '等待执行',
     'quiet_period' => '静默期等待(稍后自动上传)',
     'uploading' => '上传中',
