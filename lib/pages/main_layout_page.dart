@@ -118,7 +118,8 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
   }
 
   // Mobile navigation replaces the desktop rail without duplicating pages; it
-  // shares the desktop sidebar's theme-following gradient and selection pill.
+  // uses the theme background with accent-colored selection (see
+  // MobileNavigationBar for the finalized visual contract).
   Widget _buildMobileNavigation() {
     return MobileNavigationBar<SidebarItem>(
       accent: ThemeController.of(context).accent.color,

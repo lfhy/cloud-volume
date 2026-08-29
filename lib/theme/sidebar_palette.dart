@@ -1,9 +1,10 @@
-// 桌面侧栏与安卓底栏共享的主题化视觉调色板:渐变背景、muted 前景与
-// 装饰圆形都从当前强调色派生,两端导航遵循同一套主题(强调色)设置。
+// 桌面侧边栏的主题化视觉调色板:渐变背景、muted 前景与装饰圆形都从
+// 当前强调色派生,使桌面导航遵循主题(强调色)设置。安卓底栏不复用此
+// 调色板(定稿为纯主题背景 + 强调色选中,见 widgets/mobile_navigation_bar.dart)。
 
 import 'package:flutter/material.dart';
 
-/// 由强调色派生的导航栏调色板(桌面侧栏 / 安卓底栏共用)。
+/// 由强调色派生的桌面侧栏调色板。
 class SidebarPalette {
   const SidebarPalette._({
     required this.accent,

@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-用自绘 `MobileNavigationBar`([lib/widgets/mobile_navigation_bar.dart](../../../../lib/widgets/mobile_navigation_bar.dart))取代 `NavigationBar`:背景渐变、装饰圆形与选中态和桌面侧栏同一套视觉,共享 [lib/theme/sidebar_palette.dart](../../../../lib/theme/sidebar_palette.dart)(bgTop/bgBottom/muted 全部由 `ThemeController` 强调色 lerp 派生)。选中态复刻 `_SidebarNavItem`:强调色前景 + 10% 填充 + 20% 描边胶囊 + w600 文字;未选中为 muted 前景/透明背景,并保留同宽透明描边防止切换时布局跳动(ui_rules 布局不跳规则)。形态适配窄屏:图标上、文字下。`MobileNavItem<T>` 用泛型 value,组件不依赖页面层枚举。`test/mobile_navigation_bar_test.dart` 锁定渐变颜色随强调色派生、选中/未选中文字与胶囊样式、点击回调返回正确 value。
+用自绘 `MobileNavigationBar`([lib/widgets/mobile_navigation_bar.dart](../../../../lib/widgets/mobile_navigation_bar.dart))取代 `NavigationBar`;本版把桌面侧栏的渐变背景、装饰圆形与选中胶囊移植到移动端,并为两端抽出共享调色板 [lib/theme/sidebar_palette.dart](../../../../lib/theme/sidebar_palette.dart)(bgTop/bgBottom/muted 全部由 `ThemeController` 强调色 lerp 派生)。**移动端视觉随后按用户反馈定稿重做**(纯主题背景 + 仅强调色选中,不再用渐变与胶囊),见[定稿笔记](2026-08-29-android-mobile-nav-final-visuals.md);`SidebarPalette` 此后只服务桌面侧栏,该抽取本身仍有效。`MobileNavItem<T>` 用泛型 value,组件不依赖页面层枚举。
 
 ## Alternatives considered
 
@@ -18,6 +18,6 @@ Status: implemented
 
 ## Consequences
 
-- 移动端导航随强调色即时变化;渐变公式只有 SidebarPalette 一个家,桌面侧栏与底栏天然同步演进。
-- 底栏维持 5 项固定(文件/账号/回收站/任务/设置);分享管理与文件同步不在移动底栏(移动端本就隐藏同步;分享项保持桌面侧栏专属,与既有移动导航行为一致)。
-- 验证:`flutter analyze` 零问题;139 个 widget 测试全过(含新增锁定测试);模拟器上的视觉验收交用户确认。
+- 桌面侧栏的渐变公式收口到 SidebarPalette 一个家(自 `main_layout_page.dart` 内联实现迁移,逐值等价)。
+- 移动端那部分视觉已被[定稿笔记](2026-08-29-android-mobile-nav-final-visuals.md)取代;底栏维持 5 项固定(文件/账号/回收站/任务/设置),分享管理与文件同步不在移动底栏(移动端本就隐藏同步;分享项保持桌面侧栏专属)。
+- 验证:`flutter analyze` 零问题;widget 测试全过;模拟器上的视觉验收交用户确认。

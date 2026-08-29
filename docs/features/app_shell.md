@@ -28,11 +28,11 @@
 ## 导航结构
 
 - `lib/pages/main_layout_page.dart` — 根布局与侧栏导航。路由:文件同步(`FileSyncTasksPage`)、文件管理(`FileManagerPage`)、传输(`TransfersPage`)、回收站(`GlobalTrashPage`)、分享管理(`ShareManagementPage`)、设置(`SettingsPage`)。侧栏 `_SidebarNavItem` 是 hover 正典(见 [ui_rules](ui_rules.md))。
-- `lib/theme/sidebar_palette.dart` — 桌面侧栏与安卓底栏共享的主题化调色板:渐变背景(bgTop/bgBottom)、muted 前景与装饰圆形都由 `ThemeController` 的强调色 lerp 派生,两端导航遵循同一主题设置;渐变公式只有这一个家。
-- `lib/widgets/mobile_navigation_bar.dart` — 安卓底栏(取代 Material `NavigationBar`):背景用 `SidebarPalette` 渐变 + 装饰圆,选中态复刻桌面侧栏胶囊(强调色前景 + 10% 填充 + 20% 描边 + w600;未选中 muted/透明,保留同宽描边防布局跳动),图标上文字下适配窄屏。`MobileNavItem` 为泛型 value,不依赖页面层枚举;`test/mobile_navigation_bar_test.dart` 锁定渐变随强调色与选中/未选中样式。
+- `lib/theme/sidebar_palette.dart` — 桌面侧边栏的主题化调色板:渐变背景(bgTop/bgBottom)、muted 前景与装饰圆形都由 `ThemeController` 的强调色 lerp 派生;桌面渐变公式只有这一个家。安卓底栏不复用侧栏渐变,它以 `ShadTheme.colorScheme.background` 作纯主题背景,只把选中图标/文字设为强调色。
+- `lib/widgets/mobile_navigation_bar.dart` — 安卓底栏(取代 Material `NavigationBar`):纯 `ShadTheme` background 铺满物理底部(无渐变/装饰圆/分隔线/胶囊),图标上文字下;选中态只有 `ThemeController` 强调色图标+文字和 w600,未选中 `mutedForeground`+w500。`MobileNavItem` 为泛型 value,不依赖页面层枚举;`test/mobile_navigation_bar_test.dart` 锁定无渐变、强调色选中、muted 未选中与点击回调。
 - `lib/pages/settings_page.dart` — 设置页,分组(通用设置、Windows 设置、关于)用**左垂直侧栏栏轨**(不是顶部 tab)。同步管理已从设置移除,完全在文件同步任务页;过期的 Windows「此电脑」条目卡与锚点已删除(`windowsThisPcEntryEnabled` 仅为兼容保留在配置模型)。
 
-**Known P2/P3 (review 2026-08-29):** 底栏首版评审发现并同批修复:P2 渐变在 SafeArea 外导致三键导航设备系统导航区色带(渐变移到最外层铺满到物理底部);P3 选中胶囊圆角 10 与桌面 8 不一致(统一 8)、Semantics label 与 Text 连读两遍(去掉 label 让 Text 自报)、CODE_MAP 摘要未提安卓底栏、测试补未选中胶囊透明断言。有意行为(不改):底栏 `selectedValue` 无匹配项(如分享页被选中)时全部项不高亮——旧 Material 实现会错误高亮「文件」。
+**Known P2/P3 (review 2026-08-29):** 首版评审的 P2(渐变未铺满物理底部)与 P3(圆角不一致、Semantics label 连读)已随用户反馈的定稿重设计一并解决(定稿无渐变、无胶囊;Semantics 不带 label 让 Text 自报)。定稿版评审又发现并同批修复:P2 定稿去掉胶囊后触控目标回落到 42dp(<48dp,相对胶囊版是回归)——GestureDetector 内加 `minHeight: 48` 约束;P2 `main_layout_page` 与 `sidebar_palette` 注释仍描述共享渐变(已改为现状);P3 选中判断重复(合并为局部变量)。有意行为(不改):底栏 `selectedValue` 无匹配项(如分享页被选中)时全部项不高亮——旧 Material 实现会错误高亮「文件」;测试的无渐变断言扫描整棵 pumped 树,shadcn 内部若引入装饰渐变需收窄 finder。
 
 ## 应用图标(桌面 + Android)
 

@@ -1,8 +1,9 @@
-// 安卓底部导航栏:复用桌面侧栏的主题化渐变背景与选中胶囊视觉,
-// 取代 Material NavigationBar,使移动端导航遵循应用的主题(强调色)设置。
+// 安卓底部导航栏:无底色装饰(与应用主题背景色融合),选中项仅图标与
+// 文字变为主题强调色(w600),未选中为 mutedForeground——按用户定稿的
+// 参考设计实现,无胶囊/描边/指示器。
 
 import 'package:flutter/material.dart';
-import 'package:remote_storage/theme/sidebar_palette.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 
 /// 底栏单个目的地的描述。
 class MobileNavItem<T> {
@@ -17,8 +18,8 @@ class MobileNavItem<T> {
   final String label;
 }
 
-/// 主题化移动底栏:背景渐变、装饰圆形与选中态均与桌面侧栏
-/// (`main_layout_page.dart` 的 `_SidebarNavItem`)保持一致。
+/// 移动底栏:背景为应用主题背景色,遵循主题设置;选中态只有颜色变化
+/// (强调色 + w600),参考设计里没有选中底块与分隔线。
 class MobileNavigationBar<T> extends StatelessWidget {
   const MobileNavigationBar({
     super.key,
@@ -31,74 +32,64 @@ class MobileNavigationBar<T> extends StatelessWidget {
   final List<MobileNavItem<T>> items;
   final T? selectedValue;
   final ValueChanged<T> onSelected;
+
+  /// 主题强调色(`ThemeController` 的 accent),选中项图标与文字的颜色。
   final Color accent;
 
   @override
   Widget build(BuildContext context) {
-    final palette = SidebarPalette.of(accent);
-    // 渐变在最外层铺满到屏幕物理底部(SafeArea 只内缩内容),系统导航条
-    // 区域不会露出 Scaffold 背景形成色带。
+    final theme = ShadTheme.of(context);
+    // 背景铺满到屏幕物理底部(SafeArea 只内缩内容),无渐变、无分隔线。
     return Container(
-      decoration: BoxDecoration(gradient: palette.background),
+      color: theme.colorScheme.background,
       child: SafeArea(
         top: false,
-        child: Stack(
-          children: [
-            // 与桌面侧栏同款的装饰圆形(Stack 默认 hardEdge 裁剪在栏内)。
-            Positioned(
-              top: -40,
-              right: -30,
-              child: palette.decorCircle(140, 0.06),
-            ),
-            Positioned(
-              bottom: -30,
-              left: -40,
-              child: palette.decorCircle(120, 0.04),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-              child: Row(
-                children: [
-                  for (var i = 0; i < items.length; i++) ...[
-                    if (i > 0) const SizedBox(width: 4),
-                    Expanded(
-                      child: _MobileNavItem(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          child: Row(
+            children: [
+              for (var i = 0; i < items.length; i++) ...[
+                if (i > 0) const SizedBox(width: 4),
+                Expanded(
+                  child: Builder(
+                    builder: (context) {
+                      final selected = items[i].value == selectedValue;
+                      return _MobileNavItem(
                         item: items[i],
-                        selected: items[i].value == selectedValue,
-                        palette: palette,
+                        selected: selected,
+                        foreground:
+                            selected ? accent : theme.colorScheme.mutedForeground,
                         onTap: () => onSelected(items[i].value),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-/// 底栏单项:选中视觉复刻桌面侧栏——强调色前景 + 10% 填充 + 20% 描边
-/// 胶囊;未选中为 muted 前景、透明背景(保留同宽描边避免布局跳动)。
+/// 底栏单项:图标上、文字下,颜色由父级给定(选中 = 强调色,未选中 =
+/// mutedForeground);选中仅提升字重,不加任何背景装饰。
 class _MobileNavItem<T> extends StatelessWidget {
   const _MobileNavItem({
     required this.item,
     required this.selected,
-    required this.palette,
+    required this.foreground,
     required this.onTap,
   });
 
   final MobileNavItem<T> item;
   final bool selected;
-  final SidebarPalette palette;
+  final Color foreground;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final ac = palette.accent;
-    final fg = selected ? ac : palette.muted;
     // label 由内部 Text 自报,避免 TalkBack 连读两遍。
     return Semantics(
       button: true,
@@ -106,31 +97,24 @@ class _MobileNavItem<T> extends StatelessWidget {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          curve: Curves.easeOut,
-          decoration: BoxDecoration(
-            color: selected ? ac.withValues(alpha: 0.1) : Colors.transparent,
-            // 圆角与桌面 _SidebarNavItem 一致(8)。
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: selected ? ac.withValues(alpha: 0.2) : Colors.transparent,
-            ),
-          ),
-          padding: const EdgeInsets.symmetric(vertical: 6),
+        // 命中区域至少 48dp(图标 24 + 间距 4 + 文字约 14 原生高度不足)。
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
           child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(item.icon, size: 21, color: fg),
-              const SizedBox(height: 3),
+              Icon(item.icon, size: 24, color: foreground),
+              const SizedBox(height: 4),
               Text(
                 item.label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                  color: fg,
+                  fontSize: 12,
+                  height: 1.15,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                  color: foreground,
                 ),
               ),
             ],
