@@ -8,6 +8,7 @@
 - [DOC_STANDARDS.md](DOC_STANDARDS.md) — 文档分层规范(one home per fact)、预算门禁、防膨胀清单。
 - [DEVELOPMENT_GUIDE.md](DEVELOPMENT_GUIDE.md) — 构建、验证、提交与提交前评审流程。
 - [CODE_MAP.md](CODE_MAP.md) — 特性域索引(一行摘要 + 链接到 `features/*.md`)。
+- [notes/README.md](notes/README.md) — Agent Note 决策记录(为什么这样设计、放弃了什么;`proposed/implemented/rejected` × class,格式有门禁)。
 - [PROJECT_GUIDE.md](PROJECT_GUIDE.md) — 探索记录与历史评审结论存档(带日期,无预算上限)。
 
 ## 特性正典(features/)

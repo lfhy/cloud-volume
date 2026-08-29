@@ -55,7 +55,7 @@ Windows 宿主移除原生标题栏用自绘 chrome,同时在 OS 支持处向 DW
 
 **Gotchas:**
 - **不要**把 Cloud Files「此电脑」命名空间项描述为盘符:`Win32_LogicalDisk`/`net use` 不含它,路径仍在用户 profile 下。
-- **不要**在 UI 恢复 Cloud Files 盘符选择:`subst` 映射只是宿主目录别名,多桶挂载显示错误容量;需要承载容量的卷时用 WinFsp。
+- **不要**在 UI 恢复 Cloud Files 盘符选择:`subst` 映射只是宿主目录别名,多桶挂载显示错误容量;需要承载容量的卷时用 WinFsp(被拒提案与理由见 [决策记录](../notes/rejected/architecture/2026-07-18-cloud-files-drive-letter-selection.md))。
 - 盘符 `ShadSelect` 设 `ensureSelectedVisible: false`:包默认对选中项 `Scrollable.ensureVisible`,popover 打开时会把周围应用模态滚到最后一行。
 - 移除必须查询当前 `subst` 目标,拒绝删目标与会话路径不同的盘。每桶过期清理在删 sync root 前跑;全量清理只移除目标是 `~/Cloud Volume` 直接子项的映射。
 - 被占用的 Cloud Files 缓存不是活跃挂载:provider 断开/注销后 `Stop` 保持桶未挂载,缓存移除问题经 `BucketMountStatus.lastError` 返回;`cleanupManagedWindowsCloudFilesForBucket` 保留删不掉的稳定 root 供下次挂载注册复用。`CleanupStaleWindowsProcesses` 只终止本地构建 runner 目录下的过期 `cloud-volume.exe`/`cloud-volume-app.exe` 进程,有意不终止占用打开文件的 Explorer、Office 等用户应用。

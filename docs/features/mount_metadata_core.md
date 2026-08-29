@@ -1,6 +1,6 @@
 # Mount Metadata Core — 持久 inode 元数据与统一读写视图
 
-应用正朝「一个持久 inode B+Tree 元数据视图 + 操作 journal,Flutter 文件管理器与挂载后端共用,远端同步由 journal 驱动」重构。当前状态:持久 inode 元数据支撑页面/挂载读取与 metadata 写入,统一 `RemoteTask` 投影是唯一远端操作 UI 来源;挂载与 profile 域页面 mutation 共享同一 journal-first 命名空间,没有持久 `ProfileID` 的调用方仅保留 legacy 执行兼容。设计全文见 [MountMetadataJournalPlan.md](../MountMetadataJournalPlan.md)。
+应用正朝「一个持久 inode B+Tree 元数据视图 + 操作 journal,Flutter 文件管理器与挂载后端共用,远端同步由 journal 驱动」重构。当前状态:持久 inode 元数据支撑页面/挂载读取与 metadata 写入,统一 `RemoteTask` 投影是唯一远端操作 UI 来源;挂载与 profile 域页面 mutation 共享同一 journal-first 命名空间,没有持久 `ProfileID` 的调用方仅保留 legacy 执行兼容。设计全文见 [MountMetadataJournalPlan.md](../MountMetadataJournalPlan.md);架构决策及放弃的替代方案见 [journal-first 决策记录](../notes/implemented/architecture/2026-08-17-journal-first-metadata-core.md)。
 
 ## 架构不变式(binding)
 

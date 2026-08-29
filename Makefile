@@ -207,9 +207,10 @@ test:
 analyze:
 	$(FLUTTER) analyze
 
-# 文档字数预算门禁(规范见 docs/DOC_STANDARDS.md)。
+# 文档字数预算与 Agent Note 格式门禁(规范见 docs/DOC_STANDARDS.md 与 docs/notes/README.md)。
 check-docs:
 	@scripts/check_doc_budgets.sh
+	@scripts/check_agent_notes.sh
 
 clean:
 	$(FLUTTER) clean

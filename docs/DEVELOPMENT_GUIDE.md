@@ -27,10 +27,11 @@
 - 提交不包含编译产物或临时构建物。
 - 每次新增功能,同一变更集内更新 `README.md` 再提交。
 - 与 upcoming release 相关的改动在 `CHANGELOG.md` 的 `## Unreleased` 下维护草稿。
+- **决策记录(binding):** 非平凡变更在同一变更集中新增或更新至少一条 [Agent Note](notes/README.md)(为什么、替代方案、后果、验证);纯机械/局部改动豁免。
 
 ## 提交前强制评审(binding)
 
-- 每个代码改动落地 `main` 前必须通过 P0/P1 级子代理评审。P0/P1 发现视为 blocking;P2/P3 可延后,但发现与解决链接必须记录在对应特性的 Code Map 条目(现为 `docs/features/*.md` 的「Known P2/P3」小节 + [PROJECT_GUIDE.md](PROJECT_GUIDE.md) 记录)。
+- 每个代码改动落地 `main` 前必须通过 P0/P1 级子代理评审。P0/P1 发现视为 blocking;P2/P3 可延后,但发现与解决链接必须记录在对应特性的 Code Map 条目(现为 `docs/features/*.md` 的「Known P2/P3」小节)——完整叙事按性质分流:改变了设计决策的写成 [Agent Note](notes/README.md),纯过程叙事进 [PROJECT_GUIDE.md](PROJECT_GUIDE.md)(规则见 [DOC_STANDARDS.md](DOC_STANDARDS.md))。
 - 评审子代理只需要 `git show` / `git diff` 暴露的内容加上它点名要看的周边文件;`fork none`,给一份简短 brief:提交哈希、动机/修复的 bug、要考察的具体风险轴。
 - 改变范围的评审发现(新不变式、新文件加入特性)必须并入对应 `features/*.md` 后,解决提交才能落地。历史发现与其解决方式记录在该特性的 `**Known P2/P3 (review YYYY-MM-DD):**` 块。
 - 评审子代理自身可以委派更深的审计(如 `post_commit_review`),但主会话负责 triage 输出并推进解决提交。

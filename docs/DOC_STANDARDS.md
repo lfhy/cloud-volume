@@ -13,15 +13,16 @@
 | 本文件 | 文档规范本身 | 特性内容 |
 | [DEVELOPMENT_GUIDE.md](DEVELOPMENT_GUIDE.md) | 构建/运行/验证/提交流程的完整规则与理由 | 特性的文件清单、UI 规范 |
 | [CODE_MAP.md](CODE_MAP.md) | 索引:每个特性域一行摘要 + 链接到 `features/*.md`,外加仓库布局 | 特性正文、数据流、gotcha |
-| `features/*.md` | 特性正典:文件集、职责、数据流、binding 契约、gotcha。**描述现状** | 评审/修复过程叙事(→ PROJECT_GUIDE) |
-| [PROJECT_GUIDE.md](PROJECT_GUIDE.md) | 探索记录与历史存档:带日期的评审结论(P1/P2/P3 修复过程)、事故复盘、迁移记录。按固定格式追加,无预算上限 | 仍需每次会话看见的现行规则(应上移到正典) |
+| `features/*.md` | 特性正典:文件集、职责、数据流、binding 契约、gotcha。**描述现状** | 评审/修复过程叙事(→ PROJECT_GUIDE)、设计决策的理由与替代方案(→ notes) |
+| `notes/{proposed,implemented,rejected}/<class>/`(见 [notes/README.md](notes/README.md)) | 决策记录(Agent Note):为什么这样设计、放弃了什么替代方案、后果与验证。格式由 `check_agent_notes.sh` 门禁 | 现状文件清单(→ features)、变更史叙事(→ PROJECT_GUIDE)、双语副本(仅中文单语) |
+| [PROJECT_GUIDE.md](PROJECT_GUIDE.md) | 探索记录与历史存档:带日期的评审结论(P1/P2/P3 修复过程)、事故复盘、迁移记录。按固定格式追加,无预算上限 | 仍需每次会话看见的现行规则(应上移到正典);设计决策的理由(→ notes) |
 | 设计文档(`MountMetadataJournalPlan.md`、`P2PSyncDesign.md`、`WindowsMountRegressionMatrix.md`、`AddingStorageBackends.md`) | 既有的专题设计/操作指南,保持原位 | 与 features/*.md 重复的正典内容(互相链接,不复制) |
 
 ## 写作规则
 
 - **写现状,不写变更史。** 正典文档(`features/*.md`、`CODE_MAP.md`、`DEVELOPMENT_GUIDE.md`)禁用「之前/现在不再/fixed on …/2026-XX-XX 修复」式**叙事**;直接陈述当前机制。两条例外:日期本身承载信息的**证据引用**允许保留(如「实测 2026-08-01:默认 dialer = 75.011s」「v1.2.0 无桌面工件」这类复现数据/回归锚点);「不要退回 X」的 gotcha 允许保留,因为约束本身是现状,但过程细节去掉,完整过程放 PROJECT_GUIDE 记录。
 - **一条事实一个家。** 同一规则出现在两处时,保留归属文档,其余改成一行链接。grep 一个特征短语就能发现重复。
-- **评审结论的归档方式:** 子代理评审产生的 P2/P3 发现与修复,在对应 `features/*.md` 的「Known P2/P3」小节保留一行指针(发现 + 状态),完整叙事追加到 PROJECT_GUIDE 的带日期记录里。P0/P1 是 blocking,修复后其不变式应并入正典正文。
+- **评审结论的归档方式:** 子代理评审产生的 P2/P3 发现与修复,在对应 `features/*.md` 的「Known P2/P3」小节保留一行指针(发现 + 状态)。完整叙事按性质分流:**改变了设计决策(采纳了某方案、放弃了某替代)**的写成一条 Agent Note(格式见 [notes/README.md](notes/README.md));纯过程叙事(修复批次经过、事故时间线)追加到 PROJECT_GUIDE 的带日期记录。P0/P1 是 blocking,修复后其不变式应并入正典正文。
 - **跨文档引用使用相对 Markdown 路径**(如 `[CODE_MAP.md](CODE_MAP.md)`、`[ui_rules](features/ui_rules.md)`),不要裸文件名,便于校验与跳转。
 - **语言:** 正文中文为主,文件路径/代码标识符保留英文原文;新条目风格与既有条目保持一致。
 - **新增特性时:**在对应 `features/*.md` 落盘(没有就新建,并加入 CODE_MAP 索引和预算清单),不要往根 `AGENTS.md` 加内容。
@@ -44,6 +45,8 @@
 | `docs/DEVELOPMENT_GUIDE.md` | 16,000 |
 | `docs/CODE_MAP.md` | 30,000 |
 | `docs/README.md` | 6,000 |
+| `docs/notes/README.md` | 12,000 |
+| `docs/notes/*/*/*.md`(每条笔记) | 8,000 |
 | `docs/features/*.md`(每个) | 60,000 |
 
 `PROJECT_GUIDE.md` 是无上限存档,但每条记录必须是自包含的带日期条目,不允许变成正典规则的副本。
@@ -56,5 +59,6 @@
 - 变更史叙事:「之前/now/no longer/2026-XX-XX 修复/PR #N」出现在正典文档(改写成现状;过程移 PROJECT_GUIDE)。
 - 段落墙:一段话承载多条规则和括号插叙(拆分或降级到归属层)。
 - 强调通胀:到处加粗/CAPS/「必须」意味着什么都不突出。
-- 状态标注腐烂:「已实现!/future: …」这类实现状态会过时;正典只写机制本身。
+- 状态标注腐烂:「已实现!/future: …」这类实现状态会过时;正典只写机制本身(笔记的 `proposed/`/`implemented/` 目录本身就是状态,由 lifecycle 承载)。
+- implemented 笔记里出现 spec-speak(`## Proposal`/`## Plan`/`## Migration plan`/`## Acceptance criteria`):已落地的决策写现在时 `## Decision`;格式门禁会拒绝。
 - 把本该进 `features/*.md` 的内容写进根 `AGENTS.md`(反膨胀规则:根文件只进不出,新内容一律进 docs/)。

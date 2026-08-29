@@ -12,6 +12,7 @@
 - Code Map 34 个条目按域合并为 [features/](features/) 下 16 个正典文档;[CODE_MAP.md](CODE_MAP.md) 保留索引;带日期的评审叙事迁入本文件(见下)。
 - 新增 [DOC_STANDARDS.md](DOC_STANDARDS.md)(分层规范 + 字数预算)与 `make check-docs` 门禁。
 - 提交前经 P0/P1 子代理评审:无 P0/P1,APPROVE。P2(M2/M7 开放发现补回 mount_metadata_core 的 Known P2 指针)与 P3(账号 glyph/桶列表响应式列/自动更新超时数值/windows_dev Git-Go 前提/xpan 版本失准/DOC_STANDARDS 预算表缺 README 行与日期证据例外)已在同一提交修复;完整清单见评审记录(2026-08-29,agent 会话)。
+- 同日第二批:引入 [notes/](notes/README.md) Agent Note 决策记录体系(借鉴 `../coding`,中文单语、去双语 sidecar 与 hash 门禁),`check_agent_notes.sh` 格式门禁并入 `make check-docs`;种子笔记 5 条(文档分层、journal-first 元数据核心、任务首页可见性、应用内模态、被拒的 Cloud Files 盘符选择),本文件 2026-07-11 模态条目改为指向对应 note。
 
 对照表(旧 Code Map 条目 → 新文件):Mount Operation Queues → mount_metadata_core + remote_tasks + mount_queues_legacy + macos_webdav_mount(部分);Account Disable / Account Management / First-run Config Setup / Multi-Account Bucket Loading → account_management;File Sync / LAN P2P → file_sync_p2p;File Actions / Paste-Drag / File Preview / Object Delete-Trash → file_actions;Window Close-Tray / macOS Window Lifecycle / Navigation / Icons / Responsive Header → app_shell;Settings Layout / Diagnostic Logging / Auto Update / Global+Per-Account Proxy / Config Backup → settings;App Modal / Modal Sub-Window Shell → app_modal;Windows Crash Watchdog / Custom Chrome / Mount Presentation / Cloud Files Deletion / WinFsp → windows_platform;Windows Local Dev Workflow → windows_dev;Android Dev → android_dev;JWanFS SDK / FTP-SFTP → storage_backends。
 
@@ -66,7 +67,7 @@ Release 构建无 `app.log.level` key 时桥接保持 `Silent`,`bridge.log` 可�
 
 ## 2026-07-11 模态呈现策略统一(app_modal 域)
 
-同步/账号/远端目录编辑器默认路径从 OS 子窗口切换为应用内模态(`showAppModal` + `asDialog: true`);OS 子窗口保留为 `kDebugMode && USE_MODAL_SUB_WINDOWS` 的实验路径。同日修复 `StorageProtocolCard` 与 `DesktopModalShell` 关闭按钮的 hover 回归(反面板经见 [ui_rules](features/ui_rules.md))。
+同步/账号/远端目录编辑器默认路径从 OS 子窗口切换为应用内模态(`showAppModal` + `asDialog: true`);OS 子窗口保留为 `kDebugMode && USE_MODAL_SUB_WINDOWS` 的实验路径。决策与替代方案已正典化为 [决策记录](notes/implemented/architecture/2026-07-11-in-app-modals-over-os-subwindows.md);现状见 [app_modal](features/app_modal.md)。同日修复 `StorageProtocolCard` 与 `DesktopModalShell` 关闭按钮的 hover 回归(反面板经见 [ui_rules](features/ui_rules.md))。
 
 ## 2026-07-02 → 07-08 应用内更新修复批次(settings 域)
 

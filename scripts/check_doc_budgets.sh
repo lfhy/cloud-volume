@@ -32,6 +32,8 @@ check_glob 'docs/DOC_STANDARDS.md' 14000
 check_glob 'docs/DEVELOPMENT_GUIDE.md' 16000
 check_glob 'docs/CODE_MAP.md' 30000
 check_glob 'docs/README.md' 6000
+check_glob 'docs/notes/README.md' 12000
+check_glob 'docs/notes/*/*/*.md' 8000
 check_glob 'docs/features/*.md' 60000
 
 if [ "$FAIL" -ne 0 ]; then

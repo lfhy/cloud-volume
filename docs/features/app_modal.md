@@ -1,5 +1,7 @@
 # App Modal — 统一拟态框与调试子窗口壳
 
+呈现策略的决策背景(为什么应用内模态胜过 OS 子窗口)见 [决策记录](../notes/implemented/architecture/2026-07-11-in-app-modals-over-os-subwindows.md)。
+
 ## 统一拟态框(binding)
 
 面向用户的模态 UI 默认**应用内模态**(单 Flutter 引擎)。OS `desktop_multi_window` 编辑器是**仅 debug 的实验特性**。业务代码不得直接调 `showShadDialog`——只有 `lib/services/app_modal.dart` 可以包它。

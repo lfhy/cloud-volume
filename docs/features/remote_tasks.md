@@ -1,6 +1,6 @@
 # Remote Tasks — 统一任务投影、列表可见性与传输兼容层
 
-统一 `RemoteTask` 投影是唯一远端操作 UI 来源:任务页、侧栏、同步卡、预览、批量对话框、更新进度全部读它。`TransferQueue` 只是执行/本地生产者兼容门面。
+统一 `RemoteTask` 投影是唯一远端操作 UI 来源:任务页、侧栏、同步卡、预览、批量对话框、更新进度全部读它。`TransferQueue` 只是执行/本地生产者兼容门面。排序契约的决策背景(2026-08-21 首页可见性事故)与放弃的替代方案见 [决策记录](../notes/implemented/architecture/2026-08-21-task-list-page-one-visibility.md)。
 
 ## 架构不变式 3:任务列表首页可见性(binding)
 

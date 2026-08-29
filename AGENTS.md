@@ -39,10 +39,11 @@
 
 - 完成实现并验证成功后创建常规非 amended 提交(用户明确说不提交除外);不提交编译产物。
 - 新增功能同一变更集内更新 `README.md`;与 upcoming release 相关的改动维护 `CHANGELOG.md` 的 `## Unreleased`。
+- **决策记录(binding):** 非平凡变更(行为/架构/契约/流程/测试策略/格式)在同一变更集中新增或更新一条 Agent Note([docs/notes/](docs/notes/README.md)),记录为什么与放弃了什么;机械改动豁免。
 
 ## Mandatory Review Before Commit
 
-- 每个代码改动落地 `main` 前必须通过 P0/P1 级子代理评审;P0/P1 是 blocking,P2/P3 可延后但发现与解决方式必须记录在对应 `docs/features/*.md` 的 Known P2/P3 小节(完整叙事进 [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md))。
+- 每个代码改动落地 `main` 前必须通过 P0/P1 级子代理评审;P0/P1 是 blocking,P2/P3 可延后但发现与解决方式必须记录在对应 `docs/features/*.md` 的 Known P2/P3 小节(完整叙事按性质分流:设计决策写成 [Agent Note](docs/notes/README.md),过程叙事进 [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md);规则见 [docs/DOC_STANDARDS.md](docs/DOC_STANDARDS.md))。
 - 评审子代理只给 `git show`/`git diff` 加简短 brief(提交哈希、动机、要考察的风险轴);评审发现改变范围时,先并入对应 feature 文档再落解决提交。流程细节见 [docs/DEVELOPMENT_GUIDE.md](docs/DEVELOPMENT_GUIDE.md)。
 
 ## Binding Design Principles(三大不变式简述,全文见 feature 文档)
