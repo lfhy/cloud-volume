@@ -300,7 +300,7 @@ class _RemoteHoverRow extends StatelessWidget {
                       ? '读取中'
                       : task.phaseLabel.isNotEmpty
                       ? task.phaseLabel
-                      : '进行中')
+                      : remoteTaskStatusLabel(task))
                 : _remoteStatus(task.status),
             style: TextStyle(
               fontSize: 10.5,

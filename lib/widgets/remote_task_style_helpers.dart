@@ -36,7 +36,7 @@ String remoteTaskSpeedSummary(Iterable<RemoteTask> tasks) {
 String remoteTaskSubtitle(RemoteTask task) {
   if (task.status == RemoteTaskStatus.blocked &&
       task.blockedReason.isNotEmpty) {
-    return task.blockedReason;
+    return remoteTaskBlockedReasonLabel(task);
   }
   if (task.status == RemoteTaskStatus.retryWait &&
       task.nextRetryAt.isNotEmpty) {
@@ -58,6 +58,16 @@ String remoteTaskSubtitle(RemoteTask task) {
     return '${task.progress.itemsCompleted} / ${task.progress.totalItems} 个对象';
   }
   return task.phaseLabel.isNotEmpty ? task.phaseLabel : remoteTaskStatusLabel(task);
+}
+
+/// Metadata blocked reasons are fixed English wire strings; map the known
+/// one to a localized label and pass anything else through unchanged.
+String remoteTaskBlockedReasonLabel(RemoteTask task) {
+  final reason = task.blockedReason.trim();
+  if (reason.toLowerCase() == 'waiting for journal dependencies') {
+    return '等待前置操作完成';
+  }
+  return reason;
 }
 
 /// Row title: the entry name only (last non-empty path segment) so the row

@@ -373,7 +373,7 @@ class _TaskDetails extends StatelessWidget {
                       _detailLine(
                         context,
                         '依赖',
-                        task.blockedReason,
+                        remoteTaskBlockedReasonLabel(task),
                         valueColor: Colors.amber.shade700,
                       ),
                     if (task.mountReadRange.isNotEmpty)
