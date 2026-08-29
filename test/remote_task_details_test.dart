@@ -49,12 +49,11 @@ void main() {
     expect(find.text('完整路径'), findsOneWidget);
     expect(find.text('写入文件'), findsOneWidget);
 
-    // Journal events: sequence in the label column, Chinese verb + path +
-    // folded marker as the value — no raw 'write' concatenation.
-    expect(find.text('#2713'), findsOneWidget);
-    expect(find.text('写入 root/a.txt（已合并）'), findsOneWidget);
-    expect(find.text('#2714'), findsOneWidget);
-    expect(find.text('删除 root/b.txt'), findsOneWidget);
+    // Journal events: grouped under one 事件记录 label (blank labels keep
+    // alignment for the rest); each value reads #序号 中文动词 路径（已合并）.
+    expect(find.text('事件记录'), findsOneWidget);
+    expect(find.text('#2713 写入 root/a.txt（已合并）'), findsOneWidget);
+    expect(find.text('#2714 删除 root/b.txt'), findsOneWidget);
 
     // Physical snapshots print one ID per line: each is its own Text widget.
     expect(find.text('metadata-op-ns1-1'), findsOneWidget);

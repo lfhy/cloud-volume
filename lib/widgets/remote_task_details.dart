@@ -94,10 +94,12 @@ class RemoteTaskDetails extends StatelessWidget {
                       ),
                     if (task.remoteOutcome.isNotEmpty)
                       _row(context, '远端结果', task.remoteOutcome),
-                    // Journal events: sequence in the label column, localized
-                    // op kind + path as the value (已合并 marks folded chains).
+                    // Journal events: grouped under one 事件记录 label (like
+                    // the 传输 block); each value reads "#journal序号 中文操作
+                    // 路径（已合并）" so the sequences explain themselves.
                     if (events.isNotEmpty)
-                      for (final event in events) _eventRow(context, event)
+                      for (var i = 0; i < events.length; i++)
+                        _eventRow(context, events[i], groupLabel: i == 0)
                     else if (task.rawEventCount > 0)
                       _row(context, '原始操作', '${task.rawEventCount} 条记录'),
                     // Physical snapshots: one ID per line so long namespace-
@@ -158,18 +160,23 @@ class RemoteTaskDetails extends StatelessWidget {
     );
   }
 
-  Widget _eventRow(BuildContext context, RemoteTaskEvent event) {
+  Widget _eventRow(
+    BuildContext context,
+    RemoteTaskEvent event, {
+    required bool groupLabel,
+  }) {
     final theme = ShadTheme.of(context);
     final target = event.targetPath.isNotEmpty
         ? event.targetPath
         : event.sourcePath;
     final folded = event.folded ? '（已合并）' : '';
+    final verb = remoteTaskEventKindLabel(event.kind);
     final value = target.isEmpty
-        ? '${remoteTaskEventKindLabel(event.kind)}$folded'
-        : '${remoteTaskEventKindLabel(event.kind)} $target$folded';
+        ? '#${event.sequence} $verb$folded'
+        : '#${event.sequence} $verb $target$folded';
     return _row(
       context,
-      '#${event.sequence}',
+      groupLabel ? '事件记录' : '',
       value,
       valueBase: theme.colorScheme.mutedForeground.withValues(alpha: 0.75),
     );
