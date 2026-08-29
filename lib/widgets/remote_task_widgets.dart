@@ -198,14 +198,18 @@ class _KindIconChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final iconColor = remoteTaskKindColor(kind);
-    return Container(
-      width: 28,
-      height: 28,
-      decoration: BoxDecoration(
-        color: iconColor.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(7),
+    // Tooltip carries the op verb that no longer lives in the row title.
+    return AppTooltip(
+      message: remoteTaskKindLabel(kind),
+      child: Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: iconColor.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(7),
+        ),
+        child: Icon(remoteTaskKindIcon(kind), size: 14, color: iconColor),
       ),
-      child: Icon(remoteTaskKindIcon(kind), size: 14, color: iconColor),
     );
   }
 }
