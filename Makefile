@@ -39,7 +39,7 @@ ifneq ($(BRIDGE_CXX),)
 BRIDGE_GO_ENV += CXX=$(BRIDGE_CXX)
 endif
 
-.PHONY: bridge bridge-macos bridge-linux bridge-windows cli cli-full build-cli build-cli-full cli-release cli-release-full cli-release-linux-amd64 cli-release-linux-arm64 cli-release-darwin-amd64 cli-release-darwin-arm64 cli-release-windows-amd64 cli-release-full-linux-amd64 cli-release-full-linux-arm64 cli-release-full-darwin-amd64 cli-release-full-darwin-arm64 cli-release-full-windows-amd64 run-cli run run-macos run-linux run-web build build-macos build-linux build-windows build-web test analyze clean push
+.PHONY: bridge bridge-macos bridge-linux bridge-windows cli cli-full build-cli build-cli-full cli-release cli-release-full cli-release-linux-amd64 cli-release-linux-arm64 cli-release-darwin-amd64 cli-release-darwin-arm64 cli-release-windows-amd64 cli-release-full-linux-amd64 cli-release-full-linux-arm64 cli-release-full-darwin-amd64 cli-release-full-darwin-arm64 cli-release-full-windows-amd64 run-cli run run-macos run-linux run-web build build-macos build-linux build-windows build-web test analyze check-docs clean push
 
 bridge:
 ifeq ($(HOST_PLATFORM),macos)
@@ -206,6 +206,10 @@ test:
 
 analyze:
 	$(FLUTTER) analyze
+
+# 文档字数预算门禁(规范见 docs/DOC_STANDARDS.md)。
+check-docs:
+	@scripts/check_doc_budgets.sh
 
 clean:
 	$(FLUTTER) clean
