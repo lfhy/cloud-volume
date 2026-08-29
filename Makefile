@@ -39,7 +39,7 @@ ifneq ($(BRIDGE_CXX),)
 BRIDGE_GO_ENV += CXX=$(BRIDGE_CXX)
 endif
 
-.PHONY: bridge bridge-macos bridge-linux bridge-windows cli cli-full build-cli build-cli-full cli-release cli-release-full cli-release-linux-amd64 cli-release-linux-arm64 cli-release-darwin-amd64 cli-release-darwin-arm64 cli-release-windows-amd64 cli-release-full-linux-amd64 cli-release-full-linux-arm64 cli-release-full-darwin-amd64 cli-release-full-darwin-arm64 cli-release-full-windows-amd64 run-cli run run-macos run-linux run-web build build-macos build-linux build-windows build-web test analyze check-docs clean push
+.PHONY: bridge bridge-macos bridge-linux bridge-windows cli cli-full build-cli build-cli-full cli-release cli-release-full cli-release-linux-amd64 cli-release-linux-arm64 cli-release-darwin-amd64 cli-release-darwin-arm64 cli-release-windows-amd64 cli-release-full-linux-amd64 cli-release-full-linux-arm64 cli-release-full-darwin-amd64 cli-release-full-darwin-arm64 cli-release-full-windows-amd64 run-cli run run-macos run-linux run-web android-setup android-bridge android-run build build-macos build-linux build-windows build-web test analyze check-docs clean push
 
 bridge:
 ifeq ($(HOST_PLATFORM),macos)
@@ -154,6 +154,35 @@ endif
 
 run-web: build-web
 	go run ./cmd/web --listen $(WEB_LISTEN) --static-root build/web
+
+# Android debug loop (host: macOS). One-time bootstrap via `make android-setup`;
+# `make android-run` builds both bridge ABIs, boots the cloud-volume AVD when no
+# device is attached, then runs the app under flutter. Windows keeps using
+# scripts/setup_android_dev.ps1 / build_android.ps1.
+android-setup:
+ifneq ($(HOST_PLATFORM),windows)
+	./scripts/setup_android_dev.sh
+else
+	@echo "On Windows use scripts/setup_android_dev.ps1."
+	@exit 1
+endif
+
+android-bridge:
+ifneq ($(HOST_PLATFORM),windows)
+	./scripts/build_android_bridge.sh --abi arm64-v8a
+	./scripts/build_android_bridge.sh --abi x86_64
+else
+	@echo "On Windows use scripts/build_android_bridge.ps1."
+	@exit 1
+endif
+
+android-run:
+ifneq ($(HOST_PLATFORM),windows)
+	./scripts/run_android.sh
+else
+	@echo "android-run targets macOS hosts; on Windows build the APK with scripts/build_android.ps1."
+	@exit 1
+endif
 
 build:
 ifeq ($(HOST_PLATFORM),macos)

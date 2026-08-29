@@ -132,6 +132,17 @@ Android runner 已包含在仓库中，并把 ARM64 Go FFI bridge 作为 `librem
 
 Android 启动图标同样从现有 macOS 1024px 品牌位图生成，不重新绘制标志。修改品牌图标后运行 `powershell -ExecutionPolicy Bypass -File .\scripts\generate_android_app_icon.ps1`，脚本会写出各密度的方形/圆形传统图标，并生成 API 26+ 自适应图标前景层（品牌图形按官方 66/108 安全区缩放居中）。
 
+### Android 调测（macOS）
+
+在 macOS 上用模拟器或物理设备调测 Android 版本，从仓库根目录执行：
+
+```bash
+make android-setup   # 一次性引导：JDK 17、Android SDK/NDK、模拟器镜像与 cloud-volume AVD
+make android-run     # 构建 arm64-v8a + x86_64 双 ABI 桥、无在线设备时启动模拟器、再 flutter run
+```
+
+引导脚本复用 PATH 中已安装的 Flutter（缺失时装 stable 到 `~/dev/flutter`，支持 `--flutter-archive` 离线归档），JDK 17 装到 `~/dev/jdk-17`（已有 ≥17 的 JDK 则复用），SDK 默认装到 `~/Library/Android/sdk`，并在 `~/.zshrc` 追加受保护的环境导出块（`--no-shellrc` 可跳过）。Apple Silicon 上脚本会用官方 repository2-3 的 native aarch64 构建替换 sdkmanager 默认装的 x86_64 模拟器（后者跑不了任何镜像架构），配 arm64-v8a 镜像获得原生 Hypervisor.framework 加速；NDK 宿主工具链为 x86_64，Rosetta 2 自动安装。`make android-run` 已连接且授权的物理设备时优先直接使用；模拟器在 Ctrl-C 结束 flutter 会话后保留，方便下次 attach。参数与 `--headless`/`--boot-only` 等选项见 `scripts/setup_android_dev.sh --help` 与 `scripts/run_android.sh --help`。
+
 `make run` 是本仓库的标准启动方式：
 
 - macOS: 先构建 Go bridge 到 `bin/bridge/libremote_storage_bridge.dylib`，再以正确的 `DEVELOPER_DIR` 启动 Flutter macOS 应用

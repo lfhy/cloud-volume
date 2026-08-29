@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-08-29 macOS Android 调测链落地与评审(android_dev 域)
+
+新增 macOS Android 工具链(`make android-setup` / `make android-run`,设计决策见 [Agent Note](notes/implemented/process/2026-08-29-macos-android-dev-scripts.md);现状正典在 [android_dev](features/android_dev.md))。实机验证过程中钉住的关键上游事实:repository2-1 的 macOS emulator 归档只有 x86_64,该构建在 Apple Silicon 上跑不了任何镜像架构(arm64 镜像被 launcher 架构检查 FATAL、x86_64 镜像 HVF `Unknown error 0x4`),正解是 repository2-3 的同版本 `emulator-darwin_aarch64` 归档(不带 `package.xml`,需回填 sdkmanager 那份);Flutter 3.47 的 flutter-gradle-plugin 会自动 apply Kotlin 而 3.41 不会,`android/app/build.gradle.kts` 因此显式 apply。
+
+提交前 P0/P1 子代理评审:
+
+- **P0(同批修复)** — Flutter manifest 解析 `curl | python3 - <<PY` 的 heredoc 覆盖管道 stdin,全新机器(无 PATH Flutter)引导必死;改为先落盘 manifest 再传 argv,并单独实测解析出 stable 3.47.2 arm64 归档 URL。
+- **P1(同批修复)** — `yes | sdkmanager --licenses` 在 `set -o pipefail` 下 sdkmanager 成功退出 0 时 `yes` 收 SIGPIPE(141),成功分支是死代码,此前仅靠 cmdline-tools 23 的弃用文案 grep 侥幸通过;改为 200 行有限答案文件重定向(与 ps1 同型)。
+- **P2(同批修复)** — run_android.sh boot 等待循环对单次 adb 非零零容忍,一次抖动即杀脚本并遗留运行中的模拟器;探测加 `|| true`。
+- **P3(同批修复)** — Makefile android-setup 缺 Windows gating;aarch64 emulator 替换每次重跑重复下载 400MB(加 `qemu/darwin-aarch64` + `package.xml` 存在性跳过标记);替换顺序改为先解压后删旧树。仍开放 P3 与修复指针见 android_dev「Known P2/P3」。
+- 通过轴:bash 3.2 兼容、安装可重入、repository2-3 正则稳健性、模拟器信号设计(`trap '' INT QUIT TERM` + exec)、Kotlin 显式 apply 幂等(3.47 auto-apply 有 hasPlugin 守卫)、build_android_bridge 与 ps1 逐项对齐、文档一致性。
+
+---
+
 ## 2026-08-29 AGENTS.md 文档体系拆分(迁移记录)
 
 根 `AGENTS.md` 增长到 1630 行 / 327KB,超出会话注入上限——约第 430 行(Android Development Environment 条目中段)之后的内容对每个新会话不可见,Code Map 后半部(WinFsp、文件同步、设置、自动更新、FTP/SFTP 等 20+ 条目)实际已失效。本次拆分:

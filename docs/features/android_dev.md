@@ -1,11 +1,15 @@
-# Android Dev — 开发环境与 ARM64 APK 构建(Windows)
+# Android Dev — 开发环境、模拟器调测与 APK 构建(macOS 与 Windows)
 
-仓库有用户级 Android 工具链引导与 ARM64 APK 构建路径。移动端通过打包的 c-shared FFI 库复用 Go 对象存储后端,同时隐藏桌面专属工作流。
+仓库有 macOS 与 Windows 两套用户级 Android 工具链引导。macOS 侧提供模拟器调测回路(`make android-setup` → `make android-run`);Windows 侧出 ARM64 release APK。移动端通过打包的 c-shared FFI 库复用 Go 对象存储后端,同时隐藏桌面专属工作流。
 
 ## 关键文件
 
 - `scripts/setup_android_dev.ps1` - 默认用仓库根 `flutter_windows_3.47.0-stable.zip`(或 `-FlutterArchive`),Windows `tar.exe` 解压(Flutter 3.47 元数据目录 `Expand-Archive` 不可靠);本地压缩包缺失才回退在线 stable manifest。把 Flutter checkout 加入 Git `safe.directory`,持久化 `FLUTTER_ROOT`,然后装 Eclipse Temurin JDK 17、Android command-line tools、platform-tools、API 36、Build Tools 36.0.0、ARM64 Go 桥所需的 NDK 28.2.13676358;未跳过时还装 Android 36 Google APIs x86_64 模拟器镜像。持久化 `JAVA_HOME`、`ANDROID_HOME`、`ANDROID_SDK_ROOT`,把 Flutter、JDK、`cmdline-tools\latest\bin`(`sdkmanager`)、platform-tools(`adb`)、emulator 加入用户 PATH;随后接受 SDK 许可、把 Flutter 指向 SDK、`flutter doctor -v`,再跑 `flutter pub get` 与 `flutter test`(除非 `-SkipValidation`)。安装根可被 `-FlutterRoot`、`-AndroidSdkRoot`、`-JavaHome` 覆盖;`-SkipEmulator` 跳过镜像下载。
 - `scripts/setup_android_dev.bat` - 双击启动器,从仓库根调 PowerShell 引导,交互使用时末尾暂停(除非 `CLOUD_VOLUME_NO_PAUSE=1`)。
+- `scripts/setup_android_dev.sh` + `scripts/android_env.sh` - macOS 引导(镜像 `setup_android_dev.ps1`):复用 PATH 上的 Flutter(缺失时按 releases_macos manifest 装 stable 到 `~/dev/flutter`,`--flutter-archive`/`CV_FLUTTER_ARCHIVE_URL` 支持离线归档);Temurin JDK 17 装到 `~/dev/jdk-17`(已有 ≥17 JDK 的 `JAVA_HOME`/`java_home`/PATH 则复用);Android SDK 默认 `~/Library/Android/sdk`,装 cmdline-tools、platform-tools、API 36、Build Tools 36.0.0、NDK 28.2.13676358、emulator 与按主机 ABI(Apple Silicon→arm64-v8a,Intel→x86_64)的 Google APIs 镜像,并建 `cloud-volume` AVD(pixel_6)。Apple Silicon 额外两步:用 repository2-3 的 native aarch64 归档替换 sdkmanager 装的 x86_64 emulator(同一稳定版本;归档不带 `package.xml`,回填 sdkmanager 的那份供 avdmanager 识别),并确保 Rosetta 2(NDK 宿主工具链是 x86_64)。往 `~/.zshrc` 追加受保护的环境导出块(`--no-shellrc` 跳过),末尾 `flutter config --android-sdk`、`doctor -v`、`pub get`、`flutter test`(`--skip-emulator`/`--skip-validation` 分阶段跳过)。`android_env.sh` 是三个 Unix 脚本共享的解析 helper(Flutter/JDK/SDK 定位、Rosetta 与 NDK 探测),按 macOS 自带 bash 3.2 语法书写。
+- `scripts/build_android_bridge.sh` - `build_android_bridge.ps1` 的 Unix 版:用 NDK 工具链为 `GOOS=android` 交叉编译 `./bridge` 到 `android/app/src/main/jniLibs/<abi>/libremote_storage_bridge.so`(ABI `arm64-v8a`/`x86_64`,`--sdk-root`/`--ndk-version`/`--api-level` 可覆盖),构建后删除生成的 C 头。
+- `scripts/run_android.sh` - `make android-run` 的实现:先建双 ABI 桥(物理 ARM 设备与两种模拟器架构都能跑),无在线设备时创建并启动 `cloud-volume` AVD(窗口式;`--headless` 无窗、`--boot-only` 只等到 boot completed、`--skip-bridge` 跳过桥),模拟器日志写 `build/logs/android-emulator.log`;轮询 `sys.boot_completed` 后 `flutter run -d <serial>`。模拟器进程忽略 INT/QUIT/TERM,Ctrl-C 只结束 flutter 会话、模拟器留给下一次 attach;`CV_DEBUG_ADDR` 非空时自动 `adb forward` 并透传 dart-define;已连接且授权的物理设备优先于启动模拟器。
+- `Makefile` - `android-setup`(引导)/`android-bridge`(双 ABI 桥)/`android-run`(调测回路)目标;Windows 主机上报错并指向对应 ps1 脚本。
 - `scripts/build_android_bridge.ps1` - 用已装 NDK 为 `GOOS=android`、`GOARCH=arm64` 编译 `./bridge`,产物写入 `android/app/src/main/jniLibs/arm64-v8a/libremote_storage_bridge.so`;构建后删除生成的 C 头。
 - `scripts/build_android.ps1` - 先建 Android 桥,再出 ARM64 Flutter release APK 到 `build/app/outputs/flutter-apk/app-release.apk`。
 - `android/` - Flutter Android runner。wrapper 用腾讯 Gradle 分发镜像,`settings.gradle.kts` / `build.gradle.kts` 优先 Aliyun 的 Google、Gradle-plugin、Central 仓库再官方源。
@@ -19,7 +23,14 @@
 
 ## Gotchas
 
-- 当前只打包 `android-arm64`。发布 x86_64 模拟器或 32 位 ARM APK 前先加独立 NDK 桥构建。
+- release APK(Windows `build_android.ps1`)仍只打包 `android-arm64`;macOS 调试回路(`run_android.sh`)构建 arm64-v8a + x86_64 双 ABI 桥,物理设备与两种模拟器架构都能跑。32 位 ARM 仍不支持。
+- NDK 的 macOS 宿主工具链目录是 `darwin-x86_64`,Apple Silicon 靠 Rosetta 2 运行;`android_env.sh` 的 `cv_ensure_rosetta` 尝试 `softwareupdate --install-rosetta --agree-to-license`,失败时按该命令手动安装。宿主目录按 `darwin-*` glob 探测,上游若发布 native arm64 工具链无需改脚本。
+- **Apple Silicon 模拟器架构(binding gotcha):** legacy sdkmanager 走 repository2-1,其 macOS emulator 归档只有 x86_64;该构建跑 arm64 镜像直接 FATAL(launcher 把 Rosetta 下的 host 判成 x86_64),跑 x86_64 镜像则 `HVF Unknown error 0x4`(Rosetta 进程无法用 HVF 虚拟化 x86_64 guest)。正解是 repository2-3 的同版本 `emulator-darwin_aarch64` 归档(setup 自动替换),配 arm64-v8a 镜像走 native HVF;aarch64 归档不带 `package.xml`,必须回填 sdkmanager 的那份,否则 avdmanager 建 AVD 时报 "emulator package must be installed"。
+- 上游兼容性两处:Android repository XML 的 macOS host-os 标记是 `macosx`(旧归档为 `mac`);cmdline-tools 23 弃用 `sdkmanager --licenses`("no longer needed")且首次调用可能非零退出,setup 按"重试一次 + 输出含 no longer needed 即通过"容忍。flutter doctor 的 license 探针与 cmdline-tools 23 不兼容,会一直显示 "license status unknown"——license 文件已写入 `licenses/`,构建不受影响。
+- `android/app/build.gradle.kts` 显式 apply `org.jetbrains.kotlin.android`(版本钉在 `settings.gradle.kts` 2.4.0):Flutter 3.47 的 flutter-gradle-plugin 会自动补 Kotlin 插件,更早版本(如 3.41)不会,缺了它 `kotlin { compilerOptions { jvmTarget } }` 块解析失败。
+- 模拟器镜像按主机 CPU 选择(Apple Silicon → arm64-v8a + native aarch64 emulator;Intel → x86_64),与 NDK 桥的 ABI 无关——两个 ABI 的 `.so` 都会打进 debug APK。
+
+**Known P2/P3 (review 2026-08-29):** 提交前评审(叙事见 [PROJECT_GUIDE](../PROJECT_GUIDE.md))发现并同批修复:P0 Flutter manifest 解析 heredoc 覆盖管道 stdin(改为先落盘再传 argv)、P1 `yes | sdkmanager --licenses` 在 pipefail 下成功被误判(改有限答案文件)、P2 boot 等待对单次 adb 抖动零容忍(加 `|| true`)、P3 android-setup 缺 Windows gating、P3 aarch64 emulator 每次重跑重复下载 400MB(加跳过标记)、P3 替换前先解压后删旧树。仍开放的 P3:回填的 `package.xml` 版本不与 repository2-3 归档校验,两 channel 漂移时 `sdkmanager` 升级可能把 emulator 换回 x86_64;`~/.zshrc` 块在换 `--sdk-root`/`--java-home` 重跑时不刷新,首跑 `--no-shellrc` 装了 Flutter 次跑补写块会漏 flutter PATH 项;`run_android.sh` 的 AVD 名 grep 把 `--avd` 参数当正则用(仅误报向)。
 - Go 桥是大体积静态工件,被 Git 有意忽略。每次 APK 构建前在构建机上跑 `scripts/build_android.ps1`。
 - `third_party/super_native_extensions` 与 `third_party/irondash_engine_context` 是 vendored 的桌面专属插件 fork。其 Android 注册被移除,因为 CargoKit 的 Gradle 脚本与 Gradle 9 不兼容;CargoKit 支持该构建前不要恢复那些声明。桌面拖放与 file URI 剪贴板保持可用;Android 用 `file_picker` 上传,不创建原生 drop region。
 - 引导仍从 Adoptium 与 Google Android 服务下载 JDK/SDK 包;封锁这些端点的网络会阻止安装,Flutter 本身可从仓库根压缩包离线引导。脚本不做部分安装清理,不破坏性替换已有目录。

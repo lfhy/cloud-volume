@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- 新增 macOS Android 调测环境：`make android-setup` 一键引导 JDK 17、Android SDK/NDK/模拟器镜像与 `cloud-volume` AVD（复用 PATH 中已装的 Flutter，Apple Silicon 自动用官方 repository2-3 的 native aarch64 构建替换 x86_64 模拟器并安装 Rosetta 2）；`make android-run` 构建 arm64-v8a + x86_64 双 ABI Go 桥、无在线设备时自动启动模拟器并等待 boot completed，再 `flutter run`，支持 `--headless`/`--boot-only` 与 `CV_DEBUG_ADDR` 自动 adb forward。`android/app/build.gradle.kts` 显式 apply Kotlin 插件，使 Android 构建同时兼容会与不会自动补 Kotlin 的 Flutter 版本（3.41–3.47）。Windows 引导与出包脚本不变。
 - 重构任务展开明细的对齐与可读性：所有行改为固定宽度标签列（操作/所属桶/完整路径/依赖/错误…全部左对齐）；journal 事件行由 `#2713 write 路径` 的英文裸拼改为归入「事件记录」分组标签下，每行显示 `#序号 中文操作（写入/创建目录/重命名/删除）路径（已合并）`；物理传输 ID 不再用 `·` 拼接成一团，改为归入「传输」标签、每行一个对齐显示。明细面板拆分到 `remote_task_details.dart`。
 - 修复任务详情与副标题泄漏原始英文：metadata 任务的 Phase 表达的是归属子系统（provider/verification/dependency/history）而非用户阶段，取消/对账中的英文句子和「等待 journal 依赖」阻塞原因也在展示层本地化或过滤——终态显示「已完成/已取消」，取消中显示「正在取消」，阻塞显示「等待前置操作完成」；真实物理阶段（上传中、静默期、挂载读取等）不受影响，侧边栏活动行回落到具体状态而非笼统的「进行中」。
 - 任务行标题简化为「图标 + 文件名」：不再拼接操作动词和完整路径，只显示条目名称（路径最后一段）；操作类型、完整路径、所属桶移入展开明细（操作/所属桶/完整路径 三行）。

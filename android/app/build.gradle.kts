@@ -1,6 +1,9 @@
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+    // Kotlin is applied explicitly (version pinned in settings.gradle.kts) so the
+    // build also works on Flutter releases whose gradle plugin does not auto-apply it.
+    id("org.jetbrains.kotlin.android")
     id("dev.flutter.flutter-gradle-plugin")
 }
 

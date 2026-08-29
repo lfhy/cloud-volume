@@ -10,7 +10,7 @@
 
 - **macOS(标准):** `make run`。它先跑 `make bridge` 把 `./bridge` 构建为 `bin/bridge/libremote_storage_bridge.dylib`,再用 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer flutter run -d macos` 启动。macOS 应用必须走 Go 绑定工作流,不要裸 `flutter run -d macos`。
 - **Windows(标准):** `scripts/run_windows.ps1`。它解析 Flutter 与 MSYS2 MinGW 工具链、构建桥接 DLL,再 `flutter run -d windows`。`.\run_windows.ps1 -Build` 构建发布包。不要裸 `flutter run -d windows`。
-- **Android:** `scripts/build_android.ps1`(先建 ARM64 桥接 `libremote_storage_bridge.so` 再出 release APK),环境引导用 `scripts/setup_android_dev.ps1`,细则见 [android_dev](features/android_dev.md)。
+- **Android:** Windows 出包用 `scripts/build_android.ps1`(先建 ARM64 桥接 `libremote_storage_bridge.so` 再出 release APK),环境引导用 `scripts/setup_android_dev.ps1`。macOS 调测:一次 `make android-setup` 引导 JDK/SDK/NDK/模拟器与 `cloud-volume` AVD,日常 `make android-run`(双 ABI 桥 + 无设备时启动模拟器 + `flutter run`)。细则见 [android_dev](features/android_dev.md)。
 - 验证集成启动时优先用上述脚本,保证桥接二进制与工具链路径都正确。
 
 ## 验证
