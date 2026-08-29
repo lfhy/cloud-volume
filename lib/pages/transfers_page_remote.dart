@@ -315,11 +315,16 @@ class _RemoteHistoryPager extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text(
-            '历史已显示 $loaded / $total',
-            style: TextStyle(
-              fontSize: 11.5,
-              color: theme.colorScheme.mutedForeground,
+          // Flexible keeps the centered row overflow-safe on narrow windows.
+          Flexible(
+            child: Text(
+              '历史已显示 $loaded / $total',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11.5,
+                color: theme.colorScheme.mutedForeground,
+              ),
             ),
           ),
           const SizedBox(width: 16),
