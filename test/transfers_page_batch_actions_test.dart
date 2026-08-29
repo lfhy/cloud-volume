@@ -23,6 +23,7 @@ import 'package:remote_storage/pages/transfers_page.dart';
 import 'package:remote_storage/services/remote_storage_api.dart';
 import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/widgets/app_loading_indicator.dart';
+import 'package:remote_storage/widgets/remote_task_widgets.dart';
 import 'package:remote_storage/widgets/list_selection_controls.dart';
 import 'package:remote_storage/widgets/sidebar_transfer_status.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -403,56 +404,73 @@ void main() {
     RemoteTaskStore.instance.resetForTest();
   });
 
-  testWidgets('history pagination stays visible outside the scrolling rows', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1280, 900);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
+  testWidgets(
+    'history pagination appears only after scrolling to the last row',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
 
-    final api = _TransfersPageFakeApi()
-      ..respectActiveOnly = true
-      ..paginateHistory = true;
-    api.tasks.addAll(
-      List<RemoteTask>.generate(
-        124,
-        (index) => RemoteTask(
-          id: 'sync:test:paged-history-$index',
-          kind: RemoteTaskKind.download,
-          status: RemoteTaskStatus.done,
-          targetPath: 'history-$index.txt',
-        ),
-      ),
-    );
-
-    await tester.pumpWidget(
-      ShadApp(
-        home: Material(
-          child: TransfersPage(
-            api: api,
-            config: RemoteStorageConfig.empty(),
-            active: true,
+      final api = _TransfersPageFakeApi()
+        ..respectActiveOnly = true
+        ..paginateHistory = true;
+      api.tasks.addAll(
+        List<RemoteTask>.generate(
+          124,
+          (index) => RemoteTask(
+            id: 'sync:test:paged-history-$index',
+            kind: RemoteTaskKind.download,
+            status: RemoteTaskStatus.done,
+            targetPath: 'history-$index.txt',
           ),
         ),
-      ),
-    );
-    await tester.pump();
-    await tester.pump();
-    await tester.pump();
+      );
 
-    expect(find.text('历史已显示 100 / 124'), findsOneWidget);
-    expect(find.text('加载下一页（还剩 24 条）'), findsOneWidget);
+      await tester.pumpWidget(
+        ShadApp(
+          home: Material(
+            child: TransfersPage(
+              api: api,
+              config: RemoteStorageConfig.empty(),
+              active: true,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
 
-    await tester.tap(find.text('加载下一页（还剩 24 条）'));
-    await tester.pump();
-    await tester.pump();
+      // The continuation is the last list child, so a full first page keeps it
+      // unbuilt below the fold instead of pinning a footer to the card bottom.
+      expect(find.text('加载下一页（还剩 24 条）'), findsNothing);
 
-    expect(RemoteTaskStore.instance.loadedHistoryCount, 124);
-    expect(find.text('加载下一页（还剩 24 条）'), findsNothing);
-    await tester.pumpWidget(const SizedBox.shrink());
-    RemoteTaskStore.instance.resetForTest();
-  });
+      await tester.scrollUntilVisible(
+        find.text('加载下一页（还剩 24 条）'),
+        240,
+        // The page hosts several auxiliary Scrollables (selects/tooltips), so
+        // target the scrollable that actually owns the task rows.
+        scrollable: find.ancestor(
+          of: find.byType(RemoteTaskRow).first,
+          matching: find.byType(Scrollable),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('历史已显示 100 / 124'), findsOneWidget);
+      expect(find.text('加载下一页（还剩 24 条）'), findsOneWidget);
+
+      await tester.tap(find.text('加载下一页（还剩 24 条）'));
+      await tester.pump();
+      await tester.pump();
+
+      expect(RemoteTaskStore.instance.loadedHistoryCount, 124);
+      expect(find.text('加载下一页（还剩 24 条）'), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+      RemoteTaskStore.instance.resetForTest();
+    },
+  );
 
   testWidgets('small history queues render their complete count on entry', (
     tester,

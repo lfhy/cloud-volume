@@ -42,8 +42,7 @@ extension _TransfersPageRemote on _TransfersPageState {
             onToggleAll: () => _toggleRemoteVisibleSelection(visible),
           ),
           Expanded(
-            // Standard body-loading view while the first history page reads;
-            // the fixed pager footer below stays reachable per the pager rule.
+            // Standard body-loading view while the first history page reads.
             child: store.tasks.isEmpty && store.isLoadingInitialHistory
                 ? const _RemoteInitialLoading()
                 : ListView(
@@ -77,18 +76,20 @@ extension _TransfersPageRemote on _TransfersPageState {
                             showDivider: true,
                           ),
                       ],
+                      // History continuation lives at the end of the list, so
+                      // it appears only once the user reaches the last row.
+                      if (showHistoryPager)
+                        _RemoteHistoryPager(
+                          loaded: store.loadedHistoryCount,
+                          total: store.historyTotal,
+                          remaining: store.remainingHistoryCount,
+                          initialLoading: store.isLoadingInitialHistory,
+                          loading: store.isLoadingMoreHistory,
+                          onLoadNext: () => unawaited(store.loadMore()),
+                        ),
                     ],
                   ),
           ),
-          if (showHistoryPager)
-            _RemoteHistoryPager(
-              loaded: store.loadedHistoryCount,
-              total: store.historyTotal,
-              remaining: store.remainingHistoryCount,
-              initialLoading: store.isLoadingInitialHistory,
-              loading: store.isLoadingMoreHistory,
-              onLoadNext: () => unawaited(store.loadMore()),
-            ),
         ],
       ),
     );
@@ -266,8 +267,8 @@ class _RemoteInitialLoading extends StatelessWidget {
   }
 }
 
-// Fixed pager stays visible while rows scroll, avoiding a hidden action after
-// a full first history page fills the viewport.
+// History continuation row: the last child of the task ListView, so it only
+// comes into view once the user scrolls to the final row — no fixed footer.
 class _RemoteHistoryPager extends StatelessWidget {
   const _RemoteHistoryPager({
     required this.loaded,
@@ -289,41 +290,43 @@ class _RemoteHistoryPager extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final busy = initialLoading || loading;
-    final progressLabel = total > 0 ? '历史已显示 $loaded / $total' : '正在读取历史';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: BoxDecoration(
-        border: Border(
-          top: BorderSide(
-            color: theme.colorScheme.border.withValues(alpha: 0.7),
-            width: 0.6,
-          ),
-        ),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              progressLabel,
+    if (busy) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const AppLoadingIndicator(size: 14, strokeWidth: 2),
+            const SizedBox(width: 8),
+            Text(
+              '正在加载历史…',
               style: TextStyle(
-                fontSize: 11,
+                fontSize: 11.5,
                 color: theme.colorScheme.mutedForeground,
               ),
             ),
+          ],
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            '历史已显示 $loaded / $total',
+            style: TextStyle(
+              fontSize: 11.5,
+              color: theme.colorScheme.mutedForeground,
+            ),
           ),
+          const SizedBox(width: 16),
           ShadButton.outline(
             size: ShadButtonSize.sm,
-            onPressed: busy ? null : onLoadNext,
-            child: busy
-                ? const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      AppLoadingIndicator(size: 14, strokeWidth: 2),
-                      SizedBox(width: 7),
-                      Text('正在加载…'),
-                    ],
-                  )
-                : Text('加载下一页（还剩 $remaining 条）'),
+            onPressed: onLoadNext,
+            child: Text('加载下一页（还剩 $remaining 条）'),
           ),
         ],
       ),
