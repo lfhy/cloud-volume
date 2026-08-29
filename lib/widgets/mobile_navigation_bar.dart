@@ -40,12 +40,13 @@ class MobileNavigationBar<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     // 背景铺满到屏幕物理底部(SafeArea 只内缩内容),无渐变;顶部一条
-    // 主题 border 细线提供与内容区的分割感(与全应用分隔线同源)。
+    // 全量主题 border 线提供与内容区的分割感——强度对齐参考设计
+    // (白底约 8% 黑;全量 border 略强于参考的 7.8%,同档不明显)。
     return Container(
       decoration: BoxDecoration(
         color: theme.colorScheme.background,
         border: Border(
-          top: BorderSide(color: theme.colorScheme.border.withValues(alpha: 0.7)),
+          top: BorderSide(color: theme.colorScheme.border),
         ),
       ),
       child: SafeArea(

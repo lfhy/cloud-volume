@@ -40,18 +40,16 @@ void main() {
       reason: '底栏背景必须是纯主题背景色,不得有渐变',
     );
 
-    // 顶部有一条主题 border 细线提供与内容区的分割感。
+    // 顶部有一条全量主题 border 线提供与内容区的分割感(参考设计强度)。
     final theme = ShadTheme.of(
       tester.element(find.byType(MobileNavigationBar<int>)),
     );
     expect(
       boxDecorations.any(
-        (box) =>
-            box.border?.top.color ==
-            theme.colorScheme.border.withValues(alpha: 0.7),
+        (box) => box.border?.top.color == theme.colorScheme.border,
       ),
       isTrue,
-      reason: '底栏顶部必须有主题色分割线',
+      reason: '底栏顶部必须有全量主题色分割线',
     );
 
     // 选中项:图标与文字都用主题强调色,文字 w600。
