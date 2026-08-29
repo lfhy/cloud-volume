@@ -40,6 +40,20 @@ void main() {
       reason: '底栏背景必须是纯主题背景色,不得有渐变',
     );
 
+    // 顶部有一条主题 border 细线提供与内容区的分割感。
+    final theme = ShadTheme.of(
+      tester.element(find.byType(MobileNavigationBar<int>)),
+    );
+    expect(
+      boxDecorations.any(
+        (box) =>
+            box.border?.top.color ==
+            theme.colorScheme.border.withValues(alpha: 0.7),
+      ),
+      isTrue,
+      reason: '底栏顶部必须有主题色分割线',
+    );
+
     // 选中项:图标与文字都用主题强调色,文字 w600。
     final selectedText = tester.widget<Text>(find.text('账号'));
     expect(selectedText.style?.color, accent);
@@ -47,9 +61,6 @@ void main() {
     expect(tester.widget<Icon>(find.byIcon(Icons.cloud)).color, accent);
 
     // 未选中项:mutedForeground + w500。
-    final theme = ShadTheme.of(
-      tester.element(find.byType(MobileNavigationBar<int>)),
-    );
     final idleText = tester.widget<Text>(find.text('文件'));
     expect(idleText.style?.color, theme.colorScheme.mutedForeground);
     expect(idleText.style?.fontWeight, FontWeight.w500);

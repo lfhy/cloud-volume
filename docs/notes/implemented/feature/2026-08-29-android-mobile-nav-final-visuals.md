@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-底栏最终视觉([lib/widgets/mobile_navigation_bar.dart](../../../../lib/widgets/mobile_navigation_bar.dart)):纯 `ShadTheme.colorScheme.background` 铺满到屏幕物理底部(无渐变、无装饰圆、无分隔线、无选中底块),图标上文字下(icon 24 / 文字 12);选中态 = `ThemeController` 强调色图标+文字 + w600,未选中 = `colorScheme.mutedForeground` + w500;无胶囊/描边/指示器。`SidebarPalette` 继续只服务桌面侧栏,移动端不再引用它——两端共享的只剩强调色来源。`test/mobile_navigation_bar_test.dart` 重写为锁定:所有 BoxDecoration 无渐变、选中图标/文字为强调色、未选中为 mutedForeground、点击回调返回正确 value。
+底栏最终视觉([lib/widgets/mobile_navigation_bar.dart](../../../../lib/widgets/mobile_navigation_bar.dart)):纯 `ShadTheme.colorScheme.background` 铺满到屏幕物理底部(无渐变、无装饰圆、无选中底块),顶部一条 `colorScheme.border`(70% 透明)细线提供与内容区的分割感(用户确认纯同色缺分割感后补充),图标上文字下(icon 24 / 文字 12);选中态 = `ThemeController` 强调色图标+文字 + w600,未选中 = `colorScheme.mutedForeground` + w500;无胶囊/描边/指示器。`SidebarPalette` 继续只服务桌面侧栏,移动端不再引用它——两端共享的只剩强调色来源。`test/mobile_navigation_bar_test.dart` 重写为锁定:所有 BoxDecoration 无渐变、顶部分割线、选中图标/文字为强调色、未选中为 mutedForeground、点击回调返回正确 value。
 
 ## Alternatives considered
 

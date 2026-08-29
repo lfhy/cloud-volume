@@ -19,7 +19,7 @@ class MobileNavItem<T> {
 }
 
 /// 移动底栏:背景为应用主题背景色,遵循主题设置;选中态只有颜色变化
-/// (强调色 + w600),参考设计里没有选中底块与分隔线。
+/// (强调色 + w600)。参考设计无选中底块;顶部分割线系用户反馈后补充。
 class MobileNavigationBar<T> extends StatelessWidget {
   const MobileNavigationBar({
     super.key,
@@ -39,9 +39,15 @@ class MobileNavigationBar<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    // 背景铺满到屏幕物理底部(SafeArea 只内缩内容),无渐变、无分隔线。
+    // 背景铺满到屏幕物理底部(SafeArea 只内缩内容),无渐变;顶部一条
+    // 主题 border 细线提供与内容区的分割感(与全应用分隔线同源)。
     return Container(
-      color: theme.colorScheme.background,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.background,
+        border: Border(
+          top: BorderSide(color: theme.colorScheme.border.withValues(alpha: 0.7)),
+        ),
+      ),
       child: SafeArea(
         top: false,
         child: Padding(
