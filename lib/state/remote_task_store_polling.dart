@@ -63,7 +63,13 @@ extension RemoteTaskStorePolling on RemoteTaskStore {
         );
         // Queue counts describe the complete queue, not just this active
         // response. A genuine all-zero report must still clear stale values.
-        _applyQueue(page.queue);
+        final historyGrew = _applyQueue(page.queue);
+        // Android 隐藏了队列标签与分页控件，完成的任务只会通过历史页到达
+        // 客户端，所以历史增长时自动重载第一页；桌面端保持上游的分页语义
+        // （仅失效游标，由用户驱动的分页器加载）。
+        if (historyGrew && defaultTargetPlatform == TargetPlatform.android) {
+          unawaited(loadInitialHistory());
+        }
         _total = page.total;
         _hasServerTotal = page.hasTotal;
         _freshness = page.freshness;

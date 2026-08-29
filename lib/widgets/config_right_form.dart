@@ -1,6 +1,7 @@
 // 配置页账号表单：半宽时垂直居中；全屏时隐藏左侧宣传后使用更宽布局。
 // 宽屏全屏模式会把字段拆成两列，减少单页滚动。
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
@@ -43,11 +44,11 @@ class ConfigRightFormPanel extends StatelessWidget {
     required this.baiduPanAuthorizing,
     required this.onStartBaiduPanAuthorization,
     required this.onAuthorizeBaiduPan,
-  required this.usePathStyle,
-  required this.onPathStyleChanged,
-  required this.jwanfsGatewayMode,
-  required this.onJWanFSGatewayModeChanged,
-  required this.isSaving,
+    required this.usePathStyle,
+    required this.onPathStyleChanged,
+    required this.jwanfsGatewayMode,
+    required this.onJWanFSGatewayModeChanged,
+    required this.isSaving,
     required this.errorText,
     required this.onSave,
     this.onBack,
@@ -91,6 +92,7 @@ class ConfigRightFormPanel extends StatelessWidget {
   final String? errorText;
   final VoidCallback onSave;
   final VoidCallback? onBack;
+
   /// 刷新协议切换前的字段可见性（如 FTP 匿名开关会隐藏账号密码）。
   final VoidCallback? onFieldsChanged;
 
@@ -99,10 +101,9 @@ class ConfigRightFormPanel extends StatelessWidget {
     final theme = ShadTheme.of(context);
     final isWebDav = storageType == StorageType.webdav;
     final isBaiduPan = storageType == StorageType.baiduPan;
-    final isFTP = storageType == StorageType.ftp ||
-        storageType == StorageType.sftp;
-    final ftpLabel =
-        storageType == StorageType.sftp ? 'SFTP' : 'FTP';
+    final isFTP =
+        storageType == StorageType.ftp || storageType == StorageType.sftp;
+    final ftpLabel = storageType == StorageType.sftp ? 'SFTP' : 'FTP';
     final title = isBaiduPan
         ? '添加百度网盘账号'
         : isWebDav
@@ -118,6 +119,8 @@ class ConfigRightFormPanel extends StatelessWidget {
         ? '填写 $ftpLabel 服务器地址、端口和登录账号。'
         : '填写对象存储端点和访问密钥。';
 
+    final isAndroid = defaultTargetPlatform == TargetPlatform.android;
+
     return Container(
       color: theme.colorScheme.background,
       child: LayoutBuilder(
@@ -127,11 +130,26 @@ class ConfigRightFormPanel extends StatelessWidget {
               ? viewportHeight - 64
               : viewportHeight;
           // 全屏表单更宽；半宽模式保持原先窄卡片观感。
-          final maxFormWidth = fullWidth ? 720.0 : 380.0;
+          final maxFormWidth = isAndroid
+              ? 420.0
+              : fullWidth
+              ? 720.0
+              : 380.0;
           final useTwoColumns =
-              fullWidth && !isBaiduPan && constraints.maxWidth >= 700;
-          final horizontalPadding = fullWidth ? 48.0 : 32.0;
-          final verticalPadding = fullWidth ? 28.0 : 32.0;
+              fullWidth &&
+              !isAndroid &&
+              !isBaiduPan &&
+              constraints.maxWidth >= 700;
+          final horizontalPadding = isAndroid
+              ? 20.0
+              : fullWidth
+              ? 48.0
+              : 32.0;
+          final verticalPadding = isAndroid
+              ? 18.0
+              : fullWidth
+              ? 28.0
+              : 32.0;
 
           return SingleChildScrollView(
             padding: EdgeInsets.symmetric(
@@ -202,11 +220,15 @@ class ConfigRightFormPanel extends StatelessWidget {
                       const SizedBox(height: 24),
                       // 底部保存按钮。
                       Align(
-                        alignment: fullWidth
+                        alignment: fullWidth && !isAndroid
                             ? Alignment.centerRight
                             : Alignment.center,
                         child: SizedBox(
-                          width: fullWidth ? 220 : double.infinity,
+                          width: isAndroid
+                              ? double.infinity
+                              : fullWidth
+                              ? 220
+                              : double.infinity,
                           height: 44,
                           child: ShadButton(
                             onPressed: isSaving ? null : onSave,
@@ -220,7 +242,8 @@ class ConfigRightFormPanel extends StatelessWidget {
                                         child: AppLoadingIndicator(
                                           strokeWidth: 2,
                                           color: theme
-                                              .colorScheme.primaryForeground,
+                                              .colorScheme
+                                              .primaryForeground,
                                         ),
                                       ),
                                       const SizedBox(width: 8),

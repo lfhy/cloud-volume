@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:remote_storage/theme/list_interaction_colors.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:remote_storage/utils/display_name.dart';
 
 /// 文件管理页的 Finder 风格网格项。
 class FileGridItem extends StatelessWidget {
@@ -88,7 +89,12 @@ class FileGridItem extends StatelessWidget {
                                   behavior: HitTestBehavior.opaque,
                                   onTap: onTitleTap,
                                   child: Text(
-                                    title,
+                                    // 名称截断仅用于 Android 窄屏卡片；
+                                    // 桌面端保持完整文件名。
+                                    Theme.of(context).platform ==
+                                            TargetPlatform.android
+                                        ? compactDisplayName(title)
+                                        : title,
                                     style: TextStyle(
                                       fontSize: 11.5,
                                       fontWeight: FontWeight.w500,

@@ -270,17 +270,25 @@ class _FileManagerPageState extends State<FileManagerPage> {
           _buildHeader(theme),
           const SizedBox(height: 16),
           Expanded(
-            child: FileTransferClipboardRegion(
-              enabled: _acceptsFileTransferInput,
-              acceptsLocalFiles: _currentDirectoryWritable,
-              onPasteLocalFiles: (paths) => unawaited(_uploadLocalPaths(paths)),
-              onCopySelection: () =>
-                  unawaited(_copySelectedObjectsToClipboard()),
-              child: _buildContentWithMountLoading(theme),
-            ),
+            child: _buildFileTransferSurface(theme),
           ),
         ],
       ),
+    );
+  }
+
+  // Native desktop drop APIs are not packaged in the Android application.
+  Widget _buildFileTransferSurface(ShadThemeData theme) {
+    final content = _buildContentWithMountLoading(theme);
+    if (!isDesktopPlatform && !isWebPlatform) {
+      return content;
+    }
+    return FileTransferClipboardRegion(
+      enabled: _acceptsFileTransferInput,
+      acceptsLocalFiles: _currentDirectoryWritable,
+      onPasteLocalFiles: (paths) => unawaited(_uploadLocalPaths(paths)),
+      onCopySelection: () => unawaited(_copySelectedObjectsToClipboard()),
+      child: content,
     );
   }
 

@@ -55,6 +55,7 @@ class GlobalTrashBrowser extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
+    final compact = Theme.of(context).platform == TargetPlatform.android;
     final selectableEntries = entries
         .where((entry) => !busyIds.contains(entry.id))
         .toList(growable: false);
@@ -71,7 +72,17 @@ class GlobalTrashBrowser extends StatelessWidget {
       padding: const EdgeInsets.all(4),
       child: Column(
         children: [
-          _GlobalTrashHeader(
+          if (compact)
+            Container(
+              height: 38,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(children: [
+                _HeaderSelectionIndicator(allSelected: allSelected, partiallySelected: partiallySelected, onTap: onToggleSelectAll),
+                const SizedBox(width: 10),
+                const Text('全选'),
+              ]),
+            )
+          else _GlobalTrashHeader(
             theme: theme,
             showBucketColumn: showBucketColumn,
             allSelected: allSelected,
@@ -97,12 +108,12 @@ class GlobalTrashBrowser extends StatelessWidget {
                       size: 32,
                     ),
                     title: entry.item.name,
-                    subtitleLabel: entry.item.originalKey,
+                    subtitleLabel: compact ? entry.item.deletedAt : entry.item.originalKey,
                     sizeLabel: showBucketColumn ? entry.bucket : '',
                     sizeColumnWidthOverride: showBucketColumn
                         ? _bucketColumnWidth
                         : 0,
-                    modifiedLabel: busy ? '处理中...' : entry.item.deletedAt,
+                    modifiedLabel: compact ? '' : (busy ? '处理中...' : entry.item.deletedAt),
                     onTap: () => _toggleEntry(entry),
                     onDoubleTap: busy ? null : () => onRestore(entry),
                     onTitleTap: () => _toggleEntry(entry),
@@ -113,12 +124,18 @@ class GlobalTrashBrowser extends StatelessWidget {
                     showSelectionControl: true,
                     showDivider: index != entries.length - 1 || loadingMore,
                     deleting: busy,
-                    trailing: TrashRowActions(
-                      deletedLabel: entry.item.deletedAt,
-                      busy: busy,
-                      onRestore: () => onRestore(entry),
-                      onDeletePermanently: () => onDeletePermanently(entry),
-                    ),
+                    trailing: compact
+                        ? Row(mainAxisSize: MainAxisSize.min, children: [
+                            ShadIconButton.ghost(icon: Icon(LucideIcons.rotateCcw, size: 18, color: theme.colorScheme.primary), onPressed: busy ? null : () => onRestore(entry)),
+                            ShadIconButton.ghost(icon: Icon(LucideIcons.trash2, size: 18, color: theme.colorScheme.mutedForeground), onPressed: busy ? null : () => onDeletePermanently(entry)),
+                          ])
+                        : TrashRowActions(
+                            deletedLabel: entry.item.deletedAt,
+                            busy: busy,
+                            onRestore: () => onRestore(entry),
+                            onDeletePermanently: () => onDeletePermanently(entry),
+                          ),
+                    compact: compact,
                   ),
                 );
               },

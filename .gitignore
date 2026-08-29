@@ -37,6 +37,9 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+
+# Large local SDK archives used by setup_android_dev.ps1; never commit them.
+/flutter_windows_*-stable.zip
 /coverage/
 /bin/
 
@@ -50,3 +53,4 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+/android/app/src/main/jniLibs/

@@ -1,6 +1,4 @@
-// Web file-transfer fallback keeps desktop-only native clipboard paths disabled.
-
-import 'package:super_drag_and_drop/super_drag_and_drop.dart';
+// Web file-transfer fallback keeps local native clipboard paths disabled.
 
 class DesktopFileTransferService {
   DesktopFileTransferService._();
@@ -8,9 +6,7 @@ class DesktopFileTransferService {
   static final DesktopFileTransferService instance =
       DesktopFileTransferService._();
 
-  Future<List<String>> localFilePathsFromDrop(PerformDropEvent event) async {
-    return const <String>[];
-  }
+  static bool get supportsNativeFileClipboard => false;
 
   Future<List<String>> localFilePathsFromClipboard() async {
     return const <String>[];

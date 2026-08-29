@@ -2,6 +2,7 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:remote_storage/models/bootstrap_state.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
@@ -35,6 +36,7 @@ class _CloudStoragePageState extends State<CloudStoragePage> {
   bool _isGrid = false;
   bool _busy = false;
   late List<ProfileInfo> _accounts;
+
   /// Per-profile connection status, populated by a background probe. Keyed by
   /// profile name. Disabled accounts are marked [AccountStatus.disabled]
   /// without probing.
@@ -51,7 +53,8 @@ class _CloudStoragePageState extends State<CloudStoragePage> {
   @override
   void didUpdateWidget(covariant CloudStoragePage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final profilesChanged = !identical(oldWidget.state.profiles, widget.state.profiles) ||
+    final profilesChanged =
+        !identical(oldWidget.state.profiles, widget.state.profiles) ||
         oldWidget.state.profiles != widget.state.profiles;
     if (profilesChanged) {
       _accounts = List<ProfileInfo>.from(widget.state.profiles);
@@ -86,9 +89,8 @@ class _CloudStoragePageState extends State<CloudStoragePage> {
       // Enabled account. Drop any stale "disabled" marker left from a prior
       // state, but preserve an existing ok/error so the row does not flash.
       final existing = _status[account.name];
-      final stale = force ||
-          existing == null ||
-          existing == AccountStatus.disabled;
+      final stale =
+          force || existing == null || existing == AccountStatus.disabled;
       if (stale) {
         _status[account.name] = AccountStatus.checking;
       }
@@ -110,10 +112,12 @@ class _CloudStoragePageState extends State<CloudStoragePage> {
       final config = await widget.api.loadProfile(name);
       // list_buckets walks the full fast-fail path (dial timeout, no retry,
       // negative cache). A short Dart timeout caps the wait for the UI.
-      await widget.api.listBuckets(config).timeout(
-        const Duration(seconds: 12),
-        onTimeout: () => throw TimeoutException('连接超时'),
-      );
+      await widget.api
+          .listBuckets(config)
+          .timeout(
+            const Duration(seconds: 12),
+            onTimeout: () => throw TimeoutException('连接超时'),
+          );
       if (!mounted) return;
       setState(() {
         _status[name] = AccountStatus.ok;
@@ -131,6 +135,40 @@ class _CloudStoragePageState extends State<CloudStoragePage> {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
+    final isAndroid = defaultTargetPlatform == TargetPlatform.android;
+
+    if (isAndroid) {
+      return Padding(
+        padding: const EdgeInsets.only(
+          top: 28,
+          left: 20,
+          right: 20,
+          bottom: 12,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _PageHeader(theme: theme, onAddAccount: _showAddAccountDialog),
+            const SizedBox(height: 14),
+            Expanded(
+              child: CloudStorageAccountList(
+                accounts: _accounts,
+                isGrid: false,
+                mobileLayout: true,
+                busy: _busy,
+                onEdit: _showEditAccountDialog,
+                onDelete: _delete,
+                onManageBuckets: _showBucketVisibilityDialog,
+                onToggleDisabled: _toggleDisabled,
+                status: _status,
+                statusError: _statusError,
+                onReorder: null,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
     return Padding(
       padding: const EdgeInsets.only(top: 56, left: 36, right: 36, bottom: 20),
@@ -139,17 +177,20 @@ class _CloudStoragePageState extends State<CloudStoragePage> {
         children: [
           _PageHeader(theme: theme, onAddAccount: _showAddAccountDialog),
           const SizedBox(height: 14),
-          FileManagerActionBar(
-            theme: theme,
-            isGrid: _isGrid,
-            searchEnabled: !_busy,
-            onToggleView: () => setState(() => _isGrid = !_isGrid),
-          ),
-          const SizedBox(height: 12),
+          if (!isAndroid) ...[
+            FileManagerActionBar(
+              theme: theme,
+              isGrid: _isGrid,
+              searchEnabled: !_busy,
+              onToggleView: () => setState(() => _isGrid = !_isGrid),
+            ),
+            const SizedBox(height: 12),
+          ],
           Expanded(
             child: CloudStorageAccountList(
               accounts: _accounts,
               isGrid: _isGrid,
+              mobileLayout: false,
               busy: _busy,
               onEdit: _showEditAccountDialog,
               onDelete: _delete,
@@ -221,7 +262,9 @@ class _CloudStoragePageState extends State<CloudStoragePage> {
     final accounts = List<ProfileInfo>.from(_accounts);
     final moved = accounts.removeAt(oldIndex);
     accounts.insert(targetIndex, moved);
-    final names = accounts.map((profile) => profile.name).toList(growable: false);
+    final names = accounts
+        .map((profile) => profile.name)
+        .toList(growable: false);
     setState(() => _accounts = accounts);
     try {
       // Order is already persisted; avoid bootstrap/onRefresh which used to
@@ -316,11 +359,11 @@ class _CloudStoragePageState extends State<CloudStoragePage> {
         message: config.storageType == StorageType.baiduPan
             ? '请先完成百度网盘 OAuth 授权。'
             : config.storageType == StorageType.webdav
-                ? '请填写 WebDAV 地址、用户名和密码。'
-                : config.storageType == StorageType.ftp ||
+            ? '请填写 WebDAV 地址、用户名和密码。'
+            : config.storageType == StorageType.ftp ||
                   config.storageType == StorageType.sftp
-                ? '请填写 FTP/SFTP 地址、用户名和密码。'
-                : '请填写 Endpoint、Access Key 和 Secret Key。',
+            ? '请填写 FTP/SFTP 地址、用户名和密码。'
+            : '请填写 Endpoint、Access Key 和 Secret Key。',
       );
       return false;
     }

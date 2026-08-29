@@ -13,20 +13,29 @@ dependencies:
   path: ^1.9.1
   shadcn_ui: ^0.54.0
   shared_preferences: ^2.5.5
-  file_picker: ^11.0.2
+  file_picker: ^12.0.0
+  file_selector: ^1.0.3
   flutter_svg: ^2.2.1
   http: ^1.2.2
   path_provider: ^2.1.4
   url_launcher: ^6.3.2
-  super_drag_and_drop: ^0.9.1
-  super_clipboard: ^0.9.1
   desktop_multi_window: ^0.3.0
   window_manager: ^0.5.1
+  super_drag_and_drop: ^0.9.1
+  super_clipboard: ^0.9.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+
+# Keep CargoKit-based native code out of Android's Gradle build while retaining
+# the upstream Windows/macOS/Linux implementations used by the desktop shell.
+dependency_overrides:
+  super_native_extensions:
+    path: third_party/super_native_extensions
+  irondash_engine_context:
+    path: third_party/irondash_engine_context
 
 flutter:
   uses-material-design: true

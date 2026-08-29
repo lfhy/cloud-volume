@@ -6,7 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"sync"
 )
+
+var appDataRootOverride struct {
+	sync.RWMutex
+	path string
+}
 
 const (
 	configDirName       = ".cloud-volume"
@@ -28,11 +35,29 @@ func DefaultConfigPath() (string, error) {
 // which keeps Windows from needing write access to the (often Program Files)
 // install directory.
 func appDataRoot() (string, error) {
+	appDataRootOverride.RLock()
+	override := appDataRootOverride.path
+	appDataRootOverride.RUnlock()
+	if override != "" {
+		return override, nil
+	}
 	homePath, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve user home: %w", err)
 	}
 	return filepath.Join(homePath, configDirName), nil
+}
+
+// SetAppDataRoot lets mobile hosts provide their private writable directory.
+func SetAppDataRoot(root string) error {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return fmt.Errorf("app data root is empty")
+	}
+	appDataRootOverride.Lock()
+	appDataRootOverride.path = filepath.Clean(root)
+	appDataRootOverride.Unlock()
+	return nil
 }
 
 // legacyAppDataRoot returns the pre-Cloud Volume config root for upgrades.

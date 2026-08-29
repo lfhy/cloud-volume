@@ -2,6 +2,7 @@
 // 避免平台专属选项和过多通用设置挤在同一长页里。
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:remote_storage/utils/app_runtime_version.dart';
 import 'package:remote_storage/models/bootstrap_state.dart';
@@ -119,6 +120,7 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _cleaningStaleWindowsProcesses = false;
   bool _resettingUserConfig = false;
   String? _resetUserConfigError;
+  _SettingsTab? _mobileTab;
 
   bool get _showsWindowsTab => isWindowsPlatform;
 
@@ -133,15 +135,48 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final config = widget.state.config;
+    final isAndroid = defaultTargetPlatform == TargetPlatform.android;
 
     return Padding(
       padding: const EdgeInsets.only(top: 56, left: 36, right: 36, bottom: 20),
       // Two-column layout: vertical group rail on the left, scrolling content
       // on the right. The group rail replaces the former top ShadTabs bar so
       // all settings categories are reachable without horizontal scrolling.
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+      child: LayoutBuilder(builder: (context, constraints) {
+        if (isAndroid) {
+          if (_mobileTab == null) {
+            return _buildMobileSettingsIndex(theme);
+          }
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                IconButton(
+                  tooltip: '返回设置',
+                  onPressed: () => setState(() => _mobileTab = null),
+                  icon: const Icon(Icons.arrow_back),
+                ),
+                Text(_tabLabel(_mobileTab!), style: theme.textTheme.h3.copyWith(fontWeight: FontWeight.w700, fontSize: 22)),
+              ]),
+              const SizedBox(height: 12),
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: _contentScrollController,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ..._buildContentForTab(theme, config, _mobileTab!),
+                      const SizedBox(height: 40),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
           // --- Left sidebar: title + vertical group navigation ---
           SizedBox(
             width: 180,
@@ -174,8 +209,42 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ),
           ),
+          ],
+        );
+      }),
+    );
+  }
+
+  Widget _buildMobileSettingsIndex(ShadThemeData theme) {
+    final groups = _railGroups();
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 40),
+      children: [
+        Text('设置', style: theme.textTheme.h3.copyWith(fontWeight: FontWeight.w700, fontSize: 28)),
+        const SizedBox(height: 18),
+        for (final group in groups) ...[
+          Padding(
+            padding: const EdgeInsets.only(left: 4, top: 14, bottom: 6),
+            child: Text(group.header, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: theme.colorScheme.mutedForeground)),
+          ),
+          ShadCard(
+            padding: EdgeInsets.zero,
+            child: Column(
+              children: [
+                for (var i = 0; i < group.tabs.length; i++) ...[
+                  ListTile(
+                    dense: true,
+                    title: Text(_tabLabel(group.tabs[i])),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => setState(() => _mobileTab = group.tabs[i]),
+                  ),
+                  if (i != group.tabs.length - 1) const Divider(height: 1),
+                ],
+              ],
+            ),
+          ),
         ],
-      ),
+      ],
     );
   }
 

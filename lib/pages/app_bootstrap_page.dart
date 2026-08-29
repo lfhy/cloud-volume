@@ -15,6 +15,7 @@ import 'package:remote_storage/pages/main_layout_page.dart';
 import 'package:remote_storage/services/desktop_sub_window_modal.dart';
 import 'package:remote_storage/services/desktop_window_method_host.dart';
 import 'package:remote_storage/services/app_exit_cleanup.dart';
+import 'package:remote_storage/platform/platform_info.dart';
 import 'package:remote_storage/services/remote_storage_api.dart';
 import 'package:remote_storage/utils/app_log.dart';
 import 'package:remote_storage/utils/bridge_error_text.dart';
@@ -39,8 +40,10 @@ class _AppBootstrapPageState extends State<AppBootstrapPage> {
   @override
   void initState() {
     super.initState();
-    DesktopWindowMethodHost.ensureInstalled();
-    reconcileModalOverlayWithOpenChildren();
+    if (isDesktopPlatform) {
+      DesktopWindowMethodHost.ensureInstalled();
+      reconcileModalOverlayWithOpenChildren();
+    }
     unawaited(_loadSession(showLoadingShell: true));
   }
 

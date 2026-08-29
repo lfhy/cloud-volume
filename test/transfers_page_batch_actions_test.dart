@@ -1,8 +1,8 @@
 // Transfers page tests keep the header bulk actions wired to queue state.
 
 import 'dart:async';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:remote_storage/models/auth_session_state.dart';
@@ -46,56 +46,116 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    // This test pins the desktop header. The test binding defaults to the
+    // android platform, where the compact header hides batch cancel while
+    // rows are selected. Reset inside the body: the binding's foundation
+    // invariant check runs before addTearDown callbacks.
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    try {
+      final api = _TransfersPageFakeApi();
+      final pendingUpload = const RemoteTask(
+        id: 'sync:test:pending-upload',
+        kind: RemoteTaskKind.upload,
+        status: RemoteTaskStatus.waiting,
+        bucket: 'bucket-a',
+        targetPath: 'pending-upload.txt',
+        cancelable: true,
+      );
+      final runningDownload = const RemoteTask(
+        id: 'sync:test:running-download',
+        kind: RemoteTaskKind.download,
+        status: RemoteTaskStatus.running,
+        bucket: 'bucket-a',
+        targetPath: 'running-download.txt',
+        cancelable: true,
+      );
+      final doneUpload = const RemoteTask(
+        id: 'sync:test:done-upload',
+        kind: RemoteTaskKind.upload,
+        status: RemoteTaskStatus.done,
+        bucket: 'bucket-a',
+        targetPath: 'done-upload.txt',
+      );
+      api.tasks.addAll([pendingUpload, runningDownload, doneUpload]);
 
-    final api = _TransfersPageFakeApi();
-    final pendingUpload = const RemoteTask(
-      id: 'sync:test:pending-upload',
-      kind: RemoteTaskKind.upload,
-      status: RemoteTaskStatus.waiting,
-      bucket: 'bucket-a',
-      targetPath: 'pending-upload.txt',
-      cancelable: true,
-    );
-    final runningDownload = const RemoteTask(
-      id: 'sync:test:running-download',
-      kind: RemoteTaskKind.download,
-      status: RemoteTaskStatus.running,
-      bucket: 'bucket-a',
-      targetPath: 'running-download.txt',
-      cancelable: true,
-    );
-    final doneUpload = const RemoteTask(
-      id: 'sync:test:done-upload',
-      kind: RemoteTaskKind.upload,
-      status: RemoteTaskStatus.done,
-      bucket: 'bucket-a',
-      targetPath: 'done-upload.txt',
-    );
-    api.tasks.addAll([pendingUpload, runningDownload, doneUpload]);
-
-    await tester.pumpWidget(
-      ShadApp(
-        home: Material(
-          child: TransfersPage(api: api, config: RemoteStorageConfig.empty()),
+      await tester.pumpWidget(
+        ShadApp(
+          home: Material(
+            child: TransfersPage(
+              api: api,
+              config: RemoteStorageConfig.empty(),
+            ),
+          ),
         ),
-      ),
-    );
-    await tester.pump();
+      );
+      await tester.pump();
 
-    await tester.tap(find.byType(ListSelectionControl).first);
-    await tester.pump();
+      await tester.tap(find.byType(ListSelectionControl).first);
+      await tester.pump();
 
-    expect(find.text('取消 2'), findsOneWidget);
-    await tester.tap(find.text('取消 2'));
-    await tester.pump();
+      expect(find.text('取消 2'), findsOneWidget);
+      await tester.tap(find.text('取消 2'));
+      await tester.pump();
 
-    expect(
-      api.canceledTaskIds,
-      containsAll([pendingUpload.id, runningDownload.id]),
-    );
-    expect(api.canceledTaskIds, isNot(contains(doneUpload.id)));
-    await tester.pumpWidget(const SizedBox.shrink());
-    RemoteTaskStore.instance.resetForTest();
+      expect(
+        api.canceledTaskIds,
+        containsAll([pendingUpload.id, runningDownload.id]),
+      );
+      expect(api.canceledTaskIds, isNot(contains(doneUpload.id)));
+      await tester.pumpWidget(const SizedBox.shrink());
+      RemoteTaskStore.instance.resetForTest();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  // Android 紧凑头部：选中任务后标题槽换成「已选 N 项」，头部批量取消按钮
+  // 隐藏（取消由行内小图标承担）。
+  testWidgets('android compact header swaps title and hides batch cancel', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      final api = _TransfersPageFakeApi();
+      api.tasks.add(
+        const RemoteTask(
+          id: 'sync:test:cancelable-upload',
+          kind: RemoteTaskKind.upload,
+          status: RemoteTaskStatus.waiting,
+          bucket: 'bucket-a',
+          targetPath: 'cancelable.txt',
+          cancelable: true,
+        ),
+      );
+
+      await tester.pumpWidget(
+        ShadApp(
+          home: Material(
+            child: TransfersPage(
+              api: api,
+              config: RemoteStorageConfig.empty(),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('任务队列'), findsOneWidget);
+      await tester.tap(find.byType(ListSelectionControl).first);
+      await tester.pump();
+
+      expect(find.text('已选 1 项'), findsOneWidget);
+      expect(find.text('任务队列'), findsNothing);
+      expect(find.text('取消 1'), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+      RemoteTaskStore.instance.resetForTest();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 
   testWidgets('immediate sync uses one durable queue action with loading', (

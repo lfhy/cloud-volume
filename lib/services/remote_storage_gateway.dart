@@ -52,6 +52,16 @@ class RemoteStorageCapabilities {
       supportsDesktopWindowControls = false,
       supportsCacheDirectoryOpen = false;
 
+  const RemoteStorageCapabilities.mobile()
+    : supportsMounts = false,
+      supportsNativeOpen = false,
+      supportsDownloadDirectory = false,
+      supportsSessionLogin = false,
+      supportsWebDavAccess = false,
+      supportsBrowserTransfers = false,
+      supportsDesktopWindowControls = false,
+      supportsCacheDirectoryOpen = false;
+
   final bool supportsMounts;
   final bool supportsNativeOpen;
   final bool supportsDownloadDirectory;

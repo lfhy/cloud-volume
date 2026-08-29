@@ -110,6 +110,28 @@ go mod tidy
 make run
 ```
 
+### Android 开发环境（Windows）
+
+Android runner 已包含在仓库中，并把 ARM64 Go FFI bridge 作为 `libremote_storage_bridge.so` 打进 APK。移动端可使用账号配置、对象浏览、上传下载、分享及回收站等远程存储功能；移动端会禁用桌面专属的本地挂载、目录同步、多窗口、外部应用打开、缓存目录打开、跨应用拖放和文件 URI 剪贴板操作。桌面端仍支持拖放、文件剪贴板和可改名的另存为；移动端上传请使用文件管理页的文件选择按钮。
+
+从仓库根目录执行：
+
+```powershell
+.\scripts\setup_android_dev.ps1
+```
+
+也可双击 `scripts\setup_android_dev.bat`。如果仓库根目录存在 `flutter_windows_3.47.0-stable.zip`，脚本会直接使用它配置 Flutter，不访问 Flutter release manifest；也可用 `-FlutterArchive` 指定其他本地归档。归档不存在时才回退到在线 stable release。脚本把 Flutter、JDK 17 和 Android SDK 安装到当前用户目录，接受 Android SDK 许可，安装 API 36、Build Tools、ADB、ARM64 bridge 所需的 NDK 28.2.13676358 和默认 x86_64 Google APIs 模拟器镜像，并执行 `flutter doctor -v`、`flutter pub get` 和 `flutter test`。使用 `-SkipEmulator` 可省略模拟器镜像，使用 `-SkipValidation` 可只安装工具链。配置结束后打开新的 PowerShell 窗口，使 `flutter`、`sdkmanager`、`adb` 和 `java` 的用户 PATH 生效。
+
+生成 ARM64 release APK：
+
+```powershell
+.\scripts\build_android.ps1
+```
+
+该脚本先用 Android NDK 构建 bridge，再执行 `flutter build apk --release --target-platform android-arm64`。产物位于 `build\app\outputs\flutter-apk\app-release.apk`。Android Gradle wrapper 与 Maven 仓库已优先使用国内镜像；离线或镜像不可达时需恢复网络后重试。
+
+Android 启动图标同样从现有 macOS 1024px 品牌位图生成，不重新绘制标志。修改品牌图标后运行 `powershell -ExecutionPolicy Bypass -File .\scripts\generate_android_app_icon.ps1`，脚本会写出各密度的方形/圆形传统图标，并生成 API 26+ 自适应图标前景层（品牌图形按官方 66/108 安全区缩放居中）。
+
 `make run` 是本仓库的标准启动方式：
 
 - macOS: 先构建 Go bridge 到 `bin/bridge/libremote_storage_bridge.dylib`，再以正确的 `DEVELOPER_DIR` 启动 Flutter macOS 应用

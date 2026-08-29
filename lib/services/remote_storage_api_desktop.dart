@@ -19,6 +19,7 @@ import 'package:remote_storage/models/sync_profile.dart';
 import 'package:remote_storage/models/trash_item.dart';
 import 'package:remote_storage/models/transfer_job.dart';
 import 'package:remote_storage/services/remote_storage_gateway.dart';
+import 'package:remote_storage/platform/platform_info.dart';
 part 'remote_storage_api_desktop_shares.dart';
 part 'remote_storage_api_desktop_paging.dart';
 part 'remote_storage_api_desktop_runtime.dart';
@@ -55,7 +56,9 @@ class RemoteStorageApi
 
   @override
   RemoteStorageCapabilities get capabilities =>
-      const RemoteStorageCapabilities.desktop();
+      isAndroidPlatform || isIOSPlatform
+      ? const RemoteStorageCapabilities.mobile()
+      : const RemoteStorageCapabilities.desktop();
 
   @override
   RemoteStorageBridge get bridgeHandle => _bridge;

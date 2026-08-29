@@ -2,6 +2,7 @@
 // 侧边栏使用渐变背景 + 装饰圆形，风格与登录页左侧品牌面板统一。
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:remote_storage/models/bootstrap_state.dart';
 import 'package:remote_storage/platform/platform_info.dart';
 import 'package:remote_storage/pages/cloud_storage_page.dart';
@@ -64,7 +65,9 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
 
  bool get _sharesAvailable => widget.state.config.supportsShareLinks;
   // Sync requires local filesystem access and desktop-only FFI services.
-  bool get _syncAvailable => !isWebPlatform;
+  bool get _syncAvailable =>
+      !isWebPlatform &&
+      defaultTargetPlatform != TargetPlatform.android;
 
   SidebarItem get _effectiveSelectedItem {
     if (!_sharesAvailable && widget.selectedItem == SidebarItem.shares) {
@@ -98,13 +101,43 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isAndroid = defaultTargetPlatform == TargetPlatform.android;
     return Scaffold(
-      body: Row(
-        children: [
-          _buildSidebar(),
-          Expanded(child: _buildContent()),
-        ],
-      ),
+      body: isAndroid
+          ? _buildContent()
+          : Row(
+              children: [
+                _buildSidebar(),
+                Expanded(child: _buildContent()),
+              ],
+            ),
+      bottomNavigationBar: isAndroid ? _buildMobileNavigation() : null,
+    );
+  }
+
+  // Mobile navigation replaces the desktop rail without duplicating pages.
+  Widget _buildMobileNavigation() {
+    final items = <SidebarItem>[
+      SidebarItem.fileManager,
+      SidebarItem.storage,
+      SidebarItem.trash,
+      SidebarItem.transfers,
+      SidebarItem.settings,
+    ];
+    final selected = items.indexOf(_effectiveSelectedItem);
+    return NavigationBar(
+      selectedIndex: selected < 0 ? 0 : selected,
+      onDestinationSelected: (index) {
+        if (index < items.length) widget.onSelectedItemChanged(items[index]);
+      },
+      labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
+      destinations: const [
+        NavigationDestination(icon: Icon(LucideIcons.folderOpen), label: '文件'),
+        NavigationDestination(icon: Icon(LucideIcons.cloudCog), label: '账号'),
+        NavigationDestination(icon: Icon(LucideIcons.trash2), label: '回收站'),
+        NavigationDestination(icon: Icon(LucideIcons.arrowLeftRight), label: '任务'),
+        NavigationDestination(icon: Icon(LucideIcons.settings2), label: '设置'),
+      ],
     );
   }
 

@@ -31,14 +31,7 @@ extension FileAccessDownloadPicker on FileAccessService {
         directoryLister: directoryLister,
       );
     }
-    final initialDirectory = await resolveDefaultDownloadDirectory(
-      config.defaultDownloadDirectory,
-    );
-    final savePath = await FilePicker.saveFile(
-      dialogTitle: '下载到',
-      fileName: object.displayName,
-      initialDirectory: initialDirectory,
-    );
+    final savePath = await _selectFileDownloadPath(config, object);
     if (savePath == null || savePath.trim().isEmpty) {
       return null;
     }
@@ -128,12 +121,20 @@ extension FileAccessDownloadPicker on FileAccessService {
       }
       return uniqueDownloadDirectoryPath(targetDirectory, object.displayName);
     }
-    return FilePicker.saveFile(
-      dialogTitle: '下载到',
-      fileName: object.displayName,
-      initialDirectory: await resolveDefaultDownloadDirectory(
-        config.defaultDownloadDirectory,
-      ),
-    );
+    return _selectFileDownloadPath(config, object);
+  }
+
+  Future<String?> _selectFileDownloadPath(
+    RemoteStorageConfig config,
+    ObjectInfo object,
+  ) async {
+    // Android scoped storage grants the app an internal temporary directory,
+    // not a stable filesystem path selected through the Storage Access
+    // Framework. The Go bridge streams the object to that writable directory.
+    if (Platform.isAndroid) {
+      return uniqueDownloadPath(Directory.systemTemp.path, object.displayName);
+    }
+    final location = await getSaveLocation(suggestedName: object.displayName);
+    return location?.path;
   }
 }

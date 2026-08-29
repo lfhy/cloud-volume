@@ -6,6 +6,7 @@ import 'package:remote_storage/widgets/desktop_context_menu_region.dart';
 import 'package:remote_storage/widgets/file_grid_item.dart';
 import 'package:remote_storage/widgets/file_list_tile.dart';
 import 'package:remote_storage/widgets/trash_row_actions.dart';
+import 'package:remote_storage/widgets/list_selection_controls.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'package:remote_storage/widgets/app_loading_indicator.dart';
@@ -45,10 +46,10 @@ class FileManagerTrashBrowser extends StatelessWidget {
   Widget _buildGrid(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final crossAxisCount = (constraints.maxWidth / 118).floor().clamp(
-          4,
-          10,
-        );
+        final isAndroid = Theme.of(context).platform == TargetPlatform.android;
+        final crossAxisCount = isAndroid
+            ? (constraints.maxWidth / 150).floor().clamp(2, 4)
+            : (constraints.maxWidth / 118).floor().clamp(4, 10);
         return GridView.count(
           controller: scrollController,
           crossAxisCount: crossAxisCount,
@@ -139,11 +140,25 @@ class FileManagerTrashBrowser extends StatelessWidget {
       fontWeight: FontWeight.w600,
     );
 
-    return ShadCard(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = Theme.of(context).platform == TargetPlatform.android ||
+            constraints.maxWidth < 600;
+        return ShadCard(
       padding: const EdgeInsets.all(4),
       child: Column(
         children: [
-          Container(
+          if (compact)
+            Container(
+              height: 38,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(children: [
+                ListSelectionControl(selected: false, onTap: () {}),
+                const SizedBox(width: 10),
+                const Text('全选'),
+              ]),
+            )
+          else Container(
             height: 38,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
@@ -161,7 +176,7 @@ class FileManagerTrashBrowser extends StatelessWidget {
                 Expanded(child: Text('名称', style: headerTextStyle)),
                 const SizedBox(width: 12),
                 SizedBox(
-                  width: FileListTile.sizeColumnWidth,
+                  width: compact ? 0 : FileListTile.sizeColumnWidth,
                   child: Text(
                     '原路径',
                     textAlign: TextAlign.right,
@@ -170,7 +185,7 @@ class FileManagerTrashBrowser extends StatelessWidget {
                 ),
                 const SizedBox(width: 16),
                 SizedBox(
-                  width: FileListTile.modifiedColumnWidth,
+                  width: compact ? 0 : FileListTile.modifiedColumnWidth,
                   child: Text(
                     '删除时间',
                     textAlign: TextAlign.right,
@@ -179,7 +194,7 @@ class FileManagerTrashBrowser extends StatelessWidget {
                 ),
                 const SizedBox(width: 16),
                 SizedBox(
-                  width: TrashRowActions.actionColumnWidth,
+                  width: compact ? 0 : TrashRowActions.actionColumnWidth,
                   child: Text(
                     '操作',
                     textAlign: TextAlign.right,
@@ -209,16 +224,22 @@ class FileManagerTrashBrowser extends StatelessWidget {
                       color: theme.colorScheme.primary.withValues(alpha: 0.82),
                     ),
                     title: item.name,
-                    sizeLabel: item.originalKey,
+                    sizeLabel: compact ? item.sizeText : item.originalKey,
                     modifiedLabel: item.deletedAt,
                     onTap: () => onRestore(item),
                     showDivider: index != items.length - 1 || loadingMore,
-                    trailing: TrashRowActions(
+                    trailing: compact
+                        ? Row(mainAxisSize: MainAxisSize.min, children: [
+                            ShadIconButton.ghost(icon: Icon(LucideIcons.rotateCcw, size: 18, color: theme.colorScheme.primary), onPressed: () => onRestore(item)),
+                            ShadIconButton.ghost(icon: Icon(LucideIcons.trash2, size: 18, color: theme.colorScheme.mutedForeground), onPressed: () => onDeletePermanently(item)),
+                          ])
+                        : TrashRowActions(
                       deletedLabel: item.deletedAt,
                       busy: false,
                       onRestore: () => onRestore(item),
                       onDeletePermanently: () => onDeletePermanently(item),
                     ),
+                    compact: compact,
                   ),
                 );
               },
@@ -226,6 +247,8 @@ class FileManagerTrashBrowser extends StatelessWidget {
           ),
         ],
       ),
+        );
+      },
     );
   }
 

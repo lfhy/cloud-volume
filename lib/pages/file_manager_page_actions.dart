@@ -8,20 +8,13 @@ extension _FileManagerPageActions on _FileManagerPageState {
   Future<void> _upload() async {
     if (_activeBucket == null) return;
     if (!_ensureCurrentDirectoryWritable()) return;
-    final result = await FilePicker.pickFiles(
-      allowMultiple: true,
-      withData: widget.api.capabilities.supportsBrowserTransfers,
-    );
-    if (result == null || result.files.isEmpty) return;
+    final result = await FilePicker.pickFiles();
+    if (result.isEmpty) return;
     final tasks = <TransferTask>[];
-    for (final file in result.files) {
+    for (final file in result) {
       final path = file.path;
-      final bytes = file.bytes;
-      if (path == null && bytes == null) {
-        continue;
-      }
-      if (bytes != null) {
-        final task = _queueBrowserUpload(file.name, bytes);
+      if (isWebPlatform) {
+        final task = _queueBrowserUpload(file.name, await file.readAsBytes());
         if (task != null) {
           tasks.add(task);
         }

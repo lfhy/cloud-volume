@@ -1,5 +1,7 @@
 // Desktop entry chooses between the main app and detached preview sub-windows.
 
+import 'dart:io';
+
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:remote_storage/app/account_editor_window_app.dart';
@@ -19,6 +21,10 @@ import 'package:remote_storage/services/desktop_window_method_host.dart';
 import 'package:window_manager/window_manager.dart';
 
 Future<void> runRemoteStorageEntry(List<String> args) async {
+  if (Platform.isAndroid || Platform.isIOS) {
+    runApp(const RemoteStorageApp());
+    return;
+  }
   final controller = await WindowController.fromCurrentEngine();
   final arguments = controller.arguments;
   await windowManager.ensureInitialized();

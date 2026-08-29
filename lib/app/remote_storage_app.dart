@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:remote_storage/app/app_brand.dart';
 import 'package:remote_storage/pages/app_bootstrap_page.dart';
+import 'package:remote_storage/platform/platform_info.dart';
 import 'package:remote_storage/services/remote_storage_api.dart';
 import 'package:remote_storage/theme/app_theme.dart';
 import 'package:remote_storage/theme/theme_controller.dart';
@@ -34,20 +35,23 @@ class _ThemeAwareShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final accent = ThemeController.of(context).accent;
-    return DesktopModalParentFocusRelay(
-      child: ShadApp(
+    final content = ShadApp(
       title: appBrandName,
       debugShowCheckedModeBanner: false,
       themeMode: ThemeMode.light,
       theme: buildAppTheme(accent),
       home: Stack(
-        children: [
-          AppBootstrapPage(apiFactory: apiFactory),
-          const DesktopModalScrim(),
-          const DesktopWindowControls(),
-        ],
+        children: isDesktopPlatform
+            ? <Widget>[
+                AppBootstrapPage(apiFactory: apiFactory),
+                const DesktopModalScrim(),
+                const DesktopWindowControls(),
+              ]
+            : <Widget>[AppBootstrapPage(apiFactory: apiFactory)],
       ),
-    ),
     );
+    return isDesktopPlatform
+        ? DesktopModalParentFocusRelay(child: content)
+        : content;
   }
 }

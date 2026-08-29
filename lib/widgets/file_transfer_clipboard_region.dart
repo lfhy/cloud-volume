@@ -2,6 +2,7 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:remote_storage/services/desktop_file_transfer_service.dart';
@@ -42,6 +43,9 @@ class _FileTransferClipboardRegionState
 
   @override
   Widget build(BuildContext context) {
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return widget.child;
+    }
     final theme = ShadTheme.of(context);
     return Focus(
       focusNode: _focusNode,

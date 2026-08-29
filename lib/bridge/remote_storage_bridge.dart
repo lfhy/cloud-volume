@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 import 'package:path/path.dart' as path;
+import 'package:path_provider/path_provider.dart';
 
 typedef _NativeInvoke = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>);
 typedef _DartInvoke = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>);
@@ -41,6 +42,17 @@ class RemoteStorageBridge {
   }
 
   static Future<RemoteStorageBridge> connect() async {
+    if (Platform.isAndroid) {
+      final bridge = RemoteStorageBridge._(
+        DynamicLibrary.open('libremote_storage_bridge.so'),
+        'libremote_storage_bridge.so',
+      );
+      final supportDirectory = await getApplicationSupportDirectory();
+      bridge.call('set_app_data_root', <String, String>{
+        'path': path.join(supportDirectory.path, 'cloud-volume'),
+      });
+      return bridge;
+    }
     final bundledLibraryPath = _findBundledLibraryPath();
     if (bundledLibraryPath != null) {
       final library = DynamicLibrary.open(bundledLibraryPath);

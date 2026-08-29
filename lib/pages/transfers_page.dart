@@ -2,6 +2,7 @@
 // details; this page renders only the durable RemoteTask projection.
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
 import 'package:remote_storage/models/remote_task.dart';

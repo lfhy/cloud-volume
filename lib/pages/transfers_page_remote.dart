@@ -48,17 +48,18 @@ extension _TransfersPageRemote on _TransfersPageState {
                 : ListView(
                     children: [
                       for (final section in sections) ...[
-                        _RemoteSectionHeader(
-                          label: section.label,
-                          count: section.tasks.length,
-                        ),
+                        // Android 行内已有状态徽章，分组标题只占竖向空间，不显示。
+                        if (!_androidCompactQueueHeader)
+                          _RemoteSectionHeader(
+                            label: section.label,
+                            count: section.tasks.length,
+                          ),
                         for (final task in section.tasks)
                           RemoteTaskRow(
                             key: ValueKey<String>(task.id),
                             task: task,
                             selected: _selectedTaskIds.contains(task.id),
-                            onToggleSelected: () =>
-                                _toggleTaskSelection(task.id),
+                            onToggleSelected: () => _toggleTaskSelection(task.id),
                             onCancel: task.cancelable
                                 ? () => _cancelRemoteTask(store, task)
                                 : null,

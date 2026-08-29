@@ -409,6 +409,34 @@ Windows development now has two scripts: one for new-machine dependency bootstra
 - `scripts/setup_windows_dev.ps1` does not run a full app build by default; pass `-ValidateProject` to call `scripts/run_windows.ps1 -Build` after dependency setup.
 - After setup writes user environment variables and `PATH`, open a new PowerShell window before using `scripts/run_windows.ps1` interactively.
 
+### Feature: Android Development Environment (Windows)
+
+The repository has a user-scoped Android toolchain bootstrap and an ARM64 APK build path. The mobile application reuses the Go object-storage backend through a packaged c-shared FFI library while hiding desktop-only workflows.
+
+#### Key files
+
+- `scripts/setup_android_dev.ps1` - Uses the repository-root `flutter_windows_3.47.0-stable.zip` by default (or `-FlutterArchive`), extracting with Windows `tar.exe` because Flutter 3.47 metadata directories are not handled reliably by `Expand-Archive`; it falls back to the online Flutter stable manifest only when the local archive is absent. It adds the Flutter checkout to Git `safe.directory`, persists `FLUTTER_ROOT`, then installs Eclipse Temurin JDK 17, Android command-line tools, platform-tools, API 36, Build Tools 36.0.0, and NDK 28.2.13676358 for the ARM64 Go bridge; unless skipped it also installs the Android 36 Google APIs x86_64 emulator image. It persists `JAVA_HOME`, `ANDROID_HOME`, `ANDROID_SDK_ROOT`, and adds Flutter, JDK, `cmdline-tools\latest\bin` (`sdkmanager`), platform-tools (`adb`), and emulator paths to user PATH; it then accepts SDK licences, directs Flutter to the SDK, runs `flutter doctor -v`, then runs `flutter pub get` and `flutter test` unless `-SkipValidation` is supplied. Installation roots can be overridden with `-FlutterRoot`, `-AndroidSdkRoot`, and `-JavaHome`; `-SkipEmulator` avoids the image download.
+- `scripts/setup_android_dev.bat` - Double-click launcher that invokes the PowerShell bootstrap from the repository root and pauses for interactive use unless `CLOUD_VOLUME_NO_PAUSE=1`.
+- `scripts/build_android_bridge.ps1` - Compiles `./bridge` for `GOOS=android`, `GOARCH=arm64` with the installed NDK and writes the packaged library to `android/app/src/main/jniLibs/arm64-v8a/libremote_storage_bridge.so`. The generated C header is removed after the build.
+- `scripts/build_android.ps1` - Builds the Android bridge first, then creates the ARM64 Flutter release APK at `build/app/outputs/flutter-apk/app-release.apk`.
+- `android/` - Flutter Android runner. Its wrapper uses the Tencent Gradle distribution mirror, and `settings.gradle.kts` / `build.gradle.kts` prefer Aliyun's Google, Gradle-plugin, and Central repositories before the official hosts.
+- `bridge/dispatch_mobile.go` / `bridge/dispatch.go` / `go/config/paths.go` - Android startup passes Flutter's application-support directory to the native bridge through `set_app_data_root`, so configuration and caches remain inside Android app storage rather than an invalid desktop home directory.
+- `go/config/paths_mobile_test.go` - Pins `SetAppDataRoot` override and empty-path rejection semantics.
+- `lib/bridge/remote_storage_bridge.dart` - On Android opens the packaged `libremote_storage_bridge.so` and initializes that app-data root before configuration calls.
+- `lib/app/app_entry_io.dart` / `lib/app/remote_storage_app.dart` / `lib/pages/app_bootstrap_page.dart` / `lib/services/remote_storage_api_desktop.dart` / `lib/services/remote_storage_gateway.dart` - Keep `desktop_multi_window`, `window_manager`, desktop chrome, mounts, external file opening, local directory sync, and WebDAV launch out of mobile startup and expose the remaining mobile capabilities.
+- `third_party/super_native_extensions` / `third_party/irondash_engine_context` / `lib/services/desktop_file_transfer_service_io.dart` / `lib/widgets/file_transfer_clipboard_region.dart` / `lib/pages/file_manager_page.dart` - Preserve the Git-restored native drag-and-drop and file URI clipboard implementation on desktop while removing only the Android plugin registrations. `FileManagerPage._buildFileTransferSurface` is the Android/iOS boundary: it returns the unwrapped content there, so mobile never creates `DropRegion` and continues to use picker-based upload.
+- `lib/services/file_access_service_io.dart` / `lib/services/file_access_service_downloads_io.dart` - Use `file_selector` on desktop to obtain a writable, user-renamable save path without buffering a download in Dart; Android continues to stream into its app temporary directory until a separate Storage Access Framework implementation lands.
+- `README.md` - Documents bootstrap, mobile capabilities, restrictions, and APK build command.
+
+#### Gotchas
+
+- Only `android-arm64` is packaged today. Add separate NDK bridge builds before publishing x86_64 emulator or 32-bit ARM APKs.
+- The Go bridge is a large static artifact and is intentionally ignored by Git. Run `scripts/build_android.ps1` on the build machine before every APK build.
+- `third_party/super_native_extensions` and `third_party/irondash_engine_context` are vendored desktop-only plugin forks. Their Android registrations are removed because CargoKit's Gradle scripts are incompatible with Gradle 9; do not restore those declarations until CargoKit supports this build. Desktop drag-and-drop and file URI clipboard support remain available, while Android uses `file_picker` for upload and does not create the native drop region.
+- The bootstrap still downloads JDK and Android SDK packages from Adoptium and Google Android services. A network that blocks those endpoints prevents installation; Flutter itself can be bootstrapped offline from the repository-root archive. The script makes no partial-install cleanup or destructive replacement of an existing directory.
+- Open a new PowerShell window after completion so the persisted user PATH entries become visible to interactive shells.
+- `sdkmanager.bat` requires `JAVA_HOME` (and its `bin` on `PATH`) even when the JDK files are present. If an interrupted bootstrap leaves the SDK files installed but `sdkmanager --version` says Java is missing, restore `JAVA_HOME`, `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `FLUTTER_ROOT`, and the Flutter/JDK/platform-tools PATH entries before rerunning the setup script.
+
 ### Feature: Windows Crash Watchdog / Startup Reports
 
 Windows release bundles separate the public launcher from the Flutter process so failures before the first window exists are still observable.
@@ -439,28 +467,37 @@ Windows release bundles separate the public launcher from the Flutter process so
 - The launcher can diagnose a missing app, loader failure, Flutter engine failure, or later native crash. It cannot diagnose corruption that prevents the launcher itself from loading; its imports therefore stay limited to Windows system libraries and it has no Flutter/Go runtime dependency.
 - Reports may contain local paths from logs. Keep the user review warning and the 64 KiB tail limit when extending diagnostics; do not collect credentials or full configuration files.
 
-### Feature: Desktop Application Icons
+### Feature: Application Icons (Desktop + Android)
 
-Desktop platforms share the same cloud-and-drive brand artwork, while each platform packages it in the format and silhouette expected by its shell.
+All platforms share the same cloud-and-drive brand artwork, while each platform packages it in the format and silhouette expected by its shell.
 
 #### Key files
 
 - `assets/brand/yunjuan_app_icon.svg` - Editable brand artwork shared by the app icon family. It does not contain the platform-specific Windows corner mask.
-- `macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_1024.png` - Opaque 1024px raster used as the input for Windows icon generation; macOS applies its own displayed app-icon silhouette.
+- `macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_1024.png` - Opaque 1024px raster used as the input for Windows and Android icon generation; macOS applies its own displayed app-icon silhouette.
 - `scripts/generate_windows_app_icon.ps1` - Applies a transparent rounded-square mask with a default 22.5% radius, downsamples the masked master with high-quality filtering, and writes PNG-backed ICO layers at 16, 20, 24, 32, 40, 48, 64, 128, and 256px.
 - `windows/runner/resources/app_icon.ico` / `windows/runner/Runner.rc` - Generated Windows icon and the runner resource binding consumed by the launcher, Flutter app, taskbar, Start menu, and Explorer.
+- `scripts/generate_android_app_icon.ps1` - Generates the Android launcher icon family from the same 1024px master: legacy `ic_launcher.png` (square, full master downscaled) and `ic_launcher_round.png` (circular mask) at 48/72/96/144/192px for mdpi-xxxhdpi, plus `ic_launcher_foreground.png` adaptive layers at 108/162/216/324/432px. The foreground locates the non-white artwork bounding box via `LockBits` (channel threshold 245) and fits it inside the 66/108 adaptive safe zone, so the artwork scale matches the desktop composition.
+- `android/app/src/main/res/mipmap-*/` - Generated launcher PNGs (square + round + adaptive foreground per density).
+- `android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml` / `ic_launcher_round.xml` - Adaptive-icon definitions referencing `@color/ic_launcher_background` (white) and `@mipmap/ic_launcher_foreground`.
+- `android/app/src/main/res/values/ic_launcher_background.xml` - Solid-white adaptive background color matching the master's own canvas.
+- `android/app/src/main/AndroidManifest.xml` - `android:icon="@mipmap/ic_launcher"` plus `android:roundIcon="@mipmap/ic_launcher_round"`.
 
 #### Data flow
 
 1. Update the editable brand artwork and regenerate the macOS 1024px raster when the artwork itself changes.
 2. Run `powershell -ExecutionPolicy Bypass -File .\scripts\generate_windows_app_icon.ps1` from the repository root.
 3. Commit the regenerated `windows/runner/resources/app_icon.ico`; Windows resource compilation embeds it through `Runner.rc`.
+4. Run `powershell -ExecutionPolicy Bypass -File .\scripts\generate_android_app_icon.ps1` from the repository root, then commit the regenerated `mipmap-*` PNGs.
 
 #### Gotchas
 
 - The macOS 1024px PNG has opaque white corner pixels. Do not copy it directly into an ICO and expect Windows to apply the macOS silhouette; Windows needs real alpha in the rounded corners.
 - Keep the rounded mask in the generator rather than baking it into `yunjuan_app_icon.svg`, so macOS and other platforms retain control of their own presentation.
 - Keep the small ICO layers. A single 256px PNG forces Windows to rescale at runtime and makes the rounded silhouette and brand details less predictable at taskbar sizes.
+- `TextureBrush` samples images at native pixel scale. The Android round-icon mask must be applied to an already-resized square, never the 1024px master, or only its top-left corner is shown.
+- The adaptive foreground keeps only the inner ~66/108 of the canvas safe across launcher masks. Fitting the detected artwork bounding box into that zone reproduces the desktop composition scale; do not draw the full-bleed master into the foreground.
+- The brand master is a wide composition (artwork ≈667×441 of 1024²). Legacy Android icons intentionally keep the full square with its white margins, matching Windows/macOS presentation.
 
 ### Feature: Desktop Window Close / Tray Exit
 
@@ -834,11 +871,18 @@ Accounts are multi-profile configs, not a separate "account" table. There is **n
 - `go/s3/transfer_monitor.go` — `TransferSnapshot` struct (:15) JSON: `id,type,bucket,key,localPath,targetPath,status,statusDetail,createdAt,bytesCompleted,totalBytes,itemsCompleted,totalItems,currentFileKey,currentFileBytesCompleted,currentFileTotalBytes,speedBytes,error`. `startTransfer` (:54) sets status running + TotalBytes (default StatusDetail "uploading"); `advanceTransfer` (:246) adds bytes + computes `speedBytes = completed/elapsed`; also `AddTransferTotal`/`AddTransferItems`/`AdvanceTransferItems`, `finishTransfer` (:263; when TotalBytes>0 sets completed=total). Exposed via bridge `list_transfer_jobs` (`bridge/dispatch.go:98`, handler :394 -> `s3ops.ListTransferSnapshots()` recent-first :330) and `go/webapi/invoke.go:316`.
 - `lib/state/transfer_queue_*.dart` — Split concerns: metrics, sync, local progress, foreground, storage, directory children.
 - `go/s3/transfer_history.go` — `ForgetTerminalTransfers` removes selected or scoped terminal runtime snapshots when explicit RemoteTask history cleanup runs; running snapshots are never forgotten.
-- `lib/pages/transfers_page.dart` / `lib/pages/transfers_page_remote.dart` — Transfers page showing effective `RemoteTask` operations grouped by active/waiting/attention/history; raw journal events and physical phases expand from `RemoteTaskRow`. The legacy `TransferTaskRow` implementation remains unreferenced compatibility code and is not a display path.
+- `lib/pages/transfers_page.dart` / `lib/pages/transfers_page_remote.dart` — Transfers page showing effective `RemoteTask` operations grouped by active/waiting/attention/history; raw journal events and physical phases expand from `RemoteTaskRow`. The legacy `TransferTaskRow` implementation remains unreferenced compatibility code and is not a display path. Desktop keeps the upstream header (title always visible, queue tabs, section headers). Android (`_androidCompactQueueHeader`, `defaultTargetPlatform == TargetPlatform.android`) adapts the narrow screen: hides the queue-tab row and list section headers, swaps the selected-state title slot for 「已选 N 项」, keeps only 「清理历史」 among selection buttons (row-level icon actions cover 立即执行/取消), and hides queue-level buttons while selected. `lib/pages/global_trash_page_view.dart` hides 「回收站」 text-only (spacer kept) when entries are selected, Android-only. `transfers_page_remote_filters.dart` stacks the search input above both filter dropdowns on Android. `remote_task_store_polling.dart` auto-reloads the first history page on Android when an active poll reports history growth; after the 2026-08-29 merge with the task-queue redesign, Android **also** renders the in-list `_RemoteHistoryPager` (list last row) as the explicit load-more entry — the auto-reload only refreshes the first page so finished downloads surface without paging (desktop keeps cursor-invalidation-only semantics).
 - `lib/widgets/batch_task_progress_dialog.dart` — Modal progress for foreground batches (upload/download/delete). Summary `LinearProgressIndicator(value: progress)` (:232-242) with `progress = completedBytes/totalBytes` when any task has `totalBytes>0`, else `1.0` when all finished, else `null` = indeterminate (:44-68). Per-row determinate bar only when `currentFileTotalBytes>0` (:366-382). `_modeForTasks` returns `BatchTaskProgressMode.delete` when all tasks are deletes (:152); copy/icon in `lib/widgets/batch_task_progress_mode.dart`.
 
 #### Gotchas
 
+- One operation must map to exactly one visible row. The ID chain is: Dart `TransferQueue.startTask` id → bridge `upload_file` `taskId` → Go `startTransfer` (same id) → runtime wire `"transfer:<id>"` (`go/webapi/remote_task_runtime_wire.go`, `bridge/dispatch_remote_tasks.go`), which is also the key Dart uses in `_publishRemoteTask`. Metadata-worker physical snapshots use `metadata-op-*` ids and are **filtered** from both the legacy queue (`transfer_queue_snapshots.dart`) and both `list_remote_tasks` projections (FFI `bridge/dispatch_remote_tasks.go`, Web `go/webapi/remote_tasks.go`); their progress is embedded in the durable `sync:*` row instead. Breaking any of these (new ID prefix, unfiltered projection, publishing local rows for metadata mutations) reintroduces the "two rows for one upload, one with bytes one without" bug seen on the pre-merge Android build.
+- Page mutations on metadata buckets call `startTask(publishRemoteTask: false)`; the local row then exists only as an execution projection for the progress dialog and must never enter `RemoteTaskStore.tasks`.
+- Restart discards persisted `transfer_queue.tasks.v2` payloads outright (`transfer_queue_storage.dart`): a Dart producer cannot survive process exit, and restoring it would create rows with no backend peer.
+- Downloads have **no journal counterpart** (reads are not mutations). Their terminal visibility depends entirely on the Go runtime snapshot row plus the history auto-reload on queue growth — never set `publishRemoteTask: false` for downloads, and do not remove that auto-reload without another way to surface finished downloads.
+- Selected-state header titles are hidden by swapping the `Text` for `SizedBox.shrink` **inside the same `Expanded`**. Do not also remove the spacer/`SizedBox` separators — that shifts the action buttons to the left edge and reads as an unrelated layout change.
+- **PR #5 merge (2026-08-29) SDK/toolchain constraints:** `ReorderableListView`'s `onReorderItem` parameter exists only on Flutter 3.47+; the canonical macOS toolchain is 3.41.6 (`/Users/3000y/development/flutter_3.41.6`, used by `make run`), so `cloud_storage_account_list.dart` and `file_manager_bucket_browser.dart` must keep the classic `onReorder` callback until the toolchain upgrade. Re-adding `onReorderItem` breaks `flutter analyze` locally. `pubspec.lock` is resolved under 3.41.6 after this merge; a 3.47 machine may keep these pins.
+- **Test binding platform default:** widget tests default `defaultTargetPlatform` to **android**, which trips `_androidCompactQueueHeader` in tests that pin desktop header behavior. Pin the platform explicitly via `debugDefaultTargetPlatformOverride` and reset it inside the test body (`try/finally`) — the binding's foundation invariant check runs **before** `addTearDown` callbacks, so `addTearDown`-based resets fail the test. Canonical examples: `transfers_page_batch_actions_test.dart` `batch cancel from header...` (macOS) and `android compact header swaps title and hides batch cancel` (android).
 - A task with `totalBytes==0` renders indeterminate (modal) or plain "删除中" text (transfers row); setting `totalBytes>0` via `startTransfer`/`AddTransferTotal` + `advanceTransfer` immediately turns the modal summary bar and transfers subtitle into real percentage/bytes — no UI change needed.
 - Successful local completion must normalize both progress dimensions: Go `finishTransfer` already sets `BytesCompleted = TotalBytes` and `ItemsCompleted = TotalItems` before the bridge returns, and Flutter `TransferQueue.markTaskDone` mirrors that invariant immediately. Without the item normalization, the last-polled count (for example `10 / 20`) could remain visible after the status changed to `done` until idle polling refreshed the authoritative snapshot about 2 seconds later.
 

@@ -1,5 +1,6 @@
 // 首次启动配置页：协议选择 → 全屏账号表单；步骤切换只做轻量宽度/淡入动画。
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:remote_storage/models/bootstrap_state.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
@@ -77,7 +78,7 @@ class _ConfigSetupPageState extends State<ConfigSetupPage> {
   bool _isSaving = false;
   String? _errorText;
 
-    void _updateState(VoidCallback action) => setState(action);
+  void _updateState(VoidCallback action) => setState(action);
 
   @override
   void initState() {
@@ -97,7 +98,7 @@ class _ConfigSetupPageState extends State<ConfigSetupPage> {
           ? 'FTP'
           : 'S3',
     );
-        _mappedBucketNameController = TextEditingController(
+    _mappedBucketNameController = TextEditingController(
       text: config.mappedBucketName.trim().isNotEmpty
           ? config.mappedBucketName
           : config.storageType == StorageType.webdav
@@ -157,7 +158,7 @@ class _ConfigSetupPageState extends State<ConfigSetupPage> {
   void _selectStorageType(StorageType type) {
     setState(() {
       _storageType = type;
-            if (type == StorageType.baiduPan ||
+      if (type == StorageType.baiduPan ||
           _isPresetEndpoint(_endpointController.text)) {
         _endpointController.text = _defaultEndpointFor(type);
       }
@@ -259,7 +260,7 @@ class _ConfigSetupPageState extends State<ConfigSetupPage> {
       cacheDirectory: widget.initialState.config.cacheDirectory,
       resolvedCacheDirectory: widget.initialState.config.resolvedCacheDirectory,
       hideDotFiles: widget.initialState.config.hideDotFiles,
-            fileOpenMode: FileOpenMode.singleClick,
+      fileOpenMode: FileOpenMode.singleClick,
       trashDirectoryName: widget.initialState.config.trashDirectoryName,
       trashRetentionDays: widget.initialState.config.trashRetentionDays,
       bucketSettings: widget.initialState.config.bucketSettings,
@@ -326,7 +327,7 @@ class _ConfigSetupPageState extends State<ConfigSetupPage> {
 
   void _goToAccountForm() {
     if (_isSaving || _step == _SetupStep.accountForm) return;
-        if (_isPresetEndpoint(_endpointController.text)) {
+    if (_isPresetEndpoint(_endpointController.text)) {
       _endpointController.text = _defaultEndpointFor(_storageType);
     }
     setState(() {
@@ -346,116 +347,202 @@ class _ConfigSetupPageState extends State<ConfigSetupPage> {
   @override
   Widget build(BuildContext context) {
     final isAccountForm = _step == _SetupStep.accountForm;
+    final isAndroid = defaultTargetPlatform == TargetPlatform.android;
     return Scaffold(
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-                    final brandWidth = constraints.maxWidth * 0.5;
-          return Row(
-            children: [
-              TweenAnimationBuilder<double>(
-                duration: _kStepAnimDuration,
-                curve: Curves.easeOutCubic,
-                tween: Tween<double>(end: isAccountForm ? 0 : 1),
-                builder: (context, factor, child) {
-                  return ClipRect(
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      widthFactor: factor.clamp(0.0, 1.0),
-                      child: child,
-                    ),
-                  );
-                },
-                child: SizedBox(
-                  width: brandWidth,
-                  child: ConfigLeftPanel(
-                    configPath: widget.initialState.configPath,
-                  ),
-                ),
-              ),
-              Expanded(
-                child: AnimatedSwitcher(
-                  duration: _kStepAnimDuration,
-                  switchInCurve: Curves.easeOut,
-                  switchOutCurve: Curves.easeIn,
-                                    transitionBuilder: (child, animation) {
-                    return FadeTransition(opacity: animation, child: child);
-                  },
-                  layoutBuilder: (currentChild, _) {
-                    return currentChild ?? const SizedBox.shrink();
-                  },
-                  child: isAccountForm
-                      ? ConfigRightFormPanel(
-                          key: const ValueKey('setup-account-form'),
-                          storageType: _storageType,
-                          fullWidth: true,
-                          nameController: _nameController,
-                          mappedBucketNameController:
-                              _mappedBucketNameController,
-                          onNameChanged: _syncMappedBucketNameFromName,
-                          onMappedBucketNameChanged: (_) {
-                            _mappedBucketNameEdited = true;
-                          },
-                          endpointController: _endpointController,
-                          regionController: _regionController,
-                          accessKeyController: _accessKeyController,
-                          secretKeyController: _secretKeyController,
-                          hasStoredSecretKey:
-                              widget.initialState.config.hasSecretAccessKey,
-                          webdavUsernameController: _webdavUsernameController,
-                          webdavPasswordController: _webdavPasswordController,
-                          ftpUsernameController: _ftpUsernameController,
-                          ftpPasswordController: _ftpPasswordController,
-                          ftpPortController: _ftpPortController,
-                          ftpAnonymous: false,
-                          hasStoredFtpPassword:
-                              widget.initialState.config.hasFtpPassword,
-                          hasStoredWebdavPassword:
-                              widget.initialState.config.hasWebdavPassword,
-                          onFieldsChanged: () => setState(() {}),
-                          baiduPanAuthorized:
-                              _authorizedBaiduConfig?.hasSecretAccessKey ==
-                                  true &&
-                              _authorizedBaiduConfig?.accessKeyId
-                                      .trim()
-                                      .isNotEmpty ==
-                                  true,
-                          baiduPanAccountLabel:
-                              _authorizedBaiduConfig?.displayName
-                                      .trim()
-                                      .isNotEmpty ==
-                                  true
-                              ? _authorizedBaiduConfig!.displayName
-                              : _nameController.text.trim(),
-                          baiduPanCodeController: _baiduAuthCodeController,
-                          baiduPanAuthUrl: _baiduAuthUrl,
-                          baiduPanOpeningBrowser: _openingBaiduAuthPage,
-                          baiduPanAuthorizing: _authorizingBaidu,
-                          onStartBaiduPanAuthorization:
-                              _startBaiduPanAuthorization,
-                          onAuthorizeBaiduPan: _authorizeBaiduPan,
-                          usePathStyle: _usePathStyle,
-                          onPathStyleChanged: (v) =>
-                              setState(() => _usePathStyle = v),
-                          jwanfsGatewayMode: _jwanfsGatewayMode,
-                          onJWanFSGatewayModeChanged: (v) =>
-                              setState(() => _jwanfsGatewayMode = v),
-                          isSaving: _isSaving,
-                          errorText: _errorText,
-                          onSave: _save,
-                          onBack: _goBackToChooseType,
-                        )
-                      : ConfigStorageTypeStep(
-                          key: const ValueKey('setup-choose-type'),
-                          selectedType: _storageType,
-                          onTypeChanged: _selectStorageType,
-                          onNext: _goToAccountForm,
-                          onRestoreFromBackup: _openRestoreFromBackup,
+      body: isAndroid
+          ? _buildAndroidBody(isAccountForm)
+          : LayoutBuilder(
+              builder: (context, constraints) {
+                final brandWidth = constraints.maxWidth * 0.5;
+                return Row(
+                  children: [
+                    TweenAnimationBuilder<double>(
+                      duration: _kStepAnimDuration,
+                      curve: Curves.easeOutCubic,
+                      tween: Tween<double>(end: isAccountForm ? 0 : 1),
+                      builder: (context, factor, child) {
+                        return ClipRect(
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            widthFactor: factor.clamp(0.0, 1.0),
+                            child: child,
+                          ),
+                        );
+                      },
+                      child: SizedBox(
+                        width: brandWidth,
+                        child: ConfigLeftPanel(
+                          configPath: widget.initialState.configPath,
                         ),
-                ),
-              ),
-            ],
-          );
+                      ),
+                    ),
+                    Expanded(
+                      child: AnimatedSwitcher(
+                        duration: _kStepAnimDuration,
+                        switchInCurve: Curves.easeOut,
+                        switchOutCurve: Curves.easeIn,
+                        transitionBuilder: (child, animation) {
+                          return FadeTransition(
+                            opacity: animation,
+                            child: child,
+                          );
+                        },
+                        layoutBuilder: (currentChild, _) {
+                          return currentChild ?? const SizedBox.shrink();
+                        },
+                        child: isAccountForm
+                            ? ConfigRightFormPanel(
+                                key: const ValueKey('setup-account-form'),
+                                storageType: _storageType,
+                                fullWidth: true,
+                                nameController: _nameController,
+                                mappedBucketNameController:
+                                    _mappedBucketNameController,
+                                onNameChanged: _syncMappedBucketNameFromName,
+                                onMappedBucketNameChanged: (_) {
+                                  _mappedBucketNameEdited = true;
+                                },
+                                endpointController: _endpointController,
+                                regionController: _regionController,
+                                accessKeyController: _accessKeyController,
+                                secretKeyController: _secretKeyController,
+                                hasStoredSecretKey: widget
+                                    .initialState
+                                    .config
+                                    .hasSecretAccessKey,
+                                webdavUsernameController:
+                                    _webdavUsernameController,
+                                webdavPasswordController:
+                                    _webdavPasswordController,
+                                ftpUsernameController: _ftpUsernameController,
+                                ftpPasswordController: _ftpPasswordController,
+                                ftpPortController: _ftpPortController,
+                                ftpAnonymous: false,
+                                hasStoredFtpPassword:
+                                    widget.initialState.config.hasFtpPassword,
+                                hasStoredWebdavPassword: widget
+                                    .initialState
+                                    .config
+                                    .hasWebdavPassword,
+                                onFieldsChanged: () => setState(() {}),
+                                baiduPanAuthorized:
+                                    _authorizedBaiduConfig
+                                            ?.hasSecretAccessKey ==
+                                        true &&
+                                    _authorizedBaiduConfig?.accessKeyId
+                                            .trim()
+                                            .isNotEmpty ==
+                                        true,
+                                baiduPanAccountLabel:
+                                    _authorizedBaiduConfig?.displayName
+                                            .trim()
+                                            .isNotEmpty ==
+                                        true
+                                    ? _authorizedBaiduConfig!.displayName
+                                    : _nameController.text.trim(),
+                                baiduPanCodeController:
+                                    _baiduAuthCodeController,
+                                baiduPanAuthUrl: _baiduAuthUrl,
+                                baiduPanOpeningBrowser: _openingBaiduAuthPage,
+                                baiduPanAuthorizing: _authorizingBaidu,
+                                onStartBaiduPanAuthorization:
+                                    _startBaiduPanAuthorization,
+                                onAuthorizeBaiduPan: _authorizeBaiduPan,
+                                usePathStyle: _usePathStyle,
+                                onPathStyleChanged: (v) =>
+                                    setState(() => _usePathStyle = v),
+                                jwanfsGatewayMode: _jwanfsGatewayMode,
+                                onJWanFSGatewayModeChanged: (v) =>
+                                    setState(() => _jwanfsGatewayMode = v),
+                                isSaving: _isSaving,
+                                errorText: _errorText,
+                                onSave: _save,
+                                onBack: _goBackToChooseType,
+                              )
+                            : ConfigStorageTypeStep(
+                                key: const ValueKey('setup-choose-type'),
+                                selectedType: _storageType,
+                                onTypeChanged: _selectStorageType,
+                                onNext: _goToAccountForm,
+                                onRestoreFromBackup: _openRestoreFromBackup,
+                              ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+    );
+  }
+
+  Widget _buildAndroidBody(bool isAccountForm) {
+    return SafeArea(
+      child: AnimatedSwitcher(
+        duration: _kStepAnimDuration,
+        switchInCurve: Curves.easeOut,
+        switchOutCurve: Curves.easeIn,
+        transitionBuilder: (child, animation) {
+          return FadeTransition(opacity: animation, child: child);
         },
+        child: isAccountForm
+            ? ConfigRightFormPanel(
+                key: const ValueKey('setup-account-form-mobile'),
+                storageType: _storageType,
+                fullWidth: true,
+                nameController: _nameController,
+                mappedBucketNameController: _mappedBucketNameController,
+                onNameChanged: _syncMappedBucketNameFromName,
+                onMappedBucketNameChanged: (_) {
+                  _mappedBucketNameEdited = true;
+                },
+                endpointController: _endpointController,
+                regionController: _regionController,
+                accessKeyController: _accessKeyController,
+                secretKeyController: _secretKeyController,
+                hasStoredSecretKey:
+                    widget.initialState.config.hasSecretAccessKey,
+                webdavUsernameController: _webdavUsernameController,
+                webdavPasswordController: _webdavPasswordController,
+                ftpUsernameController: _ftpUsernameController,
+                ftpPasswordController: _ftpPasswordController,
+                ftpPortController: _ftpPortController,
+                ftpAnonymous: false,
+                hasStoredFtpPassword: widget.initialState.config.hasFtpPassword,
+                hasStoredWebdavPassword:
+                    widget.initialState.config.hasWebdavPassword,
+                onFieldsChanged: () => setState(() {}),
+                baiduPanAuthorized:
+                    _authorizedBaiduConfig?.hasSecretAccessKey == true &&
+                    _authorizedBaiduConfig?.accessKeyId.trim().isNotEmpty ==
+                        true,
+                baiduPanAccountLabel:
+                    _authorizedBaiduConfig?.displayName.trim().isNotEmpty ==
+                        true
+                    ? _authorizedBaiduConfig!.displayName
+                    : _nameController.text.trim(),
+                baiduPanCodeController: _baiduAuthCodeController,
+                baiduPanAuthUrl: _baiduAuthUrl,
+                baiduPanOpeningBrowser: _openingBaiduAuthPage,
+                baiduPanAuthorizing: _authorizingBaidu,
+                onStartBaiduPanAuthorization: _startBaiduPanAuthorization,
+                onAuthorizeBaiduPan: _authorizeBaiduPan,
+                usePathStyle: _usePathStyle,
+                onPathStyleChanged: (v) => setState(() => _usePathStyle = v),
+                jwanfsGatewayMode: _jwanfsGatewayMode,
+                onJWanFSGatewayModeChanged: (v) =>
+                    setState(() => _jwanfsGatewayMode = v),
+                isSaving: _isSaving,
+                errorText: _errorText,
+                onSave: _save,
+                onBack: _goBackToChooseType,
+              )
+            : ConfigStorageTypeStep(
+                key: const ValueKey('setup-choose-type-mobile'),
+                selectedType: _storageType,
+                onTypeChanged: _selectStorageType,
+                onNext: _goToAccountForm,
+                onRestoreFromBackup: _openRestoreFromBackup,
+              ),
       ),
     );
   }
@@ -488,4 +575,3 @@ class _RestoreSnapshotTile extends StatefulWidget {
   @override
   State<_RestoreSnapshotTile> createState() => _RestoreSnapshotTileState();
 }
-

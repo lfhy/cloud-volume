@@ -21,6 +21,8 @@ func invokeBridgeMethod(method string, args json.RawMessage) (any, error) {
 	startTaskDebugListener()
 
 	switch method {
+	case "set_app_data_root":
+		return setAppDataRoot(args)
 	case "get_build_info":
 		return getBuildInfo()
 	case "resolve_system_proxy":

@@ -19,6 +19,7 @@ class CloudStorageAccountList extends StatelessWidget {
     super.key,
     required this.accounts,
     required this.isGrid,
+    this.mobileLayout = false,
     required this.busy,
     required this.onEdit,
     required this.onDelete,
@@ -31,14 +32,18 @@ class CloudStorageAccountList extends StatelessWidget {
 
   final List<ProfileInfo> accounts;
   final bool isGrid;
+  final bool mobileLayout;
   final bool busy;
   final ValueChanged<ProfileInfo> onEdit;
   final ValueChanged<ProfileInfo> onDelete;
   final ValueChanged<ProfileInfo> onManageBuckets;
+
   /// (profile, disabled) — disabled=true means the user turned the account OFF.
   final void Function(ProfileInfo profile, bool disabled) onToggleDisabled;
+
   /// Per-profile connection status (keyed by profile name) for the status column.
   final Map<String, AccountStatus> status;
+
   /// Optional human-readable error message for accounts in [AccountStatus.error].
   final Map<String, String> statusError;
   final void Function(int oldIndex, int newIndex)? onReorder;
@@ -54,8 +59,31 @@ class CloudStorageAccountList extends StatelessWidget {
         ),
       );
     }
+    if (mobileLayout) return _buildMobileList(context);
     if (isGrid) return _buildGrid(context);
     return _buildTable(context);
+  }
+
+  Widget _buildMobileList(BuildContext context) {
+    return ListView.separated(
+      padding: const EdgeInsets.only(bottom: 12),
+      itemCount: accounts.length,
+      separatorBuilder: (context, index) => const SizedBox(height: 12),
+      itemBuilder: (context, index) {
+        final profile = accounts[index];
+        return _AccountCard(
+          profile: profile,
+          busy: busy,
+          onEdit: onEdit,
+          onDelete: onDelete,
+          onManageBuckets: onManageBuckets,
+          onToggleDisabled: onToggleDisabled,
+          status: status[profile.name] ?? AccountStatus.checking,
+          statusError: statusError[profile.name],
+          mobileLayout: true,
+        );
+      },
+    );
   }
 
   Widget _buildGrid(BuildContext context) {
@@ -101,6 +129,8 @@ class CloudStorageAccountList extends StatelessWidget {
                 ? ReorderableListView.builder(
                     buildDefaultDragHandles: false,
                     itemCount: accounts.length,
+                    // Classic onReorder API keeps this building on Flutter
+                    // 3.41; onReorderItem exists only on 3.47+.
                     onReorder: onReorder!,
                     proxyDecorator: (child, index, animation) {
                       return Material(
@@ -190,7 +220,7 @@ class CloudStorageAccountList extends StatelessWidget {
 }
 
 class _AccountCard extends StatelessWidget {
- const _AccountCard({
+  const _AccountCard({
     required this.profile,
     required this.busy,
     required this.onEdit,
@@ -199,22 +229,24 @@ class _AccountCard extends StatelessWidget {
     required this.onToggleDisabled,
     required this.status,
     required this.statusError,
- });
+    this.mobileLayout = false,
+  });
 
- final ProfileInfo profile;
- final bool busy;
- final ValueChanged<ProfileInfo> onEdit;
- final ValueChanged<ProfileInfo> onDelete;
- final ValueChanged<ProfileInfo> onManageBuckets;
- final void Function(ProfileInfo profile, bool disabled) onToggleDisabled;
- final AccountStatus status;
- final String? statusError;
+  final ProfileInfo profile;
+  final bool busy;
+  final ValueChanged<ProfileInfo> onEdit;
+  final ValueChanged<ProfileInfo> onDelete;
+  final ValueChanged<ProfileInfo> onManageBuckets;
+  final void Function(ProfileInfo profile, bool disabled) onToggleDisabled;
+  final AccountStatus status;
+  final String? statusError;
+  final bool mobileLayout;
 
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final title = profile.disabled
-        ? '${CloudStorageAccountList._profileTitle(profile)}（已禁用）'
+        ? '${CloudStorageAccountList._profileTitle(profile)}?????'
         : CloudStorageAccountList._profileTitle(profile);
     return ShadCard(
       padding: const EdgeInsets.all(14),
@@ -260,36 +292,92 @@ class _AccountCard extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
-          const Spacer(),
-          Row(
-            children: [
-              ShadSwitch(
-                value: !profile.disabled,
-                onChanged: busy
-                    ? null
-                    : (enabled) => onToggleDisabled(profile, !enabled),
-              ),
-              const Spacer(),
-              _AccountActionButton(
-                label: '桶管理',
-                icon: LucideIcons.listFilter,
-                onPressed: busy ? null : () => onManageBuckets(profile),
-              ),
-              const SizedBox(width: 6),
-              _AccountActionButton(
-                label: '编辑',
-                icon: LucideIcons.pencil,
-                onPressed: busy ? null : () => onEdit(profile),
-              ),
-              const SizedBox(width: 6),
-              _AccountActionButton(
-                label: '退出',
-                icon: LucideIcons.logOut,
-                destructive: true,
-                onPressed: busy ? null : () => onDelete(profile),
-              ),
-            ],
-          ),
+          const SizedBox(height: 12),
+          if (mobileLayout)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    ShadSwitch(
+                      value: !profile.disabled,
+                      onChanged: busy
+                          ? null
+                          : (enabled) => onToggleDisabled(profile, !enabled),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        profile.disabled ? 'Disabled' : 'Enabled',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: theme.colorScheme.mutedForeground,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _AccountActionButton(
+                        label: 'Buckets',
+                        icon: LucideIcons.listFilter,
+                        onPressed: busy ? null : () => onManageBuckets(profile),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _AccountActionButton(
+                        label: 'Edit',
+                        icon: LucideIcons.pencil,
+                        onPressed: busy ? null : () => onEdit(profile),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _AccountActionButton(
+                        label: 'Remove',
+                        icon: LucideIcons.logOut,
+                        destructive: true,
+                        onPressed: busy ? null : () => onDelete(profile),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            )
+          else
+            Row(
+              children: [
+                ShadSwitch(
+                  value: !profile.disabled,
+                  onChanged: busy
+                      ? null
+                      : (enabled) => onToggleDisabled(profile, !enabled),
+                ),
+                const Spacer(),
+                _AccountActionButton(
+                  label: 'Buckets',
+                  icon: LucideIcons.listFilter,
+                  onPressed: busy ? null : () => onManageBuckets(profile),
+                ),
+                const SizedBox(width: 6),
+                _AccountActionButton(
+                  label: 'Edit',
+                  icon: LucideIcons.pencil,
+                  onPressed: busy ? null : () => onEdit(profile),
+                ),
+                const SizedBox(width: 6),
+                _AccountActionButton(
+                  label: 'Remove',
+                  icon: LucideIcons.logOut,
+                  destructive: true,
+                  onPressed: busy ? null : () => onDelete(profile),
+                ),
+              ],
+            ),
         ],
       ),
     );
@@ -338,7 +426,7 @@ class _AccountTableHeader extends StatelessWidget {
 }
 
 class _AccountActions extends StatelessWidget {
- const _AccountActions({
+  const _AccountActions({
     required this.profile,
     required this.busy,
     required this.onEdit,
@@ -347,19 +435,19 @@ class _AccountActions extends StatelessWidget {
     required this.onToggleDisabled,
     required this.status,
     required this.statusError,
- });
+  });
 
- final ProfileInfo profile;
- final bool busy;
- final ValueChanged<ProfileInfo> onEdit;
- final ValueChanged<ProfileInfo> onDelete;
- final ValueChanged<ProfileInfo> onManageBuckets;
- final void Function(ProfileInfo profile, bool disabled) onToggleDisabled;
- final AccountStatus status;
- final String? statusError;
+  final ProfileInfo profile;
+  final bool busy;
+  final ValueChanged<ProfileInfo> onEdit;
+  final ValueChanged<ProfileInfo> onDelete;
+  final ValueChanged<ProfileInfo> onManageBuckets;
+  final void Function(ProfileInfo profile, bool disabled) onToggleDisabled;
+  final AccountStatus status;
+  final String? statusError;
 
- @override
- Widget build(BuildContext context) {
+  @override
+  Widget build(BuildContext context) {
     return SizedBox(
       width: CloudStorageAccountList._actionColumnWidth,
       child: Row(
@@ -395,20 +483,20 @@ class _AccountActions extends StatelessWidget {
         ],
       ),
     );
- }
+  }
 }
 
 /// Status chip for the account-management status column. Shows a small dot +
 /// label. Uses mutedForeground colors so it never reads as a hover/theme change
 /// (per the hover visual rule, an idle column must look identical at hover).
 class _AccountStatusChip extends StatelessWidget {
- const _AccountStatusChip({required this.status, this.error});
+  const _AccountStatusChip({required this.status, this.error});
 
- final AccountStatus status;
- final String? error;
+  final AccountStatus status;
+  final String? error;
 
- @override
- Widget build(BuildContext context) {
+  @override
+  Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final (label, color) = switch (status) {
       AccountStatus.ok => ('正常', const Color(0xFF16A34A)),
@@ -442,14 +530,14 @@ class _AccountStatusChip extends StatelessWidget {
               color: status == AccountStatus.checking
                   ? theme.colorScheme.mutedForeground
                   : (status == AccountStatus.ok
-                      ? theme.colorScheme.foreground
-                      : color),
+                        ? theme.colorScheme.foreground
+                        : color),
             ),
           ),
         ],
       ),
     );
- }
+  }
 }
 
 class _AccountActionButton extends StatefulWidget {

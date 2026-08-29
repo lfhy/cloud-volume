@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:remote_storage/theme/list_interaction_colors.dart';
 import 'package:remote_storage/widgets/list_selection_controls.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:remote_storage/utils/display_name.dart';
 
 /// 文件管理页的列表项。
 class FileListTile extends StatefulWidget {
@@ -27,6 +28,7 @@ class FileListTile extends StatefulWidget {
     this.dimmed = false,
     this.trailing,
     this.sizeColumnWidthOverride = FileListTile.sizeColumnWidth,
+    this.compact = false,
   });
 
   static const double sizeColumnWidth = 96;
@@ -53,6 +55,7 @@ class FileListTile extends StatefulWidget {
   final bool dimmed;
   final Widget? trailing;
   final double sizeColumnWidthOverride;
+  final bool compact;
 
   @override
   State<FileListTile> createState() => _FileListTileState();
@@ -143,7 +146,11 @@ class _FileListTileState extends State<FileListTile> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          widget.title,
+                          // 名称截断仅用于紧凑（Android 窄屏）行；桌面端
+                          // 列表保持完整文件名。
+                          widget.compact
+                              ? compactDisplayName(widget.title)
+                              : widget.title,
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
@@ -164,12 +171,40 @@ class _FileListTileState extends State<FileListTile> {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ],
+                        if (widget.compact &&
+                            (widget.sizeLabel.isNotEmpty ||
+                                widget.modifiedLabel.isNotEmpty ||
+                                widget.statusWidget != null)) ...[
+                          const SizedBox(height: 3),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 2,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              if (widget.sizeLabel.isNotEmpty)
+                                Text(
+                                  widget.sizeLabel,
+                                  style: TextStyle(fontSize: 10.5, color: metaColor),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              if (widget.modifiedLabel.isNotEmpty)
+                                Text(
+                                  widget.modifiedLabel,
+                                  style: TextStyle(fontSize: 10.5, color: metaColor),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              if (widget.statusWidget != null) widget.statusWidget!,
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
                 ),
               ),
-              if (showSizeColumn) ...[
+              if (!widget.compact && showSizeColumn) ...[
                 const SizedBox(width: 12),
                 SizedBox(
                   width: widget.sizeColumnWidthOverride,
@@ -184,7 +219,7 @@ class _FileListTileState extends State<FileListTile> {
                       ),
                 ),
               ],
-              if (widget.statusWidget != null) ...[
+              if (!widget.compact && widget.statusWidget != null) ...[
                 const SizedBox(width: 16),
                 SizedBox(
                   width: FileListTile.statusColumnWidth,
@@ -194,10 +229,12 @@ class _FileListTileState extends State<FileListTile> {
                   ),
                 ),
               ],
-              const SizedBox(width: 16),
-              if (widget.trailing != null)
+              if (!widget.compact) const SizedBox(width: 16),
+              if (widget.compact && widget.trailing != null)
                 widget.trailing!
-              else
+              else if (!widget.compact && widget.trailing != null)
+                widget.trailing!
+              else if (!widget.compact)
                 SizedBox(
                   width: FileListTile.modifiedColumnWidth,
                   child: Text(
