@@ -349,7 +349,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('下载 root/charge.tar'), findsOneWidget);
+    expect(find.text('charge.tar'), findsOneWidget);
     expect(find.textContaining('读取范围 bytes=1048576-1572863'), findsOneWidget);
     expect(find.text('下载 bytes=1048576-1572863'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -399,7 +399,7 @@ void main() {
     expect(find.text('暂无任务'), findsNothing);
 
     expect(RemoteTaskStore.instance.tasks, hasLength(1));
-    expect(find.text('下载 retained.txt'), findsOneWidget);
+    expect(find.text('retained.txt'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
     RemoteTaskStore.instance.resetForTest();
   });

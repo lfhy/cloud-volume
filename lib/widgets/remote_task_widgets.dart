@@ -218,15 +218,15 @@ class _TaskText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    final action = remoteTaskKindLabel(task.kind);
-    final target = task.operationPath;
+    // Title shows only the entry name (icon chip carries the op type); the
+    // verb, full path, and bucket are detail-panel lines.
     final subtitle = remoteTaskSubtitle(task);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          target.isEmpty ? action : '$action $target',
+          remoteTaskEntryName(task),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
@@ -359,6 +359,12 @@ class _TaskDetails extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Op context moved out of the row title lives here.
+                    _detailLine(context, '操作', remoteTaskKindLabel(task.kind)),
+                    if (task.bucket.trim().isNotEmpty)
+                      _detailLine(context, '所属桶', task.bucket),
+                    if (task.operationPath.isNotEmpty)
+                      _detailLine(context, '完整路径', task.operationPath),
                     if (task.blockedReason.isNotEmpty)
                       _detailLine(
                         context,

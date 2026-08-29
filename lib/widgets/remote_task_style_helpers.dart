@@ -60,6 +60,19 @@ String remoteTaskSubtitle(RemoteTask task) {
   return task.phaseLabel.isNotEmpty ? task.phaseLabel : remoteTaskStatusLabel(task);
 }
 
+/// Row title: the entry name only (last non-empty path segment) so the row
+/// reads like a file listing; the full path/op/bucket live in the detail
+/// panel. Falls back to the kind label when the task has no name.
+String remoteTaskEntryName(RemoteTask task) {
+  final path = task.operationPath;
+  final trimmed = path.endsWith('/')
+      ? path.substring(0, path.length - 1)
+      : path;
+  final slash = trimmed.lastIndexOf('/');
+  final name = (slash >= 0 ? trimmed.substring(slash + 1) : trimmed).trim();
+  return name.isEmpty ? remoteTaskKindLabel(task.kind) : name;
+}
+
 String remoteTaskStatusLabel(RemoteTask task) => switch (task.status) {
   RemoteTaskStatus.waiting => '等待同步',
   RemoteTaskStatus.blocked => '等待依赖',
