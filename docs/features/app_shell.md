@@ -27,12 +27,16 @@
 
 ## 导航结构
 
-- `lib/pages/main_layout_page.dart` — 根布局与侧栏导航。路由:文件同步(`FileSyncTasksPage`)、文件管理(`FileManagerPage`)、传输(`TransfersPage`)、回收站(`GlobalTrashPage`)、分享管理(`ShareManagementPage`)、设置(`SettingsPage`)。侧栏 `_SidebarNavItem` 是 hover 正典(见 [ui_rules](ui_rules.md))。
-- `lib/theme/sidebar_palette.dart` — 桌面侧边栏的主题化调色板:渐变背景(bgTop/bgBottom)、muted 前景与装饰圆形都由 `ThemeController` 的强调色 lerp 派生;桌面渐变公式只有这一个家。安卓底栏不复用侧栏渐变,它以 `ShadTheme.colorScheme.background` 作纯主题背景,只把选中图标/文字设为强调色。
-- `lib/widgets/mobile_navigation_bar.dart` — 安卓底栏(取代 Material `NavigationBar`):纯 `ShadTheme` background 铺满物理底部(无渐变/装饰圆/胶囊),顶部一条全量 `colorScheme.border` 线与内容区分割(强度对齐参考设计 ≈ 白底 8% 黑),图标上文字下;选中态只有 `ThemeController` 强调色图标+文字和 w600,未选中 `mutedForeground`+w500。`MobileNavItem` 为泛型 value,不依赖页面层枚举;`test/mobile_navigation_bar_test.dart` 锁定无渐变、分割线、强调色选中、muted 未选中与点击回调。
-- `lib/pages/settings_page.dart` — 设置页,分组(通用设置、Windows 设置、关于)用**左垂直侧栏栏轨**(不是顶部 tab)。同步管理已从设置移除,完全在文件同步任务页;过期的 Windows「此电脑」条目卡与锚点已删除(`windowsThisPcEntryEnabled` 仅为兼容保留在配置模型)。
+- `lib/models/sidebar_item.dart` — `SidebarItem` 枚举(桌面侧栏与移动底栏/首页共用的单一事实来源,含移动端专属 `home`)+ `SidebarItemInfo` extension(icon / `desktopLabel` / `mobileLabel`)。
+- `lib/pages/main_layout_page.dart` — 根装配:桌面 `Row(DesktopSidebar + 内容)`;Android `PopScope + Scaffold(内容 + 底栏)`。内容是 `IndexedStack`(home 在索引 7)。`_selectItem` 是统一导航入口,移动端把访问记入 `TabNavHistory`。
+- `lib/widgets/desktop_sidebar.dart` — 桌面侧栏(品牌标识 + SidebarPalette 渐变 + 装饰圆 + 导航项 + 传输状态入口);`_SidebarNavItem` 是 hover 正典(见 [ui_rules](ui_rules.md)),桌面不显示 home。
+- `lib/widgets/mobile_navigation_bar.dart` — 安卓底栏(取代 Material `NavigationBar`):纯 `ShadTheme` background 铺满物理底部(无渐变/装饰圆/胶囊),顶部一条全量 `colorScheme.border` 线与内容区分割(强度对齐参考设计 ≈ 白底 8% 黑),图标上文字下;选中态只有 `ThemeController` 强调色图标+文字和 w600,未选中 `mutedForeground`+w500。`MobileNavItem` 为泛型 value;`test/mobile_navigation_bar_test.dart` 锁定无渐变、分割线、强调色选中、muted 未选中与点击回调。
+- `lib/state/mobile_nav_preferences.dart` — 底栏自定义配置(SharedPreferences key `mobile.bottom_bar_items`):可见项 + 顺序,默认 `文件·账号·首页·任务·回收站`;可选池 `kMobileBottomBarPool`(home/fileManager/storage/transfers/trash/settings);约束 2–5 项且 home/settings 至少其一(保底设置入口),解析损坏数据回退默认。设置页「底部导航」节(仅 Android)写入,main_layout 监听重建。`test/mobile_nav_preferences_test.dart` 锁定默认/往返/容错/约束。
+- `lib/pages/mobile_home_page.dart` — 移动端首页(home tab):问候 + 账号概览、任务状态卡(进行中数 + 聚合速度,数据来自 `RemoteTaskStore`)、快捷入口 2×2(文件/账号/回收站/**设置**——底栏默认不含设置,首页是保底入口)、最近任务前 3 条。`test/mobile_home_page_test.dart` 锁定布局与导航回调。
+- `lib/state/tab_nav_history.dart` — 移动端 tab 访问历史(纯逻辑):安卓返回键经 `PopScope` 回退上一个 tab(`back(visible:)` 跳过已从底栏移除的项),历史耗尽才允许退出应用。`test/tab_nav_history_test.dart` 锁定语义。
+- `lib/pages/settings_page.dart` — 设置页,分组(通用设置、Windows 设置、关于)用**左垂直侧栏栏轨**(不是顶部 tab);「底部导航」卡(常规组,仅 Android)自定义底栏。同步管理已从设置移除,完全在文件同步任务页;过期的 Windows「此电脑」条目卡与锚点已删除(`windowsThisPcEntryEnabled` 仅为兼容保留在配置模型)。
 
-**Known P2/P3 (review 2026-08-29):** 首版评审的 P2(渐变未铺满物理底部)与 P3(圆角不一致、Semantics label 连读)已随用户反馈的定稿重设计一并解决(定稿无渐变、无胶囊;Semantics 不带 label 让 Text 自报)。定稿版评审又发现并同批修复:P2 定稿去掉胶囊后触控目标回落到 42dp(<48dp,相对胶囊版是回归)——GestureDetector 内加 `minHeight: 48` 约束;P2 `main_layout_page` 与 `sidebar_palette` 注释仍描述共享渐变(已改为现状);P3 选中判断重复(合并为局部变量)。有意行为(不改):底栏 `selectedValue` 无匹配项(如分享页被选中)时全部项不高亮——旧 Material 实现会错误高亮「文件」;测试的无渐变断言扫描整棵 pumped 树,shadcn 内部若引入装饰渐变需收窄 finder。
+**Known P2/P3 (review 2026-08-29):** 底栏视觉两轮评审的 P2(分割线未铺满物理底部、去胶囊后触控目标回落 42dp)与 P3(圆角不一致、Semantics label 连读)已随定稿重设计解决(无渐变、无胶囊;全量 border 分割线;GestureDetector 内 `minHeight: 48`)。移动导航重构评审发现并同批修复:P0 返回键死锁(栈底项被移出底栏后 `back()` 永不弹空且 `canPop` 不重算——`back` 增加整条历史不可见时 reset(current) 语义,PopScope null 分支补 setState)、P1 设置节第 6 项静默截断(save 超限显式报错 + 设置节监听偏好异步 load 同步本地副本)、P2 ui_rules 正典指针未随 `_SidebarNavItem` 迁移更新。有意行为(不改):底栏 `selectedValue` 无匹配项时全部项不高亮;测试的无渐变断言扫描整棵 pumped 树,shadcn 内部若引入装饰渐变需收窄 finder。延后:MobileHomePage 常驻 IndexedStack 的离台 RemoteTaskStore 监听无 `active:` 门控(小 widget 成本可忽略,与 TransfersPage 惯例不同)。
 
 ## 应用图标(桌面 + Android)
 

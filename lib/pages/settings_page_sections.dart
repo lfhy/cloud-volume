@@ -62,6 +62,14 @@ extension _SettingsSections on _SettingsPageState {
     return [_buildCard(theme, '外观', const ThemePicker())];
   }
 
+  // ---- 移动端专属 group ----
+
+  List<Widget> _buildMobileNavSection(ShadThemeData theme) {
+    return [
+      _buildCard(theme, '底部导航', SettingsMobileNavSection(theme: theme)),
+    ];
+  }
+
   // ---- P2P group ----
 
   List<Widget> _buildP2PSection(

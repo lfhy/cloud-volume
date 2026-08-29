@@ -37,7 +37,7 @@ Hover 是**轻微的状态变化**,不是换一套组件皮肤。硬规则:指�
 
 **可参考的正典实现:**
 - `lib/theme/list_interaction_colors.dart` — 共享 hover/selected 洗色。
-- `lib/pages/main_layout_page.dart` `_SidebarNavItem` — 侧栏导航项。
+- `lib/widgets/desktop_sidebar.dart` `_SidebarNavItem` — 侧栏导航项。
 - `lib/widgets/file_list_tile.dart` — 文件管理行(`dimmed` 禁用 hover)。
 - `lib/widgets/transfer_task_widgets.dart` — 传输队列行。
 - `lib/pages/settings_page_layout.dart` `_SettingsGroupTile` — 设置左栏条目。

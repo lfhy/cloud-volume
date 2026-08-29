@@ -24,6 +24,9 @@ extension _SettingsLayout on _SettingsPageState {
           _SettingsTab.update,
           _SettingsTab.appearance,
           _SettingsTab.logging,
+          // 移动端专属:底部导航自定义(仅 Android)。
+          if (defaultTargetPlatform == TargetPlatform.android)
+            _SettingsTab.mobileNav,
         ],
       ),
       _SettingsRailGroup(
@@ -120,6 +123,7 @@ extension _SettingsLayout on _SettingsPageState {
   String _tabLabel(_SettingsTab tab) {
     return switch (tab) {
       _SettingsTab.update => '应用更新',
+      _SettingsTab.mobileNav => '底部导航',
       _SettingsTab.proxy => '网络代理',
       _SettingsTab.appearance => '外观',
       _SettingsTab.logging => '日志设置',
@@ -176,6 +180,8 @@ extension _SettingsLayout on _SettingsPageState {
         return _buildProxySection(theme, config);
       case _SettingsTab.appearance:
         return _buildAppearanceSection(theme);
+      case _SettingsTab.mobileNav:
+        return _buildMobileNavSection(theme);
       case _SettingsTab.logging:
         return _buildLogSection(theme);
       case _SettingsTab.download:
@@ -224,7 +230,7 @@ extension _SettingsLayout on _SettingsPageState {
 /// Self-contained hover-aware navigation tile for the settings group rail.
 ///
 /// Hover handling follows the project-wide pattern (see `_SidebarNavItem` in
-/// main_layout_page.dart): a StatefulWidget holds a `_hovered` flag that is
+/// desktop_sidebar.dart): a StatefulWidget holds a `_hovered` flag that is
 /// toggled by [MouseRegion.onEnter] / [MouseRegion.onExit] and drives
 /// background color, text color, and cursor via an [AnimatedContainer].
 ///

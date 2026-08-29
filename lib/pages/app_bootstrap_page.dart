@@ -9,6 +9,7 @@ import 'package:remote_storage/services/cache_maintenance_service.dart';
 import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:remote_storage/models/auth_session_state.dart';
 import 'package:remote_storage/models/bootstrap_state.dart';
+import 'package:remote_storage/models/sidebar_item.dart';
 import 'package:remote_storage/pages/config_setup_page.dart';
 import 'package:remote_storage/pages/login_page.dart';
 import 'package:remote_storage/pages/main_layout_page.dart';

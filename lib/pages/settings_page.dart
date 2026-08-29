@@ -22,6 +22,7 @@ import 'package:remote_storage/widgets/settings_sections.dart'
 import 'package:remote_storage/widgets/settings_cache_section.dart';
 import 'package:remote_storage/widgets/settings_config_backup_section.dart';
 import 'package:remote_storage/widgets/settings_log_section.dart';
+import 'package:remote_storage/widgets/settings_mobile_nav_section.dart';
 import 'package:remote_storage/widgets/settings_p2p_section.dart';
 import 'package:remote_storage/widgets/settings_proxy_section.dart';
 import 'package:remote_storage/widgets/settings_sync_section.dart';
@@ -43,6 +44,8 @@ enum _SettingsTab {
   update,
   appearance,
   logging,
+  // 移动端专属 group: 底部导航(仅 Android 渲染)
+  mobileNav,
   // 网络 group: 代理、WebDAV 凭据
   proxy,
   webdav,
