@@ -82,7 +82,7 @@ class _MountBucketDialogState extends State<_MountBucketDialog> {
     final theme = ShadTheme.of(context);
     final requiresDriveLetter = _usesWinFsp;
     final usesPath = !requiresDriveLetter;
-    return ShadDialog(
+    return AppShadDialog(
       title: const Text('挂载存储桶'),
       description: Text('配置 ${widget.bucket} 的本地挂载。'),
       child: SizedBox(
@@ -179,30 +179,34 @@ class _MountBucketDialogState extends State<_MountBucketDialog> {
               ),
             ],
             const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                ShadButton.outline(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('取消'),
-                ),
-                const SizedBox(width: 10),
-                ShadButton(
-                  onPressed: _canSubmit
-                      ? () => Navigator.of(context).pop(
-                          MountBucketOptions(
-                            mountPath: usesPath ? _mountPath : '',
-                            readOnly: _readOnly,
-                            driveLetter: usesPath ? '' : _driveLetter ?? '',
-                            windowsMountEngine: widget.showWindowsMountMode
-                                ? _engine
-                                : null,
-                          ),
-                        )
-                      : null,
-                  child: const Text('开始挂载'),
-                ),
-              ],
+            SizedBox(
+              width: double.infinity,
+              child: Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  ShadButton.outline(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('取消'),
+                  ),
+                  ShadButton(
+                    onPressed: _canSubmit
+                        ? () => Navigator.of(context).pop(
+                            MountBucketOptions(
+                              mountPath: usesPath ? _mountPath : '',
+                              readOnly: _readOnly,
+                              driveLetter: usesPath ? '' : _driveLetter ?? '',
+                              windowsMountEngine: widget.showWindowsMountMode
+                                  ? _engine
+                                  : null,
+                            ),
+                          )
+                        : null,
+                    child: const Text('开始挂载'),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -331,7 +335,7 @@ Future<UnmountBucketChoice?> showUnmountBucketDialog(
   return showAppModal<UnmountBucketChoice?>(
     context: context,
     builder: (dialogContext) => StatefulBuilder(
-      builder: (context, setDialogState) => ShadDialog(
+      builder: (context, setDialogState) => AppShadDialog(
         title: const Text('卸载存储桶'),
         description: Text('即将卸载 $bucket。'),
         child: SizedBox(
@@ -352,21 +356,25 @@ Future<UnmountBucketChoice?> showUnmountBucketDialog(
                 ),
               ],
               const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  ShadButton.outline(
-                    onPressed: () => Navigator.of(dialogContext).pop(),
-                    child: const Text('取消'),
-                  ),
-                  const SizedBox(width: 10),
-                  ShadButton(
-                    onPressed: () => Navigator.of(dialogContext).pop(
-                      UnmountBucketChoice(removeLocalCache: removeLocalCache),
+              SizedBox(
+                width: double.infinity,
+                child: Wrap(
+                  alignment: WrapAlignment.end,
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    ShadButton.outline(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      child: const Text('取消'),
                     ),
-                    child: const Text('确认卸载'),
-                  ),
-                ],
+                    ShadButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(
+                        UnmountBucketChoice(removeLocalCache: removeLocalCache),
+                      ),
+                      child: const Text('确认卸载'),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),

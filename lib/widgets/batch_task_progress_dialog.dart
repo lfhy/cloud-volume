@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/models/remote_task_display.dart';
+import 'package:remote_storage/services/app_modal.dart';
 import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/utils/bridge_error_text.dart';
 import 'package:remote_storage/utils/transfer_format.dart';
@@ -94,7 +95,7 @@ class BatchTaskProgressDialog extends StatelessWidget {
                   ? onClose
                   : onRunInBackground,
             },
-            child: ShadDialog(
+            child: AppShadDialog(
               title: Text(
                 allFinished
                     ? resolvedMode.doneTitle
@@ -132,8 +133,10 @@ class BatchTaskProgressDialog extends StatelessWidget {
                     if (tasks.isNotEmpty)
                       _TaskList(tasks: tasks, mode: resolvedMode),
                     const SizedBox(height: 18),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
+                    Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: 10,
+                      runSpacing: 10,
                       children: [
                         if (allFinished)
                           ShadButton.outline(
@@ -146,7 +149,6 @@ class BatchTaskProgressDialog extends StatelessWidget {
                               onPressed: () => _cancelActiveTasks(tasks),
                               child: Text(resolvedMode.cancelLabel),
                             ),
-                          if (canCancel) const SizedBox(width: 10),
                           ShadButton(
                             onPressed: onRunInBackground,
                             child: const Text('后台运行'),

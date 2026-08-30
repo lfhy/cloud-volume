@@ -338,7 +338,7 @@ class ConfigRightFormPanel extends StatelessWidget {
     showAppModal(
       context: context,
       builder: (dialogContext) {
-        return ShadDialog(
+        return AppShadDialog(
           title: const Text('高级设置'),
           description: const Text('配置区域和连接选项。'),
           child: StatefulBuilder(
@@ -407,24 +407,28 @@ class ConfigRightFormPanel extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 20),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        ShadButton.outline(
-                          onPressed: () => Navigator.of(dialogContext).pop(),
-                          child: const Text('取消'),
-                        ),
-                        const SizedBox(width: 10),
-                        ShadButton(
-                          onPressed: () {
-                            regionController.text = rgCtrl.text;
-                            onPathStyleChanged(pathStyle);
-                            onJWanFSGatewayModeChanged(gatewayMode);
-                            Navigator.of(dialogContext).pop();
-                          },
-                          child: const Text('确认'),
-                        ),
-                      ],
+                    SizedBox(
+                      width: double.infinity,
+                      child: Wrap(
+                        alignment: WrapAlignment.end,
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          ShadButton.outline(
+                            onPressed: () => Navigator.of(dialogContext).pop(),
+                            child: const Text('取消'),
+                          ),
+                          ShadButton(
+                            onPressed: () {
+                              regionController.text = rgCtrl.text;
+                              onPathStyleChanged(pathStyle);
+                              onJWanFSGatewayModeChanged(gatewayMode);
+                              Navigator.of(dialogContext).pop();
+                            },
+                            child: const Text('确认'),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),

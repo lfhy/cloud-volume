@@ -226,41 +226,57 @@ class _RemoteDirectoryPickerDialogState
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
+    final fullscreen = widget.asDialog && usesFullscreenAppModal;
+    final compactFullscreen =
+        fullscreen && usesCompactFullscreenAppModal(context);
     final body = SizedBox(
       width: double.infinity,
-      height: widget.asDialog ? 480 : double.infinity,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (!widget.asDialog) ...[
-            Text(
-              _activeBucket == null ? '选择一个存储桶进入。' : '浏览目录后点击「选择当前目录」确认。',
-              style: TextStyle(
-                fontSize: 12,
-                color: theme.colorScheme.mutedForeground,
-              ),
-            ),
-            const SizedBox(height: 12),
-          ],
-          _buildBreadcrumbBar(theme),
-          const SizedBox(height: 8),
-          buildHiddenFilesToggle(theme),
-          const SizedBox(height: 8),
-          Expanded(child: _buildContent(theme)),
-          const SizedBox(height: 12),
-          buildCreateDirInput(theme),
-          _buildActions(),
-        ],
-      ),
+      height: widget.asDialog && !fullscreen
+          ? 480
+          : compactFullscreen
+          ? null
+          : double.infinity,
+      child: _buildPickerBody(theme, compactHeight: compactFullscreen),
     );
     if (!widget.asDialog) return body;
-    return ShadDialog(
+    return AppShadDialog(
       title: const Text('选择远端目录'),
       description: Text(
         _activeBucket == null ? '选择一个存储桶进入。' : '浏览目录后点击「选择当前目录」确认。',
       ),
       constraints: const BoxConstraints(maxWidth: 640),
+      scrollable: !fullscreen || compactFullscreen,
       child: body,
+    );
+  }
+
+  Widget _buildPickerBody(ShadThemeData theme, {required bool compactHeight}) {
+    return Column(
+      mainAxisSize: compactHeight ? MainAxisSize.min : MainAxisSize.max,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (!widget.asDialog) ...[
+          Text(
+            _activeBucket == null ? '选择一个存储桶进入。' : '浏览目录后点击「选择当前目录」确认。',
+            style: TextStyle(
+              fontSize: 12,
+              color: theme.colorScheme.mutedForeground,
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+        _buildBreadcrumbBar(theme),
+        const SizedBox(height: 8),
+        buildHiddenFilesToggle(theme),
+        const SizedBox(height: 8),
+        if (compactHeight)
+          SizedBox(height: 160, child: _buildContent(theme))
+        else
+          Expanded(child: _buildContent(theme)),
+        const SizedBox(height: 12),
+        buildCreateDirInput(theme),
+        _buildActions(),
+      ],
     );
   }
 
@@ -272,34 +288,39 @@ class _RemoteDirectoryPickerDialogState
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(color: theme.colorScheme.secondary),
-      child: Row(
-        children: [
-          for (int i = 0; i < crumbs.length; i++) ...[
-            if (i > 0) ...[
-              Icon(
-                LucideIcons.chevronRight,
-                size: 12,
-                color: theme.colorScheme.mutedForeground,
-              ),
-              const SizedBox(width: 4),
-            ],
-            GestureDetector(
-              onTap: () => _navigateToBreadcrumb(i),
-              child: Text(
-                crumbs[i],
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: i == crumbs.length - 1
-                      ? FontWeight.w600
-                      : FontWeight.normal,
-                  color: i == crumbs.length - 1
-                      ? theme.colorScheme.foreground
-                      : theme.colorScheme.primary,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        reverse: true,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (int i = 0; i < crumbs.length; i++) ...[
+              if (i > 0) ...[
+                Icon(
+                  LucideIcons.chevronRight,
+                  size: 12,
+                  color: theme.colorScheme.mutedForeground,
+                ),
+                const SizedBox(width: 4),
+              ],
+              GestureDetector(
+                onTap: () => _navigateToBreadcrumb(i),
+                child: Text(
+                  crumbs[i],
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: i == crumbs.length - 1
+                        ? FontWeight.w600
+                        : FontWeight.normal,
+                    color: i == crumbs.length - 1
+                        ? theme.colorScheme.foreground
+                        : theme.colorScheme.primary,
+                  ),
                 ),
               ),
-            ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }

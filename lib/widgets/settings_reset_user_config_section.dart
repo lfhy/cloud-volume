@@ -3,6 +3,16 @@ import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:remote_storage/services/app_modal.dart';
 
+Widget _dialogActionWrap(List<Widget> actions) => SizedBox(
+  width: double.infinity,
+  child: Wrap(
+    alignment: WrapAlignment.end,
+    spacing: 10,
+    runSpacing: 10,
+    children: actions,
+  ),
+);
+
 /// [SettingsResetUserConfigSection] 暴露“重置账号”入口，点击后会弹出二次确认，
 /// 确认后调用上层传入的 [onReset]，由设置页执行 bridge 重置并刷新启动状态。
 class SettingsResetUserConfigSection extends StatelessWidget {
@@ -55,7 +65,7 @@ class SettingsResetUserConfigSection extends StatelessWidget {
   Future<void> _confirmAndReset(BuildContext context) async {
     final confirmed = await showAppModal<bool>(
       context: context,
-      builder: (dialogContext) => ShadDialog(
+      builder: (dialogContext) => AppShadDialog(
         title: const Text('确认重置账号'),
         description: const Text('该操作会清空所有已保存账号，且无法撤销。'),
         child: SizedBox(
@@ -69,24 +79,22 @@ class SettingsResetUserConfigSection extends StatelessWidget {
                 '确认要清除全部账号信息并回到首次启动配置页吗？',
                 style: TextStyle(
                   fontSize: 12,
-                  color: ShadTheme.of(dialogContext).colorScheme.mutedForeground,
+                  color: ShadTheme.of(
+                    dialogContext,
+                  ).colorScheme.mutedForeground,
                 ),
               ),
               const SizedBox(height: 18),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  ShadButton.outline(
-                    onPressed: () => Navigator.of(dialogContext).pop(false),
-                    child: const Text('取消'),
-                  ),
-                  const SizedBox(width: 10),
-                  ShadButton.destructive(
-                    onPressed: () => Navigator.of(dialogContext).pop(true),
-                    child: const Text('确认重置'),
-                  ),
-                ],
-              ),
+              _dialogActionWrap([
+                ShadButton.outline(
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  child: const Text('取消'),
+                ),
+                ShadButton.destructive(
+                  onPressed: () => Navigator.of(dialogContext).pop(true),
+                  child: const Text('确认重置'),
+                ),
+              ]),
             ],
           ),
         ),

@@ -4,6 +4,16 @@ part of 'file_sync_profile_editor.dart';
 // 分步配置的字段构建方法。顶层函数接收 _FileSyncProfileEditorState，
 // 通过它访问字段和 markDirty。
 
+Widget _syncDialogActionWrap(List<Widget> actions) => SizedBox(
+  width: double.infinity,
+  child: Wrap(
+    alignment: WrapAlignment.end,
+    spacing: 10,
+    runSpacing: 10,
+    children: actions,
+  ),
+);
+
 const _intervalOptions = <int>[60, 120, 300, 600, 1800, 3600];
 const _quietOptions = <int>[0, 5, 10, 30, 60, 120];
 
@@ -34,25 +44,22 @@ Widget stepPickEndpoints({
       stepLabel(theme, '配置名称（可选）'),
       ShadInput(
         controller: self._nameController,
+        focusNode: self._nameFocusNode,
         placeholder: const Text('留空则使用桶名'),
       ),
       const SizedBox(height: 18),
       stepLabel(theme, '本地目录'),
-      Row(
-        children: [
-          Expanded(
-            child: ShadInput(
-              controller: self._localPathController,
-              placeholder: const Text('点击右侧按钮选择目录'),
-              readOnly: true,
-            ),
-          ),
-          const SizedBox(width: 8),
+      _endpointPickerRow(
+        field: ShadInput(
+          controller: self._localPathController,
+          placeholder: const Text('点击右侧按钮选择目录'),
+          readOnly: true,
+        ),
+        actions: [
           ShadButton.secondary(
             onPressed: self._pickLocalDirectory,
             child: const Text('选择'),
           ),
-          const SizedBox(width: 8),
           ShadButton.outline(
             size: ShadButtonSize.sm,
             onPressed: self._localPathController.text.trim().isEmpty
@@ -64,23 +71,21 @@ Widget stepPickEndpoints({
       ),
       const SizedBox(height: 18),
       stepLabel(theme, '远端目录'),
-      Row(
-        children: [
-          Expanded(
-            child: ShadInput(
-              controller: TextEditingController(text: remote == null
-                  ? ''
-                  : '${remote.bucket}/${remote.prefix.isEmpty ? '' : remote.prefix}'),
-              placeholder: const Text('点击右侧按钮选择远端目录'),
-              readOnly: true,
-            ),
+      _endpointPickerRow(
+        field: ShadInput(
+          controller: TextEditingController(
+            text: remote == null
+                ? ''
+                : '${remote.bucket}/${remote.prefix.isEmpty ? '' : remote.prefix}',
           ),
-          const SizedBox(width: 8),
+          placeholder: const Text('点击右侧按钮选择远端目录'),
+          readOnly: true,
+        ),
+        actions: [
           ShadButton.secondary(
             onPressed: self._pickRemoteDirectory,
             child: const Text('选择'),
           ),
-          const SizedBox(width: 8),
           ShadButton.outline(
             size: ShadButtonSize.sm,
             onPressed: self._remoteDir == null
@@ -94,7 +99,37 @@ Widget stepPickEndpoints({
   );
 }
 
-
+/// Keeps endpoint actions reachable without squeezing the path field on phones.
+Widget _endpointPickerRow({
+  required Widget field,
+  required List<Widget> actions,
+}) {
+  return LayoutBuilder(
+    builder: (context, constraints) {
+      if (constraints.maxWidth < 520) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            field,
+            const SizedBox(height: 8),
+            Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 8,
+              runSpacing: 8,
+              children: actions,
+            ),
+          ],
+        );
+      }
+      return Row(
+        children: [
+          Expanded(child: field),
+          for (final action in actions) ...[const SizedBox(width: 8), action],
+        ],
+      );
+    },
+  );
+}
 
 /// 步骤 2「同步策略」：方向 / 冲突 / 周期 / 静默。
 Widget stepSyncStrategy({
@@ -113,10 +148,7 @@ Widget stepSyncStrategy({
               Text(SyncDirection.fromValue(value).label),
           options: SyncDirection.values
               .map(
-                (d) => ShadOption<String>(
-                  value: d.value,
-                  child: Text(d.label),
-                ),
+                (d) => ShadOption<String>(value: d.value, child: Text(d.label)),
               )
               .toList(growable: false),
           onChanged: (v) {
@@ -138,17 +170,13 @@ Widget stepSyncStrategy({
               Text(SyncConflictPolicy.fromValue(value).label),
           options: SyncConflictPolicy.values
               .map(
-                (p) => ShadOption<String>(
-                  value: p.value,
-                  child: Text(p.label),
-                ),
+                (p) => ShadOption<String>(value: p.value, child: Text(p.label)),
               )
               .toList(growable: false),
           onChanged: (v) {
             if (v != null) {
               self.markDirty(
-                () => self._conflictPolicy =
-                    SyncConflictPolicy.fromValue(v),
+                () => self._conflictPolicy = SyncConflictPolicy.fromValue(v),
               );
             }
           },
@@ -164,10 +192,8 @@ Widget stepSyncStrategy({
               Text(_intervalLabel(value)),
           options: _intervalOptions
               .map(
-                (s) => ShadOption<int>(
-                  value: s,
-                  child: Text(_intervalLabel(s)),
-                ),
+                (s) =>
+                    ShadOption<int>(value: s, child: Text(_intervalLabel(s))),
               )
               .toList(growable: false),
           onChanged: (v) {
@@ -183,14 +209,10 @@ Widget stepSyncStrategy({
         width: double.infinity,
         child: ShadSelect<int>(
           initialValue: self._quietSeconds,
-          selectedOptionBuilder: (context, value) =>
-              Text(_quietLabel(value)),
+          selectedOptionBuilder: (context, value) => Text(_quietLabel(value)),
           options: _quietOptions
               .map(
-                (s) => ShadOption<int>(
-                  value: s,
-                  child: Text(_quietLabel(s)),
-                ),
+                (s) => ShadOption<int>(value: s, child: Text(_quietLabel(s))),
               )
               .toList(growable: false),
           onChanged: (v) {
@@ -223,6 +245,7 @@ Widget stepAdvancedSettings({
       stepLabel(theme, '排除规则（每行一条）'),
       ShadInput(
         controller: self._excludeController,
+        focusNode: self._excludeFocusNode,
         placeholder: const Text('.DS_Store\n*.tmp'),
         maxLines: 5,
       ),

@@ -151,7 +151,7 @@ extension _ConfigSetupRestore on _ConfigSetupPageState {
                     if (ctx.mounted) setDialogState(() {});
                   });
             }
-            return ShadDialog(
+            return AppShadDialog(
               title: const Text('从备份存储还原'),
               description: const Text('选择一份远端备份快照进行还原。'),
               constraints: const BoxConstraints(maxWidth: 520),

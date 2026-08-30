@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:remote_storage/models/file_preview_source.dart';
 import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/models/s3_objects.dart';
+import 'package:remote_storage/services/app_modal.dart';
 import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/utils/transfer_format.dart';
 import 'package:remote_storage/utils/file_preview_type.dart';
@@ -41,45 +42,54 @@ class FilePreviewDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
+    final fullscreen = usesFullscreenAppModal;
     final hasTransfer = transfer != null;
-    return ShadDialog(
+    final previewPane = Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.secondary,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: theme.colorScheme.border),
+      ),
+      child: hasTransfer
+          ? _TransferPreviewPane(state: transfer!)
+          : FilePreviewPane(
+              kind: kind,
+              source: source,
+              loading: loading,
+              errorText: errorText,
+            ),
+    );
+    final actionBar = _ActionBar(
+      transfer: transfer,
+      loading: loading,
+      unavailable: unavailable,
+      onOpenWithSystem: onOpenWithSystem,
+      onSaveAs: onSaveAs,
+      onDownload: onDownload,
+    );
+    final body = Column(
+      mainAxisSize: fullscreen ? MainAxisSize.max : MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (fullscreen)
+          Expanded(child: previewPane)
+        else
+          SizedBox(height: 420, child: previewPane),
+        const SizedBox(height: 16),
+        actionBar,
+      ],
+    );
+    return AppShadDialog(
       title: Text(object.displayName),
       description: Text(previewKindLabel(kind)),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 760, maxHeight: 620),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Container(
-              height: 420,
-              clipBehavior: Clip.antiAlias,
-              decoration: BoxDecoration(
-                color: theme.colorScheme.secondary,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: theme.colorScheme.border),
-              ),
-              child: hasTransfer
-                  ? _TransferPreviewPane(state: transfer!)
-                  : FilePreviewPane(
-                      kind: kind,
-                      source: source,
-                      loading: loading,
-                      errorText: errorText,
-                    ),
+      scrollable: !fullscreen,
+      child: fullscreen
+          ? body
+          : ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760, maxHeight: 620),
+              child: body,
             ),
-            const SizedBox(height: 16),
-            _ActionBar(
-              transfer: transfer,
-              loading: loading,
-              unavailable: unavailable,
-              onOpenWithSystem: onOpenWithSystem,
-              onSaveAs: onSaveAs,
-              onDownload: onDownload,
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -114,65 +124,59 @@ class _ActionBar extends StatelessWidget {
           // 远端对象已不存在时不再保留取消/后台运行，进度面板已经显示错误，
           // 用户除了关闭弹框（随后会触发目录刷新）没有其它合理动作。
           if (unavailable) {
-            return Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                ShadButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('关闭'),
-                ),
-              ],
-            );
-          }
-          return Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              if (task?.cancelable ?? false) ...[
-                ShadButton.destructive(
-                  onPressed: () => RemoteTaskStore.instance.cancel(task!.id),
-                  child: const Text('取消下载'),
-                ),
-                const SizedBox(width: 10),
-              ],
+            return _actionWrap([
               ShadButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: Text(running ? '后台运行' : '关闭'),
+                child: const Text('关闭'),
+              ),
+            ]);
+          }
+          return _actionWrap([
+            if (task?.cancelable ?? false) ...[
+              ShadButton.destructive(
+                onPressed: () => RemoteTaskStore.instance.cancel(task!.id),
+                child: const Text('取消下载'),
               ),
             ],
-          );
+            ShadButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(running ? '后台运行' : '关闭'),
+            ),
+          ]);
         },
       );
     }
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        ShadButton.outline(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
-        ),
-        // 对象已被远端删除：下载/另存为/外部打开没有意义，直接收起。
-        if (!unavailable) ...[
-          if (onOpenWithSystem != null) ...[
-            const SizedBox(width: 10),
-            ShadButton.outline(
-              onPressed: onOpenWithSystem,
-              child: const Text('外部应用打开'),
-            ),
-          ],
-          const SizedBox(width: 10),
+    return _actionWrap([
+      ShadButton.outline(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('取消'),
+      ),
+      // 对象已被远端删除：下载/另存为/外部打开没有意义，直接收起。
+      if (!unavailable) ...[
+        if (onOpenWithSystem != null) ...[
           ShadButton.outline(
-            onPressed: loading ? null : onSaveAs,
-            child: const Text('另存为'),
-          ),
-          const SizedBox(width: 10),
-          ShadButton(
-            onPressed: loading ? null : onDownload,
-            child: const Text('下载'),
+            onPressed: onOpenWithSystem,
+            child: const Text('外部应用打开'),
           ),
         ],
+        ShadButton.outline(
+          onPressed: loading ? null : onSaveAs,
+          child: const Text('另存为'),
+        ),
+        ShadButton(
+          onPressed: loading ? null : onDownload,
+          child: const Text('下载'),
+        ),
       ],
-    );
+    ]);
   }
+
+  Widget _actionWrap(List<Widget> actions) => Wrap(
+    alignment: WrapAlignment.end,
+    spacing: 10,
+    runSpacing: 10,
+    children: actions,
+  );
 }
 
 class FilePreviewTransferState {

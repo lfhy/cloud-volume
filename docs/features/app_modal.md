@@ -9,13 +9,23 @@
 ### 统一 API
 
 - `lib/services/app_modal.dart` — 应用内模态唯一业务入口:
-  - `showAppModal` — builder 返回 `ShadDialog` / 双模式编辑器。
+  - `showAppModal` — builder 返回 `AppShadDialog` / 会构造它的双模式编辑器。
   - `showAppModalDialog` — title/description/body/actions 简单表单 helper。
   - `showAppConfirmModal` — 是/否确认(`cancel` + `confirm`,可选 `destructive`)。
+  - `AppShadDialog` — 业务模态 surface;Android 全屏适配器,桌面/Web 透传原 `ShadDialog` 尺寸与属性。业务代码不得直接构造 `ShadDialog`。
   - 常量:`kAppModalDefaultMaxWidth = 480`、`kAppModalDefaultContentWidth = 420`。
   - 唯一允许的 `showShadDialog` 调用点。
 - `lib/services/modal_sub_window_debug.dart` — `preferModalSubWindows = kDebugMode && USE_MODAL_SUB_WINDOWS`(默认 false;debug 构建 `--dart-define=USE_MODAL_SUB_WINDOWS=true` 启用)。
 - `lib/services/desktop_overlay.dart` — `showDesktopOverlayOrDialog`:gate + 支持时开 debug OS 子窗口,否则应用内模态。**当前唯一生产调用方:** `showRemoteDirectoryPicker`。
+
+### Android 全屏呈现(binding)
+
+- 判据为 `!kIsWeb && defaultTargetPlatform == TargetPlatform.android`;不得用 `dart:io Platform.isAndroid`,否则 widget 回归无法覆盖。
+- 所有业务 surface 必须使用 `AppShadDialog`:Android 强制 `BoxConstraints.expand`、零圆角/边框/阴影,白色/主题背景铺到系统栏下;`ShadDialog` 内层 `SafeArea` 保护标题、关闭按钮与内容。不得在 route 外再包 `SafeArea`,否则会重新露出截图中的上下暗色截断带。
+- surface 高度由上游 `Align → Padding(viewInsets)` 的**键盘后可用约束**决定,不用 `MediaQuery` 硬设高度;`usesCompactFullscreenAppModal` 只用视口减 `viewInsets` 判定 480px 低高度降级。`showAppModal` 在 Android 仅保留 fade,并用 `AnnotatedRegion<SystemUiOverlayStyle>` 随主题设置系统栏图标,关闭 route 后自动恢复。
+- 普通收缩表单由 Shad 单滚动容器承载;`showAppModalDialog` 在 Android 强制可滚动且动作使用 `OverflowBar`。fill-height 内容(`RemoteDirectoryPickerDialog`、`FileSyncProfileEditor`、`FilePreviewDialog`)在常规高度下用 `scrollable: false` + 中间主体 `Expanded`,固定动作;低高度时同步编辑器与目录选择器移除 `Expanded`,切换为 Shad 外层单滚动面,让标题、说明、主体与动作一起可滚动;紧凑态纵向 padding 降为 8px,保持 SafeArea 内的聚焦与动作可达。
+- 手机动作组用获得整行宽度的 `Wrap`/`OverflowBar`,禁止用固定 `Row` 承载表单 footer;连接字段与同步路径动作按实际宽度改为单列,远端选择器深面包屑横向滚动。不得把“全屏”实现成只有背景变大、固定 480px 内容仍悬空或横向溢出。
+- 回归:`test/app_modal_test.dart` 固定 Android surface 四边、SafeArea、键盘、系统返回、截图账号编辑器、同步 fill-height 及横屏 + IME,并对照 macOS 仍有限宽居中;`test/remote_directory_picker_dialog_test.dart` 覆盖 picker fill-height、深面包屑与创建目录的横屏 + IME 路径;`test/object_action_dialogs_test.dart` 覆盖窄屏大字体 footer 换行。
 
 ### 开启路径路由策略
 
@@ -33,9 +43,9 @@
 
 | 模态 | 入口/组件 | 打开自 | 备注 |
 |-------|-----------|--------|------|
-| 账号编辑器 | `CloudStorageAccountDialog` | `account_editor_presenter.dart`(账号管理或文件管理恢复) | 应用内紧凑最大宽 **520**。主表单只保留连接字段;path-style + 代理进嵌套**高级设置**模态(`showAppModal`,最大 **420**)。子窗口内仅内容自适应缩放。 |
-| 同步配置编辑器 | `FileSyncProfileEditor` | `file_sync_tasks_page_actions.dart` 增/改 | 舒适最大宽 **600**。三步向导:同步两端 → 同步策略 → 高级设置(排除规则/启用)。嵌套远端选择器。 |
-| 远端目录选择器 | `showRemoteDirectoryPicker` / `RemoteDirectoryPickerDialog` | 同步编辑器 step 1、配置备份等 | 舒适最大宽 **640**,体高 **480**。经 `showDesktopOverlayOrDialog`;底部两组动作以 `OverflowBar` + 组内 `Wrap` 按实际宽度自动换行。 |
+| 账号编辑器 | `CloudStorageAccountDialog` | `account_editor_presenter.dart`(账号管理或文件管理恢复) | 桌面/Web 紧凑最大宽 **640**;Android 全屏。主表单只保留连接字段;path-style + 代理进嵌套**高级设置**模态。子窗口内仅内容自适应缩放。 |
+| 同步配置编辑器 | `FileSyncProfileEditor` | `file_sync_tasks_page_actions.dart` 增/改 | 桌面/Web 最大宽 **600**,Android 全屏 fill-height。三步向导:同步两端 → 同步策略 → 高级设置(排除规则/启用)。嵌套远端选择器。 |
+| 远端目录选择器 | `showRemoteDirectoryPicker` / `RemoteDirectoryPickerDialog` | 同步编辑器 step 1、配置备份等 | 桌面/Web 最大宽 **640**、体高 **480**;Android 全屏 fill-height。经 `showDesktopOverlayOrDialog`;底部两组动作以 `OverflowBar` + 组内 `Wrap` 按实际宽度自动换行。 |
 
 ### 全部应用内模态清单
 
@@ -51,12 +61,12 @@
 
 ### Gotchas
 
-- 内部有 `Expanded`/固定高列表的大编辑器**不要**外套 `SingleChildScrollView`。优先 `ShadDialog` 内有限高(picker 用 420)或仅在 body 为 `mainAxisSize: min` 时 `scrollable: true`。
+- 内部有 `Expanded`/固定高列表的大编辑器**不要**外套 `SingleChildScrollView`。Android fill-height 用 `AppShadDialog(scrollable: false)`;桌面有限高或仅在 body 为 `mainAxisSize: min` 时 `scrollable: true`。
 - hover/关闭 chrome 遵循全局 hover 规范(`ListInteractionColors`;无水波纹;仅中性洗色,见 [ui_rules](ui_rules.md))。
 - Web 恒用应用内模态(窗口服务不支持)。
-- 双模式编辑器必须**小于主窗口**:账号/同步 ~600–640、远端选择器 ~640×480。宁可加步骤/嵌套高级模态也不加宽(账号 path-style + 代理在嵌套高级设置;同步排除/启用是 step 3)。
+- 桌面/Web 双模式编辑器必须**小于主窗口**:账号/同步 ~600–640、远端选择器 ~640×480;Android 是全屏例外。宁可加步骤/嵌套高级模态也不加宽(账号 path-style + 代理在嵌套高级设置;同步排除/启用是 step 3)。
 - 简单是/否用 `showAppConfirmModal`;body 有表单/列表/进度时用专门 widget/helper。
-- 新增模态:只经 `showAppModal*` 进入,内容保持 500 行内(按 part/feature 拆),并更新本清单。
+- 新增模态:只经 `showAppModal*` 进入并构造 `AppShadDialog`,内容保持 500 行内(按 part/feature 拆),并更新本清单。
 - `RemoteDirectoryPickerDialog.initial` 只有桶名和 profile 都精确匹配时才恢复目录;空/失效目标停在桶列表,不得把旧 prefix 静默套到首桶。每次目录加载先清旧错误,成功结果必须解除错误态;较旧目录请求的迟到成功/失败都不得覆盖较新导航。回归见 `test/remote_directory_picker_dialog_test.dart`,理由见 [Agent Note](../notes/implemented/bug-fix/2026-08-30-android-backup-directory-picker.md)。
 - 选择器的桶、目录、只读文件三类行按**实际列表宽度**局部降级:`<560` 时传 `FileListTile(compact: true)`,把来源/大小等元数据收进标题下方,避免桌面固定元数据列挤压名称;宽屏继续使用标准列。不要按 Android、设备或主窗口宽度判断。
 
@@ -82,11 +92,11 @@
 - 同步编辑器:`DesktopModalSubWindowApp<_SyncBootstrapResult>` + **`scrollable: false`**(编辑器自持步骤指示 + 内部滚动 + `Expanded` 固定导航);固定初始 `600×480`,步骤尺寸 600×480/500/480。
 - 远端目录选择器:`DesktopModalSubWindowApp<RemoteStorageGateway>` + **`scrollable: false`** + `useParentFocusRelay: false`(`lib/app/remote_directory_picker_window_app.dart`;args `lib/models/remote_directory_picker_window_args.dart`;服务 `lib/services/remote_directory_picker_window_service.dart`);args JSON 同时携带真实桶 identity、`displayName` 与 `rootPrefix`,展示别名和限定根目录不得跨 debug 子窗口丢失;`onConfirm` 暂存结果再 `close()`;标题栏 X 走 shell `onClose` → `_sendResult`(无选择则 null)。固定 `640×560`(min 480×400)。
 - 未迁移:`FilePreviewWindowApp` — 非模态独立窗口(无 scrim、无 overlay release、可拖标题栏),模式根本不同,保持独立。
-- 近 500 行的双模式内容组件:`cloud_storage_account_dialog.dart`(~471)、`file_sync_profile_editor.dart`(~480)、`remote_directory_picker_dialog.dart`(~446);shell/服务远低于 500(除 `desktop_sub_window_modal.dart` ~355)。
+- 三个双模式内容组件 `cloud_storage_account_dialog.dart`、`file_sync_profile_editor.dart`、`remote_directory_picker_dialog.dart` 均保持在 500 行内;shell/服务也遵守同一上限。
 
 ### Gotchas(binding)
 
-- 内容用了 `Expanded`、`height: double.infinity` 或内部滚动区(`FileSyncProfileEditor._buildSubWindowLayout`、`RemoteDirectoryPickerDialog`)时**绝不**设 `scrollable: true`——外层 `SingleChildScrollView` 使高度无界,`RenderFlex children have non-zero flex but incoming height constraints are unbounded` 崩溃。
+- 内容用了 `Expanded`、`height: double.infinity` 或内部滚动区(`FileSyncProfileEditor._buildFillHeightLayout`、`RemoteDirectoryPickerDialog` 常规态)时**绝不**设 `scrollable: true`——外层 `SingleChildScrollView` 使高度无界,`RenderFlex children have non-zero flex but incoming height constraints are unbounded` 崩溃。紧凑态必须先移除这些无界 flex/高度,再开启 Shad 外层滚动。
 - 内容必须在保存/取消/确认路径调用注入的 `close`。标题栏 X 已走 shell `onClose` → `closeDesktopModalSubWindow`;空 `onCancel`/`onSaved` 回调会让窗口在迁移后保持打开。
 - 子窗口内**不要**嵌套 `ShadDialog`(`asDialog: false`)。文件预览不属于本壳——不要动它。
 - 账号编辑器用**内容测量**缩放(`MeasureSize` + `fitModalSubWindowToContentSize`),不是手调每步高度;只有收缩包裹(`MainAxisSize.min`)的表单内容可用。同步编辑器/目录选择器保持离散/填充高布局,**不得**调内容自适应。

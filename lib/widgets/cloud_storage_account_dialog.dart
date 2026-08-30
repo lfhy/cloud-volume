@@ -26,6 +26,8 @@ part 'cloud_storage_account_dialog_steps.dart';
 part 'cloud_storage_account_dialog_bucket_visibility.dart';
 part 'cloud_storage_account_dialog_bucket_loading.dart';
 part 'cloud_storage_account_dialog_credentials.dart';
+part 'cloud_storage_account_dialog_fields.dart';
+part 'cloud_storage_account_dialog_oauth.dart';
 
 /// 账号管理页使用的新增/编辑账号对话框。
 /// 保存时返回 [RemoteStorageConfig] 给调用方，由调用方决定 profileName 并保存。
@@ -275,7 +277,7 @@ class _CloudStorageAccountDialogState extends State<CloudStorageAccountDialog> {
     if (widget.editing) {
       final content = _buildEditContent(theme);
       if (!widget.asDialog) return _wrapMeasured(content);
-      return ShadDialog(
+      return AppShadDialog(
         title: const Text('编辑账号'),
         description: const Text('修改账号连接信息；密钥、密码或 OAuth 授权会按你当前选择保留或更新。'),
         constraints: const BoxConstraints(maxWidth: 640),
@@ -288,11 +290,13 @@ class _CloudStorageAccountDialogState extends State<CloudStorageAccountDialog> {
     if (!widget.asDialog) {
       return _wrapMeasured(_buildWizardContent(theme));
     }
-    return ShadDialog(
+    return AppShadDialog(
       title: Text(widget.simpleMode ? '配置独立备份存储' : '新增账号'),
-      description: Text(widget.simpleMode
-          ? '选择存储类型并填写连接信息，配好后可直接选择保存位置。'
-          : '先选择存储类型，再填写对应的连接信息。'),
+      description: Text(
+        widget.simpleMode
+            ? '选择存储类型并填写连接信息，配好后可直接选择保存位置。'
+            : '先选择存储类型，再填写对应的连接信息。',
+      ),
       constraints: const BoxConstraints(maxWidth: 640),
       scrollable: true,
       child: _buildWizardContent(theme),
@@ -368,68 +372,77 @@ class _CloudStorageAccountDialogState extends State<CloudStorageAccountDialog> {
     final isFirst = widget.editing || widget.simpleMode
         ? _step <= 1
         : _step <= 0;
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        ShadButton.outline(
-          onPressed: widget.asDialog
-              ? () => Navigator.of(context).pop()
-              : widget.onCancel,
-          child: const Text('取消'),
-        ),
-        const SizedBox(width: 10),
-        if (!isFirst) ...[
+    return SizedBox(
+      width: double.infinity,
+      child: Wrap(
+        alignment: WrapAlignment.end,
+        spacing: 10,
+        runSpacing: 10,
+        children: [
           ShadButton.outline(
-            onPressed: _back,
-            child: const Row(
-              children: [
-                Icon(LucideIcons.chevronLeft, size: 16),
-                SizedBox(width: 2),
-                Text('上一步'),
-              ],
-            ),
+            onPressed: widget.asDialog
+                ? () => Navigator.of(context).pop()
+                : widget.onCancel,
+            child: const Text('取消'),
           ),
-          const SizedBox(width: 10),
-        ],
-        ShadButton(
-          onPressed: _saving || _loadingBuckets ? null : _next,
-          child: _saving
-              ? const Text('保存中...')
-              : Row(
-                  children: [
-                    Text(isSimpleLast
-                        ? '保存'
-                        : isLast
+          if (!isFirst) ...[
+            ShadButton.outline(
+              onPressed: _back,
+              child: const Row(
+                children: [
+                  Icon(LucideIcons.chevronLeft, size: 16),
+                  SizedBox(width: 2),
+                  Text('上一步'),
+                ],
+              ),
+            ),
+          ],
+          ShadButton(
+            onPressed: _saving || _loadingBuckets ? null : _next,
+            child: _saving
+                ? const Text('保存中...')
+                : Row(
+                    children: [
+                      Text(
+                        isSimpleLast
+                            ? '保存'
+                            : isLast
                             ? '保存账号'
-                            : '下一步'),
-                    if (!isLast && !isSimpleLast) ...[
-                      const SizedBox(width: 4),
-                      const Icon(LucideIcons.chevronRight, size: 16),
+                            : '下一步',
+                      ),
+                      if (!isLast && !isSimpleLast) ...[
+                        const SizedBox(width: 4),
+                        const Icon(LucideIcons.chevronRight, size: 16),
+                      ],
                     ],
-                  ],
-                ),
-        ),
-      ],
+                  ),
+          ),
+        ],
+      ),
     );
   }
 
   /// Editing mode nav buttons: just Cancel + Save.
   Widget _buildEditNavButtons(ShadThemeData theme) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        ShadButton.outline(
-          onPressed: widget.asDialog
-              ? () => Navigator.of(context).pop()
-              : widget.onCancel,
-          child: const Text('取消'),
-        ),
-        const SizedBox(width: 10),
-        ShadButton(
-          onPressed: _saving ? null : _submit,
-          child: _saving ? const Text('保存中...') : const Text('保存修改'),
-        ),
-      ],
+    return SizedBox(
+      width: double.infinity,
+      child: Wrap(
+        alignment: WrapAlignment.end,
+        spacing: 10,
+        runSpacing: 10,
+        children: [
+          ShadButton.outline(
+            onPressed: widget.asDialog
+                ? () => Navigator.of(context).pop()
+                : widget.onCancel,
+            child: const Text('取消'),
+          ),
+          ShadButton(
+            onPressed: _saving ? null : _submit,
+            child: _saving ? const Text('保存中...') : const Text('保存修改'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -453,64 +466,6 @@ class _CloudStorageAccountDialogState extends State<CloudStorageAccountDialog> {
         _saving = false;
         _errorText = '保存失败，请检查配置';
       });
-    }
-  }
-
-  // -- Baidu OAuth helpers ----------------------------------------------------
-
-  Future<void> _authorizeBaiduPan() async {
-    final code = _baiduAuthCodeController.text.trim();
-    if (code.isEmpty) {
-      setState(() => _baiduAuthErrorText = '请先粘贴百度授权页显示的授权码。');
-      return;
-    }
-    setState(() {
-      _authorizingBaidu = true;
-      _baiduAuthErrorText = null;
-    });
-    try {
-      final config = await widget.onAuthorizeBaiduPan(
-        _nameController.text.trim(),
-        code,
-      );
-      if (!mounted) return;
-      setState(() {
-        _authorizedBaiduConfig = config;
-        _baiduAuthCodeController.clear();
-        _baiduAuthErrorText = null;
-        if (_nameController.text.trim().isEmpty) {
-          _nameController.text = config.displayName;
-        }
-      });
-      if (widget.editing || widget.simpleMode) {
-        // Editing or simple (backup-only) mode saves immediately — no
-        // bucket-visibility wizard step.
-        await _submit();
-      } else {
-        await _loadBucketsForVisibility();
-      }
-    } catch (error) {
-      if (!mounted) return;
-      setState(() => _baiduAuthErrorText = describeBridgeError(error));
-    } finally {
-      if (mounted) setState(() => _authorizingBaidu = false);
-    }
-  }
-
-  Future<void> _startBaiduPanAuthorization() async {
-    setState(() {
-      _openingBaiduAuthPage = true;
-      _baiduAuthErrorText = null;
-    });
-    try {
-      final authUrl = await widget.onStartBaiduPanAuthorization();
-      if (!mounted) return;
-      setState(() => _baiduAuthUrl = authUrl);
-    } catch (error) {
-      if (!mounted) return;
-      setState(() => _baiduAuthErrorText = describeBridgeError(error));
-    } finally {
-      if (mounted) setState(() => _openingBaiduAuthPage = false);
     }
   }
 }

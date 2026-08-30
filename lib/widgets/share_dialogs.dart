@@ -18,6 +18,16 @@ const List<_DurationPreset> _durationPresets = <_DurationPreset>[
   _DurationPreset(label: '7天', hours: 168),
 ];
 
+Widget _dialogActionWrap(List<Widget> actions) => SizedBox(
+  width: double.infinity,
+  child: Wrap(
+    alignment: WrapAlignment.end,
+    spacing: 10,
+    runSpacing: 10,
+    children: actions,
+  ),
+);
+
 Future<int?> showShareDurationDialog(
   BuildContext context, {
   required String title,
@@ -31,7 +41,7 @@ Future<int?> showShareDurationDialog(
     return await showAppModal<int?>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setDialogState) => ShadDialog(
+        builder: (dialogContext, setDialogState) => AppShadDialog(
           title: Text(title),
           description: Text(description),
           child: SizedBox(
@@ -83,29 +93,23 @@ Future<int?> showShareDurationDialog(
                   ),
                 ],
                 const SizedBox(height: 18),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    ShadButton.outline(
-                      onPressed: () => Navigator.of(dialogContext).pop(),
-                      child: const Text('取消'),
-                    ),
-                    const SizedBox(width: 10),
-                    ShadButton(
-                      onPressed: () {
-                        final hours = int.tryParse(controller.text.trim());
-                        if (hours == null || hours < 1 || hours > 168) {
-                          setDialogState(
-                            () => errorText = '请输入 1 到 168 之间的小时数',
-                          );
-                          return;
-                        }
-                        Navigator.of(dialogContext).pop(hours * 3600);
-                      },
-                      child: Text(confirmLabel),
-                    ),
-                  ],
-                ),
+                _dialogActionWrap([
+                  ShadButton.outline(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: const Text('取消'),
+                  ),
+                  ShadButton(
+                    onPressed: () {
+                      final hours = int.tryParse(controller.text.trim());
+                      if (hours == null || hours < 1 || hours > 168) {
+                        setDialogState(() => errorText = '请输入 1 到 168 之间的小时数');
+                        return;
+                      }
+                      Navigator.of(dialogContext).pop(hours * 3600);
+                    },
+                    child: Text(confirmLabel),
+                  ),
+                ]),
               ],
             ),
           ),
@@ -123,7 +127,7 @@ Future<void> showShareLinkDialog(
 }) async {
   await showAppModal<void>(
     context: context,
-    builder: (dialogContext) => ShadDialog(
+    builder: (dialogContext) => AppShadDialog(
       title: const Text('分享已创建'),
       description: Text('可以直接复制下面的分享链接。'),
       child: SizedBox(
@@ -159,42 +163,34 @@ Future<void> showShareLinkDialog(
               ),
             ),
             const SizedBox(height: 18),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                ShadButton.outline(
-                  onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('关闭'),
-                ),
-                const SizedBox(width: 10),
-                ShadButton.outline(
-                  onPressed: () async {
-                    try {
-                      await openShareUrl(record.url);
-                    } catch (error) {
-                      if (!dialogContext.mounted) {
-                        return;
-                      }
-                      showAppErrorToast(
-                        dialogContext,
-                        message: error.toString(),
-                      );
+            _dialogActionWrap([
+              ShadButton.outline(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('关闭'),
+              ),
+              ShadButton.outline(
+                onPressed: () async {
+                  try {
+                    await openShareUrl(record.url);
+                  } catch (error) {
+                    if (!dialogContext.mounted) {
+                      return;
                     }
-                  },
-                  child: const Text('打开链接'),
-                ),
-                const SizedBox(width: 10),
-                ShadButton(
-                  onPressed: () async {
-                    await Clipboard.setData(ClipboardData(text: record.url));
-                    if (!dialogContext.mounted) return;
-                    Navigator.of(dialogContext).pop();
-                    showAppToast(context, message: '分享链接已复制');
-                  },
-                  child: const Text('复制链接'),
-                ),
-              ],
-            ),
+                    showAppErrorToast(dialogContext, message: error.toString());
+                  }
+                },
+                child: const Text('打开链接'),
+              ),
+              ShadButton(
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: record.url));
+                  if (!dialogContext.mounted) return;
+                  Navigator.of(dialogContext).pop();
+                  showAppToast(context, message: '分享链接已复制');
+                },
+                child: const Text('复制链接'),
+              ),
+            ]),
           ],
         ),
       ),
@@ -209,7 +205,7 @@ Future<ShareRecordDetailAction?> showShareRecordDetailsDialog(
 }) async {
   return showAppModal<ShareRecordDetailAction?>(
     context: context,
-    builder: (dialogContext) => ShadDialog(
+    builder: (dialogContext) => AppShadDialog(
       title: const Text('分享详情'),
       description: const Text('查看链接、有效期和来源路径。'),
       child: SizedBox(
@@ -284,40 +280,34 @@ Future<ShareRecordDetailAction?> showShareRecordDetailsDialog(
               ),
               const SizedBox(height: 12),
             ],
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                ShadButton.outline(
-                  onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('关闭'),
-                ),
-                const SizedBox(width: 10),
-                ShadButton.outline(
-                  onPressed: () => Navigator.of(
-                    dialogContext,
-                  ).pop(ShareRecordDetailAction.copyLink),
-                  child: const Text('复制链接'),
-                ),
-                const SizedBox(width: 10),
-                ShadButton.outline(
-                  onPressed: busy
-                      ? null
-                      : () => Navigator.of(
-                          dialogContext,
-                        ).pop(ShareRecordDetailAction.refresh),
-                  child: const Text('更新有效时间'),
-                ),
-                const SizedBox(width: 10),
-                ShadButton.destructive(
-                  onPressed: busy
-                      ? null
-                      : () => Navigator.of(
-                          dialogContext,
-                        ).pop(ShareRecordDetailAction.delete),
-                  child: const Text('删除记录'),
-                ),
-              ],
-            ),
+            _dialogActionWrap([
+              ShadButton.outline(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('关闭'),
+              ),
+              ShadButton.outline(
+                onPressed: () => Navigator.of(
+                  dialogContext,
+                ).pop(ShareRecordDetailAction.copyLink),
+                child: const Text('复制链接'),
+              ),
+              ShadButton.outline(
+                onPressed: busy
+                    ? null
+                    : () => Navigator.of(
+                        dialogContext,
+                      ).pop(ShareRecordDetailAction.refresh),
+                child: const Text('更新有效时间'),
+              ),
+              ShadButton.destructive(
+                onPressed: busy
+                    ? null
+                    : () => Navigator.of(
+                        dialogContext,
+                      ).pop(ShareRecordDetailAction.delete),
+                child: const Text('删除记录'),
+              ),
+            ]),
           ],
         ),
       ),
@@ -331,7 +321,7 @@ Future<bool> showDeleteShareRecordsDialog(
 ) async {
   return await showAppModal<bool>(
         context: context,
-        builder: (dialogContext) => ShadDialog(
+        builder: (dialogContext) => AppShadDialog(
           title: const Text('删除分享记录'),
           description: const Text('只会删除本地分享记录，不会删除远程文件。'),
           child: SizedBox(
@@ -343,20 +333,16 @@ Future<bool> showDeleteShareRecordsDialog(
                 const SizedBox(height: 8),
                 Text('即将删除 $count 条分享记录。'),
                 const SizedBox(height: 18),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    ShadButton.outline(
-                      onPressed: () => Navigator.of(dialogContext).pop(false),
-                      child: const Text('取消'),
-                    ),
-                    const SizedBox(width: 10),
-                    ShadButton.destructive(
-                      onPressed: () => Navigator.of(dialogContext).pop(true),
-                      child: const Text('删除记录'),
-                    ),
-                  ],
-                ),
+                _dialogActionWrap([
+                  ShadButton.outline(
+                    onPressed: () => Navigator.of(dialogContext).pop(false),
+                    child: const Text('取消'),
+                  ),
+                  ShadButton.destructive(
+                    onPressed: () => Navigator.of(dialogContext).pop(true),
+                    child: const Text('删除记录'),
+                  ),
+                ]),
               ],
             ),
           ),
@@ -371,7 +357,7 @@ Future<bool> showDeleteShareRecordDialog(
 ) async {
   return await showAppModal<bool>(
         context: context,
-        builder: (dialogContext) => ShadDialog(
+        builder: (dialogContext) => AppShadDialog(
           title: const Text('删除分享记录'),
           description: const Text('只会删除本地分享记录，不会删除远程文件。'),
           child: SizedBox(
@@ -386,20 +372,16 @@ Future<bool> showDeleteShareRecordDialog(
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 18),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    ShadButton.outline(
-                      onPressed: () => Navigator.of(dialogContext).pop(false),
-                      child: const Text('取消'),
-                    ),
-                    const SizedBox(width: 10),
-                    ShadButton.destructive(
-                      onPressed: () => Navigator.of(dialogContext).pop(true),
-                      child: const Text('删除记录'),
-                    ),
-                  ],
-                ),
+                _dialogActionWrap([
+                  ShadButton.outline(
+                    onPressed: () => Navigator.of(dialogContext).pop(false),
+                    child: const Text('取消'),
+                  ),
+                  ShadButton.destructive(
+                    onPressed: () => Navigator.of(dialogContext).pop(true),
+                    child: const Text('删除记录'),
+                  ),
+                ]),
               ],
             ),
           ),

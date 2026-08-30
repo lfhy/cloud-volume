@@ -108,10 +108,16 @@ class _BucketVisibilityDialogState extends State<_BucketVisibilityDialog> {
       _errorText = null;
     });
     try {
-      final ok = await widget.onSave(Map<String, BucketViewSettings>.from(_views));
+      final ok = await widget.onSave(
+        Map<String, BucketViewSettings>.from(_views),
+      );
       if (!mounted) return;
       if (ok) {
-        showAppToast(context, title: '桶管理已更新', message: widget.config.displayName);
+        showAppToast(
+          context,
+          title: '桶管理已更新',
+          message: widget.config.displayName,
+        );
         Navigator.of(context).pop(true);
       } else {
         setState(() {
@@ -131,7 +137,7 @@ class _BucketVisibilityDialogState extends State<_BucketVisibilityDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    return ShadDialog(
+    return AppShadDialog(
       title: const Text('桶列表显示设置'),
       description: Text(
         '账号：${widget.config.displayName.isEmpty ? widget.profileName : widget.config.displayName}',
@@ -164,7 +170,10 @@ class _BucketVisibilityDialogState extends State<_BucketVisibilityDialog> {
         if (_errorText != null) ...[
           Text(
             _errorText!,
-            style: TextStyle(fontSize: 12, color: theme.colorScheme.destructive),
+            style: TextStyle(
+              fontSize: 12,
+              color: theme.colorScheme.destructive,
+            ),
           ),
           const SizedBox(height: 10),
           ShadButton.outline(
@@ -174,7 +183,7 @@ class _BucketVisibilityDialogState extends State<_BucketVisibilityDialog> {
           ),
           const SizedBox(height: 10),
         ] else if (_buckets.isEmpty) ...[
-          Text('当前账号没有可用桶。', style: theme.textTheme.small)
+          Text('当前账号没有可用桶。', style: theme.textTheme.small),
         ] else
           for (final bucket in _buckets) ...[
             _StandaloneBucketVisibilityRow(
@@ -187,21 +196,25 @@ class _BucketVisibilityDialogState extends State<_BucketVisibilityDialog> {
             if (bucket != _buckets.last) const SizedBox(height: 8),
           ],
         const SizedBox(height: 24),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            ShadButton.outline(
-              onPressed: _saving
-                  ? null
-                  : () => Navigator.of(context).pop(false),
-              child: const Text('取消'),
-            ),
-            const SizedBox(width: 10),
-            ShadButton(
-              onPressed: _saving || _loading ? null : _save,
-              child: _saving ? const Text('保存中...') : const Text('保存'),
-            ),
-          ],
+        SizedBox(
+          width: double.infinity,
+          child: Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              ShadButton.outline(
+                onPressed: _saving
+                    ? null
+                    : () => Navigator.of(context).pop(false),
+                child: const Text('取消'),
+              ),
+              ShadButton(
+                onPressed: _saving || _loading ? null : _save,
+                child: _saving ? const Text('保存中...') : const Text('保存'),
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -319,7 +332,9 @@ class _StandaloneBucketVisibilityRowState
               BucketSelectionCheckbox(
                 value: selected,
                 onChanged: (value) {
-                  final next = Map<String, BucketViewSettings>.from(widget.views);
+                  final next = Map<String, BucketViewSettings>.from(
+                    widget.views,
+                  );
                   if (value) {
                     next[widget.bucket.name] = const BucketViewSettings();
                   } else {

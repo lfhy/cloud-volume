@@ -112,7 +112,7 @@ class _DesktopWindowControlsState extends State<DesktopWindowControls>
           : '你可以先最小化窗口，或者直接退出应用。';
       final choice = await showAppModal<_CloseAction>(
         context: context,
-        builder: (dialogContext) => ShadDialog(
+        builder: (dialogContext) => AppShadDialog(
           title: const Text('关闭云卷？'),
           description: hasActiveMounts
               ? Text(description)
@@ -128,28 +128,34 @@ class _DesktopWindowControlsState extends State<DesktopWindowControls>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    ShadButton.outline(
-                      onPressed: () => Navigator.of(dialogContext).pop(
-                        WindowControls.supportsTray
-                            ? _CloseAction.tray
-                            : _CloseAction.minimize,
+                SizedBox(
+                  width: double.infinity,
+                  child: Wrap(
+                    alignment: WrapAlignment.end,
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      ShadButton.outline(
+                        onPressed: () => Navigator.of(dialogContext).pop(
+                          WindowControls.supportsTray
+                              ? _CloseAction.tray
+                              : _CloseAction.minimize,
+                        ),
+                        child: hasActiveMounts
+                            ? const Text('后台运行')
+                            : Text(
+                                WindowControls.supportsTray
+                                    ? '最小化到托盘'
+                                    : '最小化窗口',
+                              ),
                       ),
-                      child: hasActiveMounts
-                          ? const Text('后台运行')
-                          : Text(
-                              WindowControls.supportsTray ? '最小化到托盘' : '最小化窗口',
-                            ),
-                    ),
-                    const SizedBox(width: 10),
-                    ShadButton(
-                      onPressed: () =>
-                          Navigator.of(dialogContext).pop(_CloseAction.exit),
-                      child: const Text('退出云卷'),
-                    ),
-                  ],
+                      ShadButton(
+                        onPressed: () =>
+                            Navigator.of(dialogContext).pop(_CloseAction.exit),
+                        child: const Text('退出云卷'),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),

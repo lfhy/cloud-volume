@@ -16,7 +16,7 @@
 
 | 域 | 职责摘要 |
 |---|---|
-| [account_management](features/account_management.md) | 账号管理页/三步向导、账号禁用、首启配置(页面/保存职责分层)、桶可见性与别名、每桶配额与远端配额发现、自定义排序、多账号桶加载韧性(并发/超时/singleflight/负缓存/3s 拨号超时)。 |
+| [account_management](features/account_management.md) | 账号管理页/三步向导(字段与 OAuth 职责拆分)、账号禁用、首启配置(页面/保存职责分层)、桶可见性与别名、每桶配额与远端配额发现、自定义排序、多账号桶加载韧性(并发/超时/singleflight/负缓存/3s 拨号超时)。 |
 | [file_actions](features/file_actions.md) | 复制/移动目录选择、本地粘贴/拖拽上传(macOS Cmd+V channel)、预览缓存索引(bbolt)与上传播种、S3 软删除回收站与 item 阶段进度。 |
 | [file_sync_p2p](features/file_sync_p2p.md) | 本地↔远端目录同步(三视图对账、删除推断、重命名检测)与 LAN P2P(mDNS 多账号发现、QUIC 传输、事件/内容安全,默认关闭)。 |
 
@@ -26,7 +26,7 @@
 |---|---|
 | [app_shell](features/app_shell.md) | 窗口关闭/托盘退出确认、macOS 窗口生命周期与常量、导航结构(桌面侧栏、移动可配置底栏 + 首页 + 返回栈)、应用图标生成链、响应式页面头部操作区。 |
 | [ui_rules](features/ui_rules.md) | Flutter 组织规范、hover 可点击行 binding(StatefulWidget + `_hovered` + 中性洗色)、`AppLoadingIndicator` 分档、设置卡视觉一致性。 |
-| [app_modal](features/app_modal.md) | 统一拟态框(`showAppModal*` 唯一入口)与全量模态清单;远端目录选择器的精确初始目标及窄屏动作/列表布局;debug 桌面子窗口壳(`DesktopModalSubWindowApp`、内容自适应缩放)。 |
+| [app_modal](features/app_modal.md) | 统一拟态框(`showAppModal*` 唯一入口、`AppShadDialog` Android 全屏/桌面有限宽)与全量模态清单;远端目录选择器的精确初始目标及 fill-height/窄屏布局;debug 桌面子窗口壳(`DesktopModalSubWindowApp`、内容自适应缩放)。 |
 | [settings](features/settings.md) | 设置页两栏锚点布局、四级诊断日志、应用内自动更新(镜像规则/完整性校验/续传重试/Windows 绿色 ZIP)、全局与每账号代理、远端配置备份与首启还原(单根备份别名与真实桶 identity 分离)。 |
 
 ## 平台

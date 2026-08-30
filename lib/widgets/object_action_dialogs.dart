@@ -9,6 +9,16 @@ import 'package:remote_storage/services/app_modal.dart';
 import 'package:remote_storage/services/remote_storage_api.dart';
 import 'package:remote_storage/widgets/remote_directory_picker_dialog.dart';
 
+Widget _dialogActionWrap(List<Widget> actions) => SizedBox(
+  width: double.infinity,
+  child: Wrap(
+    alignment: WrapAlignment.end,
+    spacing: 10,
+    runSpacing: 10,
+    children: actions,
+  ),
+);
+
 // DeleteDialogChoice carries the user's delete confirmation plus whether the
 // objects should bypass the trash and be removed permanently.
 class DeleteDialogChoice {
@@ -66,24 +76,20 @@ class _DeleteDialogBodyState extends State<DeleteDialogBody> {
             const SizedBox(height: 18),
           ] else
             const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              ShadButton.outline(
-                onPressed: () => Navigator.of(context).pop(
-                  const DeleteDialogChoice(confirmed: false, permanent: false),
-                ),
-                child: const Text('取消'),
+          _dialogActionWrap([
+            ShadButton.outline(
+              onPressed: () => Navigator.of(context).pop(
+                const DeleteDialogChoice(confirmed: false, permanent: false),
               ),
-              const SizedBox(width: 10),
-              ShadButton.destructive(
-                onPressed: () => Navigator.of(context).pop(
-                  DeleteDialogChoice(confirmed: true, permanent: _permanent),
-                ),
-                child: Text(widget.actionLabel),
-              ),
-            ],
-          ),
+              child: const Text('取消'),
+            ),
+            ShadButton.destructive(
+              onPressed: () => Navigator.of(
+                context,
+              ).pop(DeleteDialogChoice(confirmed: true, permanent: _permanent)),
+              child: Text(widget.actionLabel),
+            ),
+          ]),
         ],
       ),
     );
@@ -189,7 +195,7 @@ Future<String?> showRenameObjectDialog(
   try {
     return await showAppModal<String?>(
       context: context,
-      builder: (dialogContext) => ShadDialog(
+      builder: (dialogContext) => AppShadDialog(
         title: const Text('重命名'),
         description: Text(object.isDir ? '输入新的目录名称。' : '输入新的文件名称。'),
         child: SizedBox(
@@ -201,21 +207,17 @@ Future<String?> showRenameObjectDialog(
               const SizedBox(height: 8),
               ShadInput(controller: controller),
               const SizedBox(height: 18),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  ShadButton.outline(
-                    onPressed: () => Navigator.of(dialogContext).pop(),
-                    child: const Text('取消'),
-                  ),
-                  const SizedBox(width: 10),
-                  ShadButton(
-                    onPressed: () =>
-                        Navigator.of(dialogContext).pop(controller.text.trim()),
-                    child: const Text('保存'),
-                  ),
-                ],
-              ),
+              _dialogActionWrap([
+                ShadButton.outline(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('取消'),
+                ),
+                ShadButton(
+                  onPressed: () =>
+                      Navigator.of(dialogContext).pop(controller.text.trim()),
+                  child: const Text('保存'),
+                ),
+              ]),
             ],
           ),
         ),
@@ -270,7 +272,7 @@ Future<DeleteDialogChoice> showDeleteObjectDialog(
 }) async {
   return await showAppModal<DeleteDialogChoice>(
         context: context,
-        builder: (dialogContext) => ShadDialog(
+        builder: (dialogContext) => AppShadDialog(
           title: const Text('删除'),
           description: Text(
             trashEnabled
@@ -298,7 +300,7 @@ Future<DeleteDialogChoice> showDeleteObjectsDialog(
 }) async {
   return await showAppModal<DeleteDialogChoice>(
         context: context,
-        builder: (dialogContext) => ShadDialog(
+        builder: (dialogContext) => AppShadDialog(
           title: const Text('批量删除'),
           description: Text(
             trashEnabled
@@ -321,7 +323,7 @@ Future<bool> showDeleteTrashItemDialog(
 ) async {
   return await showAppModal<bool>(
         context: context,
-        builder: (dialogContext) => ShadDialog(
+        builder: (dialogContext) => AppShadDialog(
           title: const Text('彻底删除'),
           description: const Text('将从回收站彻底删除，之后无法恢复。'),
           child: SizedBox(
@@ -336,20 +338,16 @@ Future<bool> showDeleteTrashItemDialog(
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 18),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    ShadButton.outline(
-                      onPressed: () => Navigator.of(dialogContext).pop(false),
-                      child: const Text('取消'),
-                    ),
-                    const SizedBox(width: 10),
-                    ShadButton.destructive(
-                      onPressed: () => Navigator.of(dialogContext).pop(true),
-                      child: const Text('彻底删除'),
-                    ),
-                  ],
-                ),
+                _dialogActionWrap([
+                  ShadButton.outline(
+                    onPressed: () => Navigator.of(dialogContext).pop(false),
+                    child: const Text('取消'),
+                  ),
+                  ShadButton.destructive(
+                    onPressed: () => Navigator.of(dialogContext).pop(true),
+                    child: const Text('彻底删除'),
+                  ),
+                ]),
               ],
             ),
           ),
@@ -361,7 +359,7 @@ Future<bool> showDeleteTrashItemDialog(
 Future<bool> showDeleteTrashItemsDialog(BuildContext context, int count) async {
   return await showAppModal<bool>(
         context: context,
-        builder: (dialogContext) => ShadDialog(
+        builder: (dialogContext) => AppShadDialog(
           title: const Text('批量彻底删除'),
           description: Text('将从回收站彻底删除选中的 $count 个项目，之后无法恢复。'),
           child: SizedBox(
@@ -371,20 +369,16 @@ Future<bool> showDeleteTrashItemsDialog(BuildContext context, int count) async {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    ShadButton.outline(
-                      onPressed: () => Navigator.of(dialogContext).pop(false),
-                      child: const Text('取消'),
-                    ),
-                    const SizedBox(width: 10),
-                    ShadButton.destructive(
-                      onPressed: () => Navigator.of(dialogContext).pop(true),
-                      child: const Text('彻底删除'),
-                    ),
-                  ],
-                ),
+                _dialogActionWrap([
+                  ShadButton.outline(
+                    onPressed: () => Navigator.of(dialogContext).pop(false),
+                    child: const Text('取消'),
+                  ),
+                  ShadButton.destructive(
+                    onPressed: () => Navigator.of(dialogContext).pop(true),
+                    child: const Text('彻底删除'),
+                  ),
+                ]),
               ],
             ),
           ),
@@ -396,25 +390,21 @@ Future<bool> showDeleteTrashItemsDialog(BuildContext context, int count) async {
 Future<bool> showClearTrashDialog(BuildContext context, String bucket) async {
   return await showAppModal<bool>(
         context: context,
-        builder: (dialogContext) => ShadDialog(
+        builder: (dialogContext) => AppShadDialog(
           title: const Text('清空回收站'),
           description: Text('将彻底删除「$bucket」回收站中的所有项目，之后无法恢复。'),
           child: SizedBox(
             width: 380,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                ShadButton.outline(
-                  onPressed: () => Navigator.of(dialogContext).pop(false),
-                  child: const Text('取消'),
-                ),
-                const SizedBox(width: 10),
-                ShadButton.destructive(
-                  onPressed: () => Navigator.of(dialogContext).pop(true),
-                  child: const Text('清空回收站'),
-                ),
-              ],
-            ),
+            child: _dialogActionWrap([
+              ShadButton.outline(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('取消'),
+              ),
+              ShadButton.destructive(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('清空回收站'),
+              ),
+            ]),
           ),
         ),
       ) ??

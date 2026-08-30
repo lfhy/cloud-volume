@@ -36,7 +36,7 @@ class ProfilePickerDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    return ShadDialog(
+    return AppShadDialog(
       title: const Text('切换网关'),
       description: const Text('选择要连接的远程存储网关。'),
       child: SizedBox(

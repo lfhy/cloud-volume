@@ -1,10 +1,9 @@
-// 文件同步配置编辑弹窗：分两步完成配置，降低单屏信息密度。
-// 步骤 1 选择桶（桶列表来自文件管理的同一数据源，自动绑定关联账号）
-// 步骤 2 同步设置（远端前缀、本地目录、同步方向与策略）。
+// 文件同步配置编辑弹窗：分步选择同步两端、策略与高级设置。
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:remote_storage/models/file_manager_bucket_entry.dart';
 import 'package:remote_storage/models/sync_profile.dart';
+import 'package:remote_storage/services/app_modal.dart';
 import 'package:remote_storage/services/remote_storage_api.dart';
 import 'package:remote_storage/models/sync_remote_open_request.dart';
 import 'package:remote_storage/widgets/remote_directory_picker_dialog.dart';
@@ -61,6 +60,7 @@ class _FileSyncProfileEditorState extends State<FileSyncProfileEditor> {
   final _nameController = TextEditingController();
   final _localPathController = TextEditingController();
   final _excludeController = TextEditingController();
+  final _nameFocusNode = FocusNode(), _excludeFocusNode = FocusNode();
 
   // 当前步骤索引（0 = 选择桶，1 = 同步设置）。
   int _step = 0;
@@ -93,12 +93,16 @@ class _FileSyncProfileEditorState extends State<FileSyncProfileEditor> {
       bucket: initial.bucket,
       prefix: initial.remotePrefix,
       profileName: initial.accountProfile,
-      config: widget.buckets
-          .where((b) =>
-              b.bucket.name == initial.bucket &&
-              b.profileName == initial.accountProfile)
-          .firstOrNull
-          ?.config ?? widget.buckets.first.config,
+      config:
+          widget.buckets
+              .where(
+                (b) =>
+                    b.bucket.name == initial.bucket &&
+                    b.profileName == initial.accountProfile,
+              )
+              .firstOrNull
+              ?.config ??
+          widget.buckets.first.config,
     );
   }
 
@@ -107,6 +111,8 @@ class _FileSyncProfileEditorState extends State<FileSyncProfileEditor> {
     _nameController.dispose();
     _localPathController.dispose();
     _excludeController.dispose();
+    _nameFocusNode.dispose();
+    _excludeFocusNode.dispose();
     super.dispose();
   }
 
@@ -185,9 +191,7 @@ class _FileSyncProfileEditorState extends State<FileSyncProfileEditor> {
   }
 
   Future<void> _pickLocalDirectory() async {
-    final path = await FilePicker.getDirectoryPath(
-      dialogTitle: '选择需要同步的本地目录',
-    );
+    final path = await FilePicker.getDirectoryPath(dialogTitle: '选择需要同步的本地目录');
     if (path != null) {
       setState(() => _localPathController.text = path);
     }
@@ -248,37 +252,40 @@ class _FileSyncProfileEditorState extends State<FileSyncProfileEditor> {
       _saving = true;
       _errorText = null;
     });
-    final profile = (widget.initial ?? SyncProfile(
-      id: '',
-      name: '',
-      accountProfile: '',
-      bucket: '',
-      remotePrefix: '',
-      localPath: '',
-      direction: SyncDirection.twoway,
-      intervalSeconds: 300,
-      conflictPolicy: SyncConflictPolicy.newest,
-      excludePatterns: const <String>[],
-      quietSeconds: 10,
-      enabled: true,
-    )).copyWith(
-      name: name,
-      // 从目录选择器结果自动绑定。
-      accountProfile: remote.profileName,
-      bucket: remote.bucket,
-      remotePrefix: remote.prefix,
-      localPath: _localPathController.text.trim(),
-      direction: _direction,
-      intervalSeconds: _intervalSeconds,
-      conflictPolicy: _conflictPolicy,
-      quietSeconds: _quietSeconds,
-      excludePatterns: _excludeController.text
-          .split('\n')
-          .map((line) => line.trim())
-          .where((line) => line.isNotEmpty)
-          .toList(),
-      enabled: _enabled,
-    );
+    final profile =
+        (widget.initial ??
+                SyncProfile(
+                  id: '',
+                  name: '',
+                  accountProfile: '',
+                  bucket: '',
+                  remotePrefix: '',
+                  localPath: '',
+                  direction: SyncDirection.twoway,
+                  intervalSeconds: 300,
+                  conflictPolicy: SyncConflictPolicy.newest,
+                  excludePatterns: const <String>[],
+                  quietSeconds: 10,
+                  enabled: true,
+                ))
+            .copyWith(
+              name: name,
+              // 从目录选择器结果自动绑定。
+              accountProfile: remote.profileName,
+              bucket: remote.bucket,
+              remotePrefix: remote.prefix,
+              localPath: _localPathController.text.trim(),
+              direction: _direction,
+              intervalSeconds: _intervalSeconds,
+              conflictPolicy: _conflictPolicy,
+              quietSeconds: _quietSeconds,
+              excludePatterns: _excludeController.text
+                  .split('\n')
+                  .map((line) => line.trim())
+                  .where((line) => line.isNotEmpty)
+                  .toList(),
+              enabled: _enabled,
+            );
     final ok = await widget.onSave(profile);
     if (!mounted) return;
     if (ok) {
@@ -297,19 +304,23 @@ class _FileSyncProfileEditorState extends State<FileSyncProfileEditor> {
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     if (!widget.asDialog) {
-      return _buildSubWindowLayout(theme);
+      return _buildFillHeightLayout(theme);
     }
-    return ShadDialog(
+    final fullscreen = usesFullscreenAppModal;
+    final compactFullscreen = usesCompactFullscreenAppModal(context);
+    return AppShadDialog(
       title: Text(widget.initial == null ? '新建同步配置' : '编辑同步配置'),
       description: const Text('将一个本地目录与远端桶目录保持同步。'),
       constraints: const BoxConstraints(maxWidth: 600),
-      scrollable: true,
-      child: _buildDialogContent(theme),
+      scrollable: !fullscreen || compactFullscreen,
+      child: fullscreen && !compactFullscreen
+          ? _buildFillHeightLayout(theme)
+          : _buildDialogContent(theme),
     );
   }
 
-  /// 子窗口：中间区始终可滚动以防溢出；内容顶对齐，第一步不会底下大块留白。
-  Widget _buildSubWindowLayout(ShadThemeData theme) {
+  /// Normal fill-height shells keep navigation pinned below the scrolling step.
+  Widget _buildFillHeightLayout(ShadThemeData theme) {
     final stepBody = _buildStepBody(theme);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -318,10 +329,7 @@ class _FileSyncProfileEditorState extends State<FileSyncProfileEditor> {
         const SizedBox(height: 16),
         Expanded(
           child: SingleChildScrollView(
-            child: Align(
-              alignment: Alignment.topLeft,
-              child: stepBody,
-            ),
+            child: Align(alignment: Alignment.topLeft, child: stepBody),
           ),
         ),
         if (_errorText != null) ...[
@@ -374,21 +382,16 @@ class _FileSyncProfileEditorState extends State<FileSyncProfileEditor> {
 
   /// 步骤选项卡：点击 1/2 可自由切换查看各步内容。
   Widget _buildStepIndicator(ShadThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: List.generate(_stepLabels.length, (i) {
-            final isActive = i == _step;
-            return Expanded(
-              child: Padding(
-                padding: EdgeInsets.only(right: i < _stepLabels.length - 1 ? 8 : 0),
-                child: _buildStepTab(theme, i, isActive),
-              ),
-            );
-          }),
-        ),
-      ],
+    return Row(
+      children: List.generate(_stepLabels.length, (i) {
+        final isActive = i == _step;
+        return Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(right: i < _stepLabels.length - 1 ? 8 : 0),
+            child: _buildStepTab(theme, i, isActive),
+          ),
+        );
+      }),
     );
   }
 
@@ -449,37 +452,33 @@ class _FileSyncProfileEditorState extends State<FileSyncProfileEditor> {
   /// 底部导航。
   Widget _buildNavButtons(ShadThemeData theme) {
     final isLast = _step == _stepLabels.length - 1;
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        if (_step > 0) ...[
-          ShadButton.outline(
-            onPressed: _back,
-            child: const Row(
-              children: [
-                Icon(LucideIcons.chevronLeft, size: 16),
-                SizedBox(width: 2),
-                Text('上一步'),
-              ],
-            ),
+    return _syncDialogActionWrap([
+      if (_step > 0) ...[
+        ShadButton.outline(
+          onPressed: _back,
+          child: const Row(
+            children: [
+              Icon(LucideIcons.chevronLeft, size: 16),
+              SizedBox(width: 2),
+              Text('上一步'),
+            ],
           ),
-          const SizedBox(width: 10),
-        ],
-        ShadButton(
-          onPressed: _saving ? null : _next,
-          child: _saving
-              ? const Text('保存中...')
-              : Row(
-                  children: [
-                    Text(isLast ? '保存' : '下一步'),
-                    if (!isLast) ...[
-                      const SizedBox(width: 4),
-                      const Icon(LucideIcons.chevronRight, size: 16),
-                    ],
-                  ],
-                ),
         ),
       ],
-    );
+      ShadButton(
+        onPressed: _saving ? null : _next,
+        child: _saving
+            ? const Text('保存中...')
+            : Row(
+                children: [
+                  Text(isLast ? '保存' : '下一步'),
+                  if (!isLast) ...[
+                    const SizedBox(width: 4),
+                    const Icon(LucideIcons.chevronRight, size: 16),
+                  ],
+                ],
+              ),
+      ),
+    ]);
   }
 }

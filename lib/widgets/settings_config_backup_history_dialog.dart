@@ -81,9 +81,7 @@ class _ConfigBackupHistoryDialogState extends State<ConfigBackupHistoryDialog> {
     final confirmed = await showAppConfirmModal(
       context: context,
       title: const Text('还原此配置备份？'),
-      description: Text(
-        '将用 $label 替换当前账号、代理和显示排序；备份目标会保留，方便继续管理备份。',
-      ),
+      description: Text('将用 $label 替换当前账号、代理和显示排序；备份目标会保留，方便继续管理备份。'),
       confirmLabel: '还原配置',
       destructive: true,
     );
@@ -125,8 +123,11 @@ class _ConfigBackupHistoryDialogState extends State<ConfigBackupHistoryDialog> {
       // 用户取消密码输入：静默退出，不弹「还原失败」。
     } catch (error) {
       if (mounted) {
-        showAppErrorToast(context,
-            title: '还原失败', message: configBackupFriendlyError(error));
+        showAppErrorToast(
+          context,
+          title: '还原失败',
+          message: configBackupFriendlyError(error),
+        );
       }
     } finally {
       if (mounted) setState(() => _restoring = false);
@@ -186,7 +187,7 @@ class _ConfigBackupHistoryDialogState extends State<ConfigBackupHistoryDialog> {
     // list refresh was still running — the classic "first click does nothing"
     // bug. Only an active restore/delete disables the row actions.
     final busy = _restoring || _deleting;
-    return ShadDialog(
+    return AppShadDialog(
       title: const Text('配置备份历史'),
       description: const Text('按时间查看远端加密快照。还原会替换当前账号、代理和显示排序。'),
       constraints: const BoxConstraints(maxWidth: 560),
@@ -203,8 +204,8 @@ class _ConfigBackupHistoryDialogState extends State<ConfigBackupHistoryDialog> {
                     _loading && _snapshots.isEmpty
                         ? '正在读取…'
                         : _snapshots.isEmpty
-                            ? '暂无备份'
-                            : '共 ${_snapshots.length} 份备份',
+                        ? '暂无备份'
+                        : '共 ${_snapshots.length} 份备份',
                     style: TextStyle(
                       fontSize: 12,
                       color: theme.colorScheme.mutedForeground,
@@ -436,4 +437,3 @@ class _BackupSnapshotTileState extends State<_BackupSnapshotTile> {
     );
   }
 }
-

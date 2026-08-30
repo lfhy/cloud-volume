@@ -229,7 +229,7 @@ class FileManagerBreadcrumbBar extends StatelessWidget {
   ) {
     showAppModal<void>(
       context: context,
-      builder: (dialogContext) => ShadDialog(
+      builder: (dialogContext) => AppShadDialog(
         title: const Text('跳转到层级'),
         description: const Text('选择要展开的中间路径层级。'),
         child: SizedBox(

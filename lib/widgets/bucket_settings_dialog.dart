@@ -9,6 +9,16 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 const int _bytesPerGigabyte = 1024 * 1024 * 1024;
 const double _maxCustomQuotaGb = 8 * 1024 * 1024;
 
+Widget _dialogActionWrap(List<Widget> actions) => SizedBox(
+  width: double.infinity,
+  child: Wrap(
+    alignment: WrapAlignment.end,
+    spacing: 10,
+    runSpacing: 10,
+    children: actions,
+  ),
+);
+
 Future<RemoteStorageConfig?> showBucketSettingsDialog(
   BuildContext context, {
   required String bucket,
@@ -29,7 +39,7 @@ Future<RemoteStorageConfig?> showBucketSettingsDialog(
   return showAppModal<RemoteStorageConfig?>(
     context: context,
     builder: (dialogContext) {
-      return ShadDialog(
+      return AppShadDialog(
         title: const Text('桶设置'),
         description: Text('配置「$bucket」的配额、只读和回收站策略。'),
         child: StatefulBuilder(
@@ -156,46 +166,41 @@ Future<RemoteStorageConfig?> showBucketSettingsDialog(
                     ),
                   ),
                   const SizedBox(height: 18),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      ShadButton.outline(
-                        onPressed: () => Navigator.of(dialogContext).pop(),
-                        child: const Text('取消'),
-                      ),
-                      const SizedBox(width: 10),
-                      ShadButton(
-                        onPressed: () {
-                          final customQuotaBytes = _parseQuotaBytes(
-                            quotaController.text,
+                  _dialogActionWrap([
+                    ShadButton.outline(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      child: const Text('取消'),
+                    ),
+                    ShadButton(
+                      onPressed: () {
+                        final customQuotaBytes = _parseQuotaBytes(
+                          quotaController.text,
+                        );
+                        if (customQuotaBytes == null) {
+                          setDialogState(
+                            () => quotaError =
+                                '请输入 0 到 ${_maxCustomQuotaGb.toInt()} 之间的数值。',
                           );
-                          if (customQuotaBytes == null) {
-                            setDialogState(
-                              () => quotaError =
-                                  '请输入 0 到 ${_maxCustomQuotaGb.toInt()} 之间的数值。',
-                            );
-                            return;
-                          }
-                          final trimmed = trashController.text.trim();
-                          final nextSettings = Map<String, BucketSettings>.from(
-                            config.bucketSettings,
-                          );
-                          nextSettings[bucket] = BucketSettings(
-                            readOnly: readOnly,
-                            trashEnabled: trashEnabled,
-                            trashDirectory: trimmed,
-                            customQuotaBytes: customQuotaBytes,
-                            winFspVolumeLabel: volumeLabelController.text
-                                .trim(),
-                          );
-                          Navigator.of(
-                            dialogContext,
-                          ).pop(config.copyWith(bucketSettings: nextSettings));
-                        },
-                        child: const Text('保存'),
-                      ),
-                    ],
-                  ),
+                          return;
+                        }
+                        final trimmed = trashController.text.trim();
+                        final nextSettings = Map<String, BucketSettings>.from(
+                          config.bucketSettings,
+                        );
+                        nextSettings[bucket] = BucketSettings(
+                          readOnly: readOnly,
+                          trashEnabled: trashEnabled,
+                          trashDirectory: trimmed,
+                          customQuotaBytes: customQuotaBytes,
+                          winFspVolumeLabel: volumeLabelController.text.trim(),
+                        );
+                        Navigator.of(
+                          dialogContext,
+                        ).pop(config.copyWith(bucketSettings: nextSettings));
+                      },
+                      child: const Text('保存'),
+                    ),
+                  ]),
                 ],
               ),
             );

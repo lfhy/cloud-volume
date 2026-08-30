@@ -21,7 +21,8 @@
 - `lib/pages/file_manager_page_sources.dart` / `file_manager_page_bucket_loading.dart` — source 失败携带精确 `profileName`;只有最新加载 generation 可发布错误,防止重叠启动重载把失败账号目标替换成活跃/第一账号。
 - `lib/pages/file_manager_page.dart` — 桶列表错误视图次级动作是**「账号管理」**,接 `onOpenAccountManagement`,`main_layout_page.dart` 解析为 `onSelectedItemChanged(SidebarItem.storage)`:跳到账号管理页(可编辑/禁用/重启)而不是原地开单 profile 编辑器。
 - `lib/widgets/cloud_storage_account_dialog.dart` — 向导/编辑 UI;双模式 `asDialog`(默认 true)。
-- `lib/widgets/cloud_storage_account_dialog_steps.dart` — `stepProtocolPicker` / `stepConnectionFields` + 协议字段构建器;`StorageProtocolCard` 是 hover 正典(见 [ui_rules](ui_rules.md))。
+- `lib/widgets/cloud_storage_account_dialog_steps.dart` — `stepProtocolPicker` / `stepConnectionFields`、高级设置 chrome 与窄屏单/双列编排;`StorageProtocolCard` 是 hover 正典(见 [ui_rules](ui_rules.md))。
+- `lib/widgets/cloud_storage_account_dialog_fields.dart` / `cloud_storage_account_dialog_oauth.dart` — S3/WebDAV/FTP/SFTP/Baidu 字段组与 Baidu OAuth 动作;从主 widget/steps 拆出以维持 500 行上限。
 - `lib/widgets/cloud_storage_account_dialog_bucket_loading.dart` / `cloud_storage_account_dialog_bucket_visibility.dart` — 拉取 live 桶、编辑第三步 allowlist/别名/prefix。
 - `lib/widgets/cloud_storage_account_dialog_credentials.dart` — S3 Access Key/Secret Key 被修改时暴露显式验证按钮,调桥接 `validate_account_credentials`;`bridge/dispatch_config.go` 对 S3 用 `s3.CheckAccess`、其它后端用 `ListBuckets` 验证,不持久化任何东西。
 - `lib/models/cloud_storage_account_draft.dart` / `lib/utils/account_config_builder.dart` / `lib/utils/account_profile_name.dart` — 草稿、配置构建、profile key。`buildAccountConfig` 在编辑字段为空时保留已存 S3/WebDAV/FTP 密码;编辑器绝不把 secret 水合进 Flutter。

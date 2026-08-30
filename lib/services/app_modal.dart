@@ -1,8 +1,10 @@
-// Unified in-app modal API. All business dialogs should enter through here
-// instead of calling showShadDialog directly so barrier, width, and chrome
-// stay consistent. OS sub-windows are a separate debug-only path.
+// Unified in-app modal API and platform-aware Shad dialog surface.
+// Business dialogs enter here so routing, Android fullscreen presentation,
+// system chrome, and desktop sizing stay consistent.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 /// Default max width for standard form / confirm modals.
@@ -11,10 +13,152 @@ const double kAppModalDefaultMaxWidth = 480;
 /// Default content width used inside many existing dialogs.
 const double kAppModalDefaultContentWidth = 420;
 
+/// Whether app-modal surfaces should use Android's fullscreen presentation.
+bool get usesFullscreenAppModal =>
+    !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+/// Whether Android has too little post-keyboard height for pinned dialog chrome.
+bool usesCompactFullscreenAppModal(BuildContext context) {
+  if (!usesFullscreenAppModal) return false;
+  final availableHeight =
+      MediaQuery.sizeOf(context).height -
+      MediaQuery.viewInsetsOf(context).vertical;
+  return availableHeight < 480;
+}
+
+/// A [ShadDialog] whose surface fills the available Android viewport.
+///
+/// Desktop and web retain every caller-supplied Shad property. On Android the
+/// surface itself extends behind system bars while Shad's inner [SafeArea]
+/// keeps title, content, actions, and the close button reachable.
+class AppShadDialog extends ShadDialog {
+  const AppShadDialog({
+    super.key,
+    super.title,
+    super.description,
+    super.child,
+    super.actions,
+    super.closeIcon,
+    super.closeIconData,
+    super.closeIconPosition,
+    super.radius,
+    super.backgroundColor,
+    super.expandActionsWhenTiny,
+    super.padding,
+    super.gap,
+    super.constraints,
+    super.border,
+    super.shadows,
+    super.removeBorderRadiusWhenTiny,
+    super.actionsAxis,
+    super.actionsMainAxisSize,
+    super.actionsMainAxisAlignment,
+    super.actionsVerticalDirection,
+    super.titleStyle,
+    super.descriptionStyle,
+    super.titleTextAlign,
+    super.descriptionTextAlign,
+    super.alignment,
+    super.mainAxisAlignment,
+    super.crossAxisAlignment,
+    super.scrollable,
+    super.scrollPadding,
+    super.actionsGap,
+    super.useSafeArea,
+    super.titlePinned,
+    super.descriptionPinned,
+    super.actionsPinned,
+  });
+
+  const AppShadDialog.alert({
+    super.key,
+    super.title,
+    super.description,
+    super.child,
+    super.actions,
+    super.closeIcon,
+    super.closeIconData,
+    super.closeIconPosition,
+    super.radius,
+    super.backgroundColor,
+    super.expandActionsWhenTiny,
+    super.padding,
+    super.gap,
+    super.constraints,
+    super.border,
+    super.shadows,
+    super.removeBorderRadiusWhenTiny,
+    super.actionsAxis,
+    super.actionsMainAxisSize,
+    super.actionsMainAxisAlignment,
+    super.actionsVerticalDirection,
+    super.titleStyle,
+    super.descriptionStyle,
+    super.titleTextAlign,
+    super.descriptionTextAlign,
+    super.alignment,
+    super.mainAxisAlignment,
+    super.crossAxisAlignment,
+    super.scrollable,
+    super.scrollPadding,
+    super.actionsGap,
+    super.useSafeArea,
+    super.titlePinned,
+    super.descriptionPinned,
+    super.actionsPinned,
+  }) : super.alert();
+
+  @override
+  Widget build(BuildContext context) {
+    if (!usesFullscreenAppModal) return super.build(context);
+    final compactHeight = usesCompactFullscreenAppModal(context);
+
+    return ShadDialog.raw(
+      variant: variant,
+      title: title,
+      description: description,
+      actions: actions,
+      closeIcon: closeIcon,
+      closeIconData: closeIconData,
+      closeIconPosition: closeIconPosition,
+      radius: BorderRadius.zero,
+      backgroundColor: backgroundColor,
+      expandActionsWhenTiny: expandActionsWhenTiny,
+      padding: compactHeight
+          ? const EdgeInsets.symmetric(horizontal: 24, vertical: 8)
+          : padding,
+      gap: gap,
+      constraints: const BoxConstraints.expand(),
+      border: const Border(),
+      shadows: const <BoxShadow>[],
+      removeBorderRadiusWhenTiny: true,
+      actionsAxis: actionsAxis,
+      actionsMainAxisSize: actionsMainAxisSize,
+      actionsMainAxisAlignment: actionsMainAxisAlignment,
+      actionsVerticalDirection: actionsVerticalDirection,
+      titleStyle: titleStyle,
+      descriptionStyle: descriptionStyle,
+      titleTextAlign: titleTextAlign,
+      descriptionTextAlign: descriptionTextAlign,
+      alignment: alignment,
+      mainAxisAlignment: mainAxisAlignment,
+      crossAxisAlignment: crossAxisAlignment,
+      scrollable: scrollable,
+      scrollPadding: scrollPadding,
+      actionsGap: actionsGap,
+      useSafeArea: true,
+      titlePinned: titlePinned,
+      descriptionPinned: descriptionPinned,
+      actionsPinned: actionsPinned,
+      child: child,
+    );
+  }
+}
+
 /// Presents an in-app modal route. Prefer this over bare [showShadDialog].
 ///
-/// Pass a builder that returns a [ShadDialog] (or a widget that builds one)
-/// so existing dual-mode editors (`asDialog: true`) keep working unchanged.
+/// The builder should return an [AppShadDialog] (or a widget that builds one)
+/// so Android presentation remains fullscreen without changing desktop sizes.
 Future<T?> showAppModal<T>({
   required BuildContext context,
   required WidgetBuilder builder,
@@ -24,22 +168,41 @@ Future<T?> showAppModal<T>({
   RouteSettings? routeSettings,
   Offset? anchorPoint,
 }) {
+  final fullscreen = usesFullscreenAppModal;
   return showShadDialog<T>(
     context: context,
-    builder: builder,
+    builder: (dialogContext) {
+      final dialog = builder(dialogContext);
+      if (!fullscreen) return dialog;
+
+      final theme = ShadTheme.of(dialogContext);
+      final iconBrightness = theme.brightness == Brightness.dark
+          ? Brightness.light
+          : Brightness.dark;
+      return AnnotatedRegion<SystemUiOverlayStyle>(
+        value: SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: iconBrightness,
+          statusBarBrightness: theme.brightness,
+          systemNavigationBarColor: Colors.transparent,
+          systemNavigationBarIconBrightness: iconBrightness,
+          systemStatusBarContrastEnforced: false,
+          systemNavigationBarContrastEnforced: false,
+        ),
+        child: dialog,
+      );
+    },
     barrierDismissible: barrierDismissible,
     barrierColor: barrierColor,
     useRootNavigator: useRootNavigator,
     routeSettings: routeSettings,
     anchorPoint: anchorPoint,
+    animateIn: fullscreen ? const [FadeEffect()] : null,
+    animateOut: fullscreen ? const [FadeEffect(begin: 1, end: 0)] : null,
   );
 }
 
 /// Convenience builder for title / description / body / trailing action row.
-///
-/// Use for simple confirmations and forms that do not already own a
-/// [ShadDialog]. Large dual-mode editors should keep building their own
-/// [ShadDialog] and call [showAppModal] instead.
 Future<T?> showAppModalDialog<T>({
   required BuildContext context,
   Widget? title,
@@ -53,7 +216,8 @@ Future<T?> showAppModalDialog<T>({
   bool alert = false,
   bool expandActionsWhenTiny = true,
 }) {
-  final effectiveContentWidth = contentWidth ??
+  final effectiveContentWidth =
+      contentWidth ??
       (maxWidth > 40 ? maxWidth - 40 : maxWidth).clamp(280.0, maxWidth);
 
   return showAppModal<T>(
@@ -61,45 +225,44 @@ Future<T?> showAppModalDialog<T>({
     barrierDismissible: barrierDismissible,
     builder: (dialogContext) {
       Widget? body = child;
-if (actions.isNotEmpty) {
+      if (actions.isNotEmpty) {
         body = Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             ?child,
             if (child != null) const SizedBox(height: 18),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                for (var i = 0; i < actions.length; i++) ...[
-                  if (i > 0) const SizedBox(width: 10),
-                  actions[i],
-                ],
-              ],
+            OverflowBar(
+              alignment: MainAxisAlignment.end,
+              overflowAlignment: OverflowBarAlignment.end,
+              spacing: 10,
+              overflowSpacing: 10,
+              children: actions,
             ),
           ],
         );
       }
 
-      final sizedBody =
-          body == null ? null : SizedBox(width: effectiveContentWidth, child: body);
-
+      final sizedBody = body == null
+          ? null
+          : SizedBox(width: effectiveContentWidth, child: body);
       final constraints = BoxConstraints(maxWidth: maxWidth);
+      final effectiveScrollable = usesFullscreenAppModal || scrollable;
       if (alert) {
-        return ShadDialog.alert(
+        return AppShadDialog.alert(
           title: title,
           description: description,
           constraints: constraints,
-          scrollable: scrollable,
+          scrollable: effectiveScrollable,
           expandActionsWhenTiny: expandActionsWhenTiny,
           child: sizedBody,
         );
       }
-      return ShadDialog(
+      return AppShadDialog(
         title: title,
         description: description,
         constraints: constraints,
-        scrollable: scrollable,
+        scrollable: effectiveScrollable,
         expandActionsWhenTiny: expandActionsWhenTiny,
         child: sizedBody,
       );

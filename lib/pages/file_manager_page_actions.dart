@@ -432,7 +432,7 @@ extension _FileManagerPageActions on _FileManagerPageState {
     unawaited(
       showAppModal<void>(
         context: context,
-        builder: (dialogContext) => ShadDialog(
+        builder: (dialogContext) => AppShadDialog(
           title: Text(title),
           description: Text(message),
           child: SizedBox(

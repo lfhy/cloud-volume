@@ -1,6 +1,7 @@
 // Regression coverage for backup restore directory selection on phone-sized dialogs.
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -276,6 +277,25 @@ void main() {
     );
   });
 
+  testWidgets('deep phone breadcrumb scrolls instead of overflowing', (
+    tester,
+  ) async {
+    const prefix =
+        'first-very-long-directory/second-very-long-directory/third-current-directory/';
+    final api = _PickerGateway(objectsByPrefix: const {prefix: []});
+    await tester.pumpWidget(
+      _pickerHarness(
+        api: api,
+        contentWidth: 363.4,
+        initial: _initial(bucket: 'root', prefix: prefix),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('third-current-directory'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('successful breadcrumb retry clears a missing-directory error', (
     tester,
   ) async {
@@ -364,6 +384,117 @@ void main() {
     expect(find.textContaining('没有找到配置备份'), findsOneWidget);
     expect(find.byType(AppLoadingIndicator), findsNothing);
   });
+
+  testWidgets('Android dialog picker fills height without unbounded flex', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      tester.view.physicalSize = const Size(393, 852);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final api = _PickerGateway();
+
+      await tester.pumpWidget(
+        ShadApp(
+          home: RemoteDirectoryPickerDialog(
+            api: api,
+            buckets: [_bucketEntry()],
+            initial: _initial(bucket: '', prefix: ''),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final expandedSurface = find.descendant(
+        of: find.byType(RemoteDirectoryPickerDialog),
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget is ConstrainedBox &&
+              widget.constraints == const BoxConstraints.expand(),
+        ),
+      );
+      expect(tester.getSize(expandedSurface), const Size(393, 852));
+      expect(find.text('选择远端目录'), findsOneWidget);
+      expect(find.text('取消'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+
+      tester.view.physicalSize = const Size(800, 360);
+      await tester.pumpAndSettle();
+      expect(tester.getSize(expandedSurface), const Size(800, 360));
+      expect(tester.takeException(), isNull);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets(
+    'Android landscape picker scrolls create input and actions above IME',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      try {
+        tester.view.physicalSize = const Size(800, 360);
+        tester.view.devicePixelRatio = 1;
+        tester.view.padding = const FakeViewPadding(top: 24, bottom: 20);
+        tester.view.viewPadding = const FakeViewPadding(top: 24, bottom: 20);
+        addTearDown(tester.view.reset);
+        final api = _PickerGateway();
+
+        await tester.pumpWidget(
+          ShadApp(
+            home: Builder(
+              builder: (context) => MediaQuery(
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: const TextScaler.linear(1.5)),
+                child: RemoteDirectoryPickerDialog(
+                  api: api,
+                  buckets: [_bucketEntry()],
+                  initial: _initial(bucket: 'root', prefix: ''),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.ensureVisible(find.text('新建目录'));
+        await tester.tap(find.text('新建目录'));
+        await tester.pumpAndSettle();
+        expect(find.text('输入目录名称'), findsOneWidget);
+
+        tester.view.viewInsets = const FakeViewPadding(bottom: 180);
+        await tester.pumpAndSettle();
+
+        final expandedSurface = find.descendant(
+          of: find.byType(RemoteDirectoryPickerDialog),
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget is ConstrainedBox &&
+                widget.constraints == const BoxConstraints.expand(),
+          ),
+        );
+        expect(tester.getSize(expandedSurface.first), const Size(800, 180));
+        expect(
+          tester
+              .widget<EditableText>(find.byType(EditableText))
+              .focusNode
+              .hasFocus,
+          isTrue,
+        );
+
+        await tester.ensureVisible(find.text('选择当前目录'));
+        await tester.pumpAndSettle();
+        final surfaceRect = tester.getRect(expandedSurface.first);
+        final actionRect = tester.getRect(find.text('选择当前目录'));
+        expect(actionRect.top, greaterThanOrEqualTo(surfaceRect.top + 24));
+        expect(actionRect.bottom, lessThanOrEqualTo(surfaceRect.bottom - 20));
+        expect(tester.takeException(), isNull);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    },
+  );
 }
 
 Widget _pickerHarness({

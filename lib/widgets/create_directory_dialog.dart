@@ -4,6 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:remote_storage/services/app_modal.dart';
 
+Widget _dialogActionWrap(List<Widget> actions) => SizedBox(
+  width: double.infinity,
+  child: Wrap(
+    alignment: WrapAlignment.end,
+    spacing: 10,
+    runSpacing: 10,
+    children: actions,
+  ),
+);
+
 class CreateDirectoryDialog extends StatelessWidget {
   const CreateDirectoryDialog({
     super.key,
@@ -42,7 +52,7 @@ class CreateDirectoryDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ShadDialog(
+    return AppShadDialog(
       title: const Text('新建目录'),
       description: const Text('输入目录名称后，会在当前路径下创建空目录。'),
       child: SizedBox(
@@ -52,11 +62,11 @@ class CreateDirectoryDialog extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 8),
-           ShadInput(
-             controller: controller,
-             placeholder: const Text('例如：images / backup'),
-             onSubmitted: creating ? null : (_) => onCreate(),
-           ),
+            ShadInput(
+              controller: controller,
+              placeholder: const Text('例如：images / backup'),
+              onSubmitted: creating ? null : (_) => onCreate(),
+            ),
             if (errorText != null) ...[
               const SizedBox(height: 10),
               Text(
@@ -68,20 +78,16 @@ class CreateDirectoryDialog extends StatelessWidget {
               ),
             ],
             const SizedBox(height: 18),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                ShadButton.outline(
-                  onPressed: creating ? null : onCancel,
-                  child: const Text('取消'),
-                ),
-                const SizedBox(width: 10),
-                ShadButton(
-                  onPressed: creating ? null : onCreate,
-                  child: Text(creating ? '创建中...' : '创建'),
-                ),
-              ],
-            ),
+            _dialogActionWrap([
+              ShadButton.outline(
+                onPressed: creating ? null : onCancel,
+                child: const Text('取消'),
+              ),
+              ShadButton(
+                onPressed: creating ? null : onCreate,
+                child: Text(creating ? '创建中...' : '创建'),
+              ),
+            ]),
           ],
         ),
       ),
