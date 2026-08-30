@@ -6,6 +6,7 @@ import 'package:remote_storage/models/file_manager_bucket_entry.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
 import 'package:remote_storage/models/s3_objects.dart';
 import 'package:remote_storage/services/remote_storage_api.dart';
+import 'package:remote_storage/utils/bridge_error_text.dart';
 import 'package:remote_storage/widgets/app_toast.dart';
 import 'package:remote_storage/widgets/file_list_tile.dart';
 import 'package:remote_storage/widgets/local_cloudpan_file_icon.dart';
@@ -102,6 +103,8 @@ class _RemoteDirectoryPickerDialogState
   List<ObjectInfo> _objects = const [];
   bool _loading = false;
   String? _error;
+  // Prevent a slower previous directory request from overwriting new navigation.
+  int _loadGeneration = 0;
 
   // 创建目录弹窗状态。
   bool _showCreateDir = false;
@@ -113,16 +116,21 @@ class _RemoteDirectoryPickerDialogState
   @override
   void initState() {
     super.initState();
-    // 若有初始值，直接进入对应桶和目录。
-    if (widget.initial != null) {
-      final init = widget.initial!;
-      _activeBucket = widget.buckets.firstWhere(
-        (b) =>
-            b.bucket.name == init.bucket && b.profileName == init.profileName,
-        orElse: () => widget.buckets.first,
-      );
-      _prefix = init.prefix;
-      WidgetsBinding.instance.addPostFrameCallback((_) => _loadObjects());
+    // 仅恢复仍然存在的精确目标，避免把空/过期目标的前缀套到第一个桶。
+    final initial = widget.initial;
+    if (initial != null) {
+      for (final bucket in widget.buckets) {
+        if (bucket.bucket.name != initial.bucket ||
+            bucket.profileName != initial.profileName) {
+          continue;
+        }
+        _activeBucket = bucket;
+        _prefix = initial.prefix;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _loadObjects();
+        });
+        break;
+      }
     }
   }
 
@@ -184,6 +192,7 @@ class _RemoteDirectoryPickerDialogState
 
   void _goBackToBuckets() {
     setState(() {
+      _loadGeneration++;
       _activeBucket = null;
       _prefix = '';
       _objects = const [];
@@ -240,7 +249,7 @@ class _RemoteDirectoryPickerDialogState
           Expanded(child: _buildContent(theme)),
           const SizedBox(height: 12),
           buildCreateDirInput(theme),
-          _buildActions(theme),
+          _buildActions(),
         ],
       ),
     );
@@ -400,60 +409,5 @@ class _RemoteDirectoryPickerDialogState
       },
       showDivider: false,
     );
-  }
-
-  Widget _buildActions(ShadThemeData theme) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        // 左侧：返回桶列表 / 创建目录。
-        Row(
-          children: [
-            if (_activeBucket != null)
-              ShadButton.outline(
-                onPressed: _goBackToBuckets,
-                child: const Row(
-                  children: [
-                    Icon(LucideIcons.chevronLeft, size: 14),
-                    SizedBox(width: 2),
-                    Text('桶列表'),
-                  ],
-                ),
-              ),
-            if (_activeBucket != null) ...[
-              const SizedBox(width: 8),
-              ShadButton.outline(
-                onPressed: _toggleCreateDir,
-                child: const Row(
-                  children: [
-                    Icon(LucideIcons.folderPlus, size: 14),
-                    SizedBox(width: 2),
-                    Text('新建目录'),
-                  ],
-                ),
-              ),
-            ],
-          ],
-        ),
-        // 右侧：取消 / 选择当前目录。
-        Row(
-          children: [
-            ShadButton.outline(onPressed: _cancel, child: const Text('取消')),
-            const SizedBox(width: 8),
-            ShadButton(
-              onPressed: _activeBucket == null ? null : _confirm,
-              child: const Text('选择当前目录'),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  void _toggleCreateDir() {
-    setState(() {
-      _showCreateDir = !_showCreateDir;
-      _dirNameController.clear();
-    });
   }
 }

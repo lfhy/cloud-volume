@@ -96,7 +96,7 @@ Dart 的 `HttpClient.findProxyFromEnvironment` 只读 `http_proxy`/`https_proxy`
 
 ## 远端配置备份
 
-桌面端可把当前账号配置保存为加密远端快照,误改配置后从设置页还原;备份目标不属于普通账号列表时也可独立保存。
+应用可把当前账号配置保存为加密远端快照,误改配置后从设置页还原;备份目标不属于普通账号列表时也可独立保存。
 
 - `go/config/config_backup.go` — bbolt `meta` 保存 `ConfigBackupSettings`;目标可引用 profile 或保存独立 `RemoteStorageConfig`。`ExportConfigBackup`/`RestoreConfigBackup` 只处理 profiles、活跃账号、全局代理、显示顺序,刻意不打包本地缓存;还原保留备份目标设置。
 - `go/configbackup/backups.go` — 解析目标,用用户自设备份密码派生 AES-GCM 密钥(`cloud-volume/config-backup/v2` + password 的 SHA-256),上传/列举/下载 `*.cloud-volume-config.json.enc` 快照。恢复前校验前缀、后缀、最大 32 MiB,再验证解密标签并导入。空密码走明文 JSON;加密但无密码返回 `此备份已加密,请先设置加密密码`,密码错误包装为 `无法解密配置备份:...`。
@@ -104,6 +104,7 @@ Dart 的 `HttpClient.findProxyFromEnvironment` 只读 `http_proxy`/`https_proxy`
 - `lib/models/config_backup.dart` / gateway — Flutter 模型/API;Web 明确不支持本地配置备份。
 - `lib/utils/bridge_error_text.dart` / `test/config_backup_restore_test.dart` — `isConfigBackupDecryptionError` 只匹配 Go 稳定解密失败文案(`无法解密配置备份`/`此备份已加密`/`message authentication failed`),网络/解析错误不误进密码重试。
 - `lib/widgets/config_backup_restore.dart` — 共享密码输入弹窗 + 解密失败重试循环;`skipInitialAttempt` 用于「本地密码已经失败过」路径;取消抛 `ConfigBackupRestoreCancelled`,调用方静默退出。
-- `lib/widgets/settings_config_backup_section.dart` / `settings_config_backup_cards.dart` / `settings_config_backup_history_dialog.dart` / `settings_config_backup_labels.dart` + 设置页/首启页 — 「设置→账号→配置备份」配置目标、自动备份与立即备份;页面只保留可点击的历史摘要卡,完整快照列表在 `ConfigBackupHistoryDialog` 拟态框滚动查看。还原流程:点还原 → 立刻确认 → 用本地密码尝试 → 解密失败才弹密码框循环重试。历史弹窗后台刷新不锁行按钮(否则首点被吞——`busy` 只含 `_restoring/_deleting`,不并 `_loading`)。首启「从备份存储还原」复用同一密码重试 helper。独立目标复用账号连接向导但不调 `saveProfile`,因而不出现在账号页。
+- `lib/widgets/settings_config_backup_section.dart` / `settings_config_backup_cards.dart` / `settings_config_backup_history_dialog.dart` / `settings_config_backup_labels.dart` + 设置页/首启页 — 「设置→账号→配置备份」配置目标、自动备份与立即备份;页面只保留可点击的历史摘要卡,完整快照列表在 `ConfigBackupHistoryDialog` 拟态框滚动查看。还原流程:点还原 → 立刻确认 → 用本地密码尝试 → 解密失败才弹密码框循环重试。历史弹窗后台刷新不锁行按钮(否则首点被吞——`busy` 只含 `_restoring/_deleting`,不并 `_loading`)。首启「从备份存储还原」复用同一密码重试 helper;快照加载显式区分 loading/error/empty,成功空列表显示目录提示而不保留 spinner。独立目标复用账号连接向导但不调 `saveProfile`,因而不出现在账号页。
+- `lib/pages/config_setup_restore.dart` / `lib/widgets/remote_directory_picker_dialog.dart` / `test/remote_directory_picker_dialog_test.dart` — 首启连接独立备份存储后以未选中的建议位置打开选择器,不会把默认 `cloud-volume-config-backups` 前缀套进任意首桶;精确初始目标、窄屏动作区和错误恢复契约见 [app_modal](app_modal.md)。修复理由见 [Agent Note](../notes/implemented/bug-fix/2026-08-30-android-backup-directory-picker.md)。
 
 **Gotchas:** 加密密钥只从用户备份密码派生,与 endpoint/AK/SK 无关,换机器可解密;密码错误与未设密码是两类稳定错误,UI 只对它们弹密码框。自动备份只在已存在且启用的目标上运行,多个紧邻本地配置写入合并为一次快照。完整清除本地配置后,必须先重新提供备份目标连接才能读远端快照,不能从加密备份无凭证自举。

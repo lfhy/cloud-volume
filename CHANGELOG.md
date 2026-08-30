@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- 修复 Android 首启「从备份存储还原」目录弹窗:手机宽度下四个底部按钮会按组换行,不再右侧 overflow;空或失效的初始 bucket 不再把 `cloud-volume-config-backups` 强套到首个存储并触发 `file does not exist`;返回有效目录会清除旧错误,远端快照为空时显示明确空状态而不永久转圈。
 - 移动端导航重构：新增首页 tab（问候与账号概览、任务状态卡、快捷入口、最近任务）；底部导航栏的显示项与顺序可在 设置 → 常规 → 底部导航（仅 Android 显示）自定义——每项开关 + 上移/下移排序 + 恢复默认，约束 2–5 项且首页/设置至少保留一个，默认顺序 文件·账号·首页·任务·回收站；安卓返回键按 tab 访问历史回退上一个页面（跳过已从底栏移除的项），历史耗尽才退出应用。桌面侧栏拆分为独立组件，行为不变。
 - 新增 macOS Android 调测环境：`make android-setup` 一键引导 JDK 17、Android SDK/NDK/模拟器镜像与 `cloud-volume` AVD（复用 PATH 中已装的 Flutter，Apple Silicon 自动用官方 repository2-3 的 native aarch64 构建替换 x86_64 模拟器并安装 Rosetta 2）；`make android-run` 构建 arm64-v8a + x86_64 双 ABI Go 桥、无在线设备时自动启动模拟器并等待 boot completed，再 `flutter run`，支持 `--headless`/`--boot-only` 与 `CV_DEBUG_ADDR` 自动 adb forward。`android/app/build.gradle.kts` 显式 apply Kotlin 插件，使 Android 构建同时兼容会与不会自动补 Kotlin 的 Flutter 版本（3.41–3.47）。Windows 引导与出包脚本不变。
 - 重构任务展开明细的对齐与可读性：所有行改为固定宽度标签列（操作/所属桶/完整路径/依赖/错误…全部左对齐）；journal 事件行由 `#2713 write 路径` 的英文裸拼改为归入「事件记录」分组标签下，每行显示 `#序号 中文操作（写入/创建目录/重命名/删除）路径（已合并）`；物理传输 ID 不再用 `·` 拼接成一团，改为归入「传输」标签、每行一个对齐显示。明细面板拆分到 `remote_task_details.dart`。

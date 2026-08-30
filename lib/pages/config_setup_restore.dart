@@ -86,19 +86,24 @@ extension _ConfigSetupRestore on _ConfigSetupPageState {
     try {
       final buckets = await widget.api.listBuckets(config);
       entries = buckets
-          .map((b) => FileManagerBucketEntry.fromBucketInfo(
-                bucket: b,
-                profileName: '__restore__',
-                sourceLabel: config.displayName.isEmpty
-                    ? config.storageType.label
-                    : config.displayName,
-                config: config,
-              ))
+          .map(
+            (b) => FileManagerBucketEntry.fromBucketInfo(
+              bucket: b,
+              profileName: '__restore__',
+              sourceLabel: config.displayName.isEmpty
+                  ? config.storageType.label
+                  : config.displayName,
+              config: config,
+            ),
+          )
           .toList();
     } catch (error) {
       if (mounted) {
-        showAppErrorToast(context,
-            title: '读取存储桶失败', message: configBackupFriendlyError(error));
+        showAppErrorToast(
+          context,
+          title: '读取存储桶失败',
+          message: configBackupFriendlyError(error),
+        );
       }
       return null;
     }
@@ -124,6 +129,7 @@ extension _ConfigSetupRestore on _ConfigSetupPageState {
   Future<void> _showSnapshotList(ConfigBackupTarget target) async {
     final snapshots = <ConfigBackupSnapshot>[];
     var loading = true;
+    var requestStarted = false;
     var errorMessage = '';
 
     await showAppModal<void>(
@@ -131,18 +137,21 @@ extension _ConfigSetupRestore on _ConfigSetupPageState {
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (ctx, setDialogState) {
-            if (loading) {
-              loading = false;
+            if (!requestStarted) {
+              requestStarted = true;
               widget.api
                   .listConfigBackupsWithTarget(target)
                   .then((items) {
-                snapshots.clear();
-                snapshots.addAll(items);
-                if (ctx.mounted) setDialogState(() {});
-              }).catchError((e) {
-                errorMessage = configBackupFriendlyError(e);
-                if (ctx.mounted) setDialogState(() {});
-              });
+                    snapshots.clear();
+                    snapshots.addAll(items);
+                    loading = false;
+                    if (ctx.mounted) setDialogState(() {});
+                  })
+                  .catchError((e) {
+                    errorMessage = configBackupFriendlyError(e);
+                    loading = false;
+                    if (ctx.mounted) setDialogState(() {});
+                  });
             }
             return ShadDialog(
               title: const Text('从备份存储还原'),
@@ -154,12 +163,12 @@ extension _ConfigSetupRestore on _ConfigSetupPageState {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    if (snapshots.isEmpty && errorMessage.isEmpty)
+                    if (loading)
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 28),
                         child: Center(child: AppLoadingIndicator()),
                       )
-                    else if (snapshots.isEmpty && errorMessage.isNotEmpty)
+                    else if (errorMessage.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 20),
                         child: Text(
@@ -170,14 +179,27 @@ extension _ConfigSetupRestore on _ConfigSetupPageState {
                           ),
                         ),
                       )
+                    else if (snapshots.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 20),
+                        child: Text(
+                          '没有找到配置备份。请确认选中了存放备份快照的目录。',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: ShadTheme.of(
+                              ctx,
+                            ).colorScheme.mutedForeground,
+                          ),
+                        ),
+                      )
                     else
                       ConstrainedBox(
                         constraints: const BoxConstraints(maxHeight: 340),
                         child: ListView.separated(
                           shrinkWrap: true,
                           itemCount: snapshots.length,
-                          separatorBuilder: (_, _) =>
-                              const SizedBox(height: 6),
+                          separatorBuilder: (_, _) => const SizedBox(height: 6),
                           itemBuilder: (_, index) {
                             final s = snapshots[index];
                             final label = configBackupSnapshotPrimaryLabel(s);
@@ -210,16 +232,21 @@ extension _ConfigSetupRestore on _ConfigSetupPageState {
                                     label: label,
                                   );
                                   if (!mounted) return;
-                                  showAppToast(context,
-                                      title: '配置已还原', message: label);
+                                  showAppToast(
+                                    context,
+                                    title: '配置已还原',
+                                    message: label,
+                                  );
                                   widget.onSaved();
                                 } on ConfigBackupRestoreCancelled {
                                   // 用户取消密码输入：静默退出。
                                 } catch (e) {
                                   if (!mounted) return;
-                                  showAppErrorToast(context,
-                                      title: '还原失败',
-                                      message: configBackupFriendlyError(e));
+                                  showAppErrorToast(
+                                    context,
+                                    title: '还原失败',
+                                    message: configBackupFriendlyError(e),
+                                  );
                                 }
                               },
                             );
@@ -245,7 +272,6 @@ extension _ConfigSetupRestore on _ConfigSetupPageState {
   }
 }
 
-
 class _RestoreSnapshotTileState extends State<_RestoreSnapshotTile> {
   bool _hovered = false;
 
@@ -254,7 +280,10 @@ class _RestoreSnapshotTileState extends State<_RestoreSnapshotTile> {
     final theme = ShadTheme.of(context);
     final interaction = ListInteractionColors.fromTheme(theme);
     final bg = interaction.rowBackground(
-        selected: false, hovered: _hovered, pressed: false);
+      selected: false,
+      hovered: _hovered,
+      pressed: false,
+    );
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
@@ -270,8 +299,11 @@ class _RestoreSnapshotTileState extends State<_RestoreSnapshotTile> {
         child: Row(
           children: [
             if (widget.encrypted) ...[
-              Icon(Icons.lock_outline,
-                  size: 14, color: theme.colorScheme.mutedForeground),
+              Icon(
+                Icons.lock_outline,
+                size: 14,
+                color: theme.colorScheme.mutedForeground,
+              ),
               const SizedBox(width: 6),
             ],
             Expanded(
@@ -287,18 +319,19 @@ class _RestoreSnapshotTileState extends State<_RestoreSnapshotTile> {
             if (widget.latest) ...[
               const SizedBox(width: 8),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color:
-                      theme.colorScheme.primary.withValues(alpha: 0.12),
+                  color: theme.colorScheme.primary.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(999),
                 ),
-                child: Text('最新',
-                    style: TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w600,
-                        color: theme.colorScheme.primary)),
+                child: Text(
+                  '最新',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w600,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
               ),
             ],
             const SizedBox(width: 10),

@@ -26,8 +26,8 @@
 |---|---|
 | [app_shell](features/app_shell.md) | 窗口关闭/托盘退出确认、macOS 窗口生命周期与常量、导航结构(桌面侧栏、移动可配置底栏 + 首页 + 返回栈)、应用图标生成链、响应式页面头部操作区。 |
 | [ui_rules](features/ui_rules.md) | Flutter 组织规范、hover 可点击行 binding(StatefulWidget + `_hovered` + 中性洗色)、`AppLoadingIndicator` 分档、设置卡视觉一致性。 |
-| [app_modal](features/app_modal.md) | 统一拟态框(`showAppModal*` 唯一入口)与全量模态清单;debug 桌面子窗口壳(`DesktopModalSubWindowApp`、内容自适应缩放)。 |
-| [settings](features/settings.md) | 设置页两栏锚点布局、四级诊断日志、应用内自动更新(镜像规则/完整性校验/续传重试/Windows 绿色 ZIP)、全局与每账号代理、远端配置备份。 |
+| [app_modal](features/app_modal.md) | 统一拟态框(`showAppModal*` 唯一入口)与全量模态清单;远端目录选择器的精确初始目标/窄屏动作布局;debug 桌面子窗口壳(`DesktopModalSubWindowApp`、内容自适应缩放)。 |
+| [settings](features/settings.md) | 设置页两栏锚点布局、四级诊断日志、应用内自动更新(镜像规则/完整性校验/续传重试/Windows 绿色 ZIP)、全局与每账号代理、远端配置备份与首启还原。 |
 
 ## 平台
 
@@ -35,7 +35,7 @@
 |---|---|
 | [windows_platform](features/windows_platform.md) | 崩溃监视器/启动报告、自绘窗口与 DWM 圆角、Cloud Files/WinFsp/WebDAV 挂载呈现与盘符、Cloud Files 外部删除投影与持久 mutation journal、WinFsp 虚拟卷引擎(构建/安装/容量)。 |
 | [windows_dev](features/windows_dev.md) | Windows 新机依赖引导与运行/构建脚本(ARM64 CLANGARM64 工具链、CargoKit/Rustup、CPATH、Developer Mode)。 |
-| [android_dev](features/android_dev.md) | macOS/Windows Android 工具链引导、c-shared 桥构建、macOS 模拟器调测回路(`make android-run`)与 ARM64 APK 打包、移动端桌面能力裁剪。 |
+| [android_dev](features/android_dev.md) | macOS/Windows Android 工具链引导、c-shared 桥构建、macOS 模拟器调测回路(`make android-run`)与 ARM64 APK 打包、应用 ID/私有数据边界、移动端桌面能力裁剪。 |
 
 ## 后端
 

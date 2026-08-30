@@ -1,6 +1,7 @@
 // Shared label helpers for configuration backup UI surfaces.
 import 'package:remote_storage/models/bootstrap_state.dart';
 import 'package:remote_storage/models/config_backup.dart';
+import 'package:remote_storage/utils/bridge_error_text.dart';
 import 'package:remote_storage/utils/transfer_format.dart';
 
 String configBackupProfileLabel(ProfileInfo profile) {
@@ -118,7 +119,7 @@ String configBackupSnapshotSecondaryLabel(ConfigBackupSnapshot snapshot) {
 }
 
 String configBackupFriendlyError(Object error) {
-  final text = error.toString().trim();
+  final text = describeBridgeError(error).trim();
   const prefixes = <String>['Exception: ', 'Bad state: ', 'StateError: '];
   for (final prefix in prefixes) {
     if (text.startsWith(prefix)) {

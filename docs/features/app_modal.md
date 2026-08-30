@@ -35,7 +35,7 @@
 |-------|-----------|--------|------|
 | 账号编辑器 | `CloudStorageAccountDialog` | `account_editor_presenter.dart`(账号管理或文件管理恢复) | 应用内紧凑最大宽 **520**。主表单只保留连接字段;path-style + 代理进嵌套**高级设置**模态(`showAppModal`,最大 **420**)。子窗口内仅内容自适应缩放。 |
 | 同步配置编辑器 | `FileSyncProfileEditor` | `file_sync_tasks_page_actions.dart` 增/改 | 舒适最大宽 **600**。三步向导:同步两端 → 同步策略 → 高级设置(排除规则/启用)。嵌套远端选择器。 |
-| 远端目录选择器 | `showRemoteDirectoryPicker` / `RemoteDirectoryPickerDialog` | 同步编辑器 step 1 等 | 舒适最大宽 **640**,体高 **480**。经 `showDesktopOverlayOrDialog`。 |
+| 远端目录选择器 | `showRemoteDirectoryPicker` / `RemoteDirectoryPickerDialog` | 同步编辑器 step 1、配置备份等 | 舒适最大宽 **640**,体高 **480**。经 `showDesktopOverlayOrDialog`;底部两组动作以 `OverflowBar` + 组内 `Wrap` 按实际宽度自动换行。 |
 
 ### 全部应用内模态清单
 
@@ -57,6 +57,9 @@
 - 双模式编辑器必须**小于主窗口**:账号/同步 ~600–640、远端选择器 ~640×480。宁可加步骤/嵌套高级模态也不加宽(账号 path-style + 代理在嵌套高级设置;同步排除/启用是 step 3)。
 - 简单是/否用 `showAppConfirmModal`;body 有表单/列表/进度时用专门 widget/helper。
 - 新增模态:只经 `showAppModal*` 进入,内容保持 500 行内(按 part/feature 拆),并更新本清单。
+- `RemoteDirectoryPickerDialog.initial` 只有桶名和 profile 都精确匹配时才恢复目录;空/失效目标停在桶列表,不得把旧 prefix 静默套到首桶。每次目录加载先清旧错误,成功结果必须解除错误态;较旧目录请求的迟到成功/失败都不得覆盖较新导航。回归见 `test/remote_directory_picker_dialog_test.dart`,理由见 [Agent Note](../notes/implemented/bug-fix/2026-08-30-android-backup-directory-picker.md)。
+
+**Known P2/P3 (review 2026-08-30):** P3 桶列表态只有确认动作组时,`OverflowBar` 的 `spaceBetween` 会把它放到左侧;已按动作组数量切换为 `end`,回归同上。
 
 ## 桌面模态子窗口壳(通用子窗口壳)
 

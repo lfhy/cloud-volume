@@ -13,6 +13,7 @@
 - `scripts/build_android_bridge.ps1` - 用已装 NDK 为 `GOOS=android`、`GOARCH=arm64` 编译 `./bridge`,产物写入 `android/app/src/main/jniLibs/arm64-v8a/libremote_storage_bridge.so`;构建后删除生成的 C 头。
 - `scripts/build_android.ps1` - 先建 Android 桥,再出 ARM64 Flutter release APK 到 `build/app/outputs/flutter-apk/app-release.apk`。
 - `android/` - Flutter Android runner。wrapper 用腾讯 Gradle 分发镜像,`settings.gradle.kts` / `build.gradle.kts` 优先 Aliyun 的 Google、Gradle-plugin、Central 仓库再官方源。
+- `android/app/build.gradle.kts` / `android/app/src/main/kotlin/cn/ihep/cloudvolume/remote_storage/MainActivity.kt` — Android `namespace` 与 `applicationId` 当前均为 `cn.ihep.cloudvolume.remote_storage`;FrameTracker/输入法性能日志用它标识当前应用,不是远端存储地址。该 ID 同时决定安装升级身份与 `/data/user/0/<applicationId>` 私有沙箱,变更会被系统视作另一应用,必须配套旧配置数据迁移。
 - `bridge/dispatch_mobile.go` / `bridge/dispatch.go` / `go/config/paths.go` - Android 启动经 `set_app_data_root` 把 Flutter 的 application-support 目录传给原生桥,配置与缓存留在 Android 应用存储内而非无效的桌面 home。
 - `go/config/paths_mobile_test.go` - 钉住 `SetAppDataRoot` 覆盖与空路径拒绝语义。
 - `lib/bridge/remote_storage_bridge.dart` - Android 打开打包的 `libremote_storage_bridge.so` 并在配置调用前初始化该 app-data root。
