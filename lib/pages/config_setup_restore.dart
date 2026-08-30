@@ -82,21 +82,14 @@ extension _ConfigSetupRestore on _ConfigSetupPageState {
   Future<({String bucket, String prefix})?> _pickBackupLocation(
     RemoteStorageConfig config,
   ) async {
-    List<FileManagerBucketEntry> entries;
+    late ConfigBackupPickerModel pickerModel;
     try {
       final buckets = await widget.api.listBuckets(config);
-      entries = buckets
-          .map(
-            (b) => FileManagerBucketEntry.fromBucketInfo(
-              bucket: b,
-              profileName: '__restore__',
-              sourceLabel: config.displayName.isEmpty
-                  ? config.storageType.label
-                  : config.displayName,
-              config: config,
-            ),
-          )
-          .toList();
+      pickerModel = buildConfigBackupPickerModel(
+        config: config,
+        buckets: buckets,
+        profileName: '__restore__',
+      );
     } catch (error) {
       if (mounted) {
         showAppErrorToast(
@@ -108,15 +101,20 @@ extension _ConfigSetupRestore on _ConfigSetupPageState {
       return null;
     }
     if (!mounted) return null;
-    final initial = entries.isEmpty ? '' : entries.first.profileName;
+    final initialEntry = pickerModel.initialEntry;
+    final initialProfileName =
+        initialEntry?.profileName ??
+        (pickerModel.entries.isEmpty
+            ? ''
+            : pickerModel.entries.first.profileName);
     final result = await showRemoteDirectoryPicker(
       context: context,
       api: widget.api,
-      buckets: entries,
+      buckets: pickerModel.entries,
       initial: RemoteDirectoryResult(
-        bucket: '',
-        prefix: 'cloud-volume-config-backups',
-        profileName: initial,
+        bucket: initialEntry?.bucket.name ?? '',
+        prefix: '',
+        profileName: initialProfileName,
         config: config,
       ),
     );

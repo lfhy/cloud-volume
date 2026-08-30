@@ -29,6 +29,7 @@ class RemoteDirectoryPickerWindowArgs {
 
   final String requestId;
   final String creatorWindowId;
+
   /// Main (or outermost) window to keep visible when this child is focused.
   final String? rootWindowId;
   final List<FileManagerBucketEntry> buckets;
@@ -39,6 +40,7 @@ class RemoteDirectoryPickerWindowArgs {
   final double? creatorFrameTop;
   final double? creatorFrameWidth;
   final double? creatorFrameHeight;
+
   /// Main window bounds at modal stack start; nested children center on this.
   final double? anchorFrameLeft;
   final double? anchorFrameTop;
@@ -105,12 +107,16 @@ class RemoteDirectoryPickerWindowArgs {
       'id': e.id,
       'profileName': e.profileName,
       'sourceLabel': e.sourceLabel,
+      'displayName': e.displayName,
+      'rootPrefix': e.rootPrefix,
       'bucketName': e.bucket.name,
       'config': e.config.toJson(),
     };
   }
 
-  static FileManagerBucketEntry _bucketEntryFromJson(Map<String, dynamic> json) {
+  static FileManagerBucketEntry _bucketEntryFromJson(
+    Map<String, dynamic> json,
+  ) {
     final bucketMap = Map<String, dynamic>.from(json['bucket'] as Map? ?? {});
     if (bucketMap.isEmpty && json['bucketName'] != null) {
       bucketMap['name'] = json['bucketName'];
@@ -120,6 +126,8 @@ class RemoteDirectoryPickerWindowArgs {
       bucket: BucketInfo.fromJson(bucketMap),
       profileName: json['profileName'] as String? ?? '',
       sourceLabel: json['sourceLabel'] as String? ?? '',
+      displayName: json['displayName'] as String? ?? '',
+      rootPrefix: json['rootPrefix'] as String? ?? '',
       config: RemoteStorageConfig.fromJson(
         Map<String, dynamic>.from(json['config'] as Map? ?? {}),
       ),

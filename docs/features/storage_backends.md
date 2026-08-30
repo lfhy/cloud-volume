@@ -51,7 +51,7 @@ FTP 与 SFTP 把远端服务器呈现为单一虚拟桶,保持文件管理器、
 - `go/storage/ftp_backend*.go` - 经典 FTP listing、文件 I/O、目录 mutation、递归 listing/拷贝、硬删除。FTP 返回未知配额(协议无标准容量 API)。
 - `go/storage/sftp_backend*.go` - 经 `pkg/sftp` 实现 SFTP listing、文件 I/O、mutation;`sftp_backend_quota.go` 在服务器提供时用可选 `statvfs@openssh.com` 扩展。`HeadObject` 只把真实缺失路径映射 `os.ErrNotExist`,保留权限/连接失败使 metadata 验证可带可操作错误重试。
 - `go/storage/ftp_mock_test.go` / `sftp_mock_test.go` 及后端测试 - 对进程内 mock 服务器跑协议级集成测试。
-- `lib/models/remote_storage_config.dart`、`lib/models/cloud_storage_account_draft.dart`、`lib/utils/account_config_builder.dart`、`lib/widgets/cloud_storage_account_dialog*.dart`、`lib/pages/config_setup_page.dart`、`lib/widgets/config_right_form*.dart` - 持久化设置并呈现协议专属账号表单。
+- `lib/models/remote_storage_config.dart`、`lib/models/cloud_storage_account_draft.dart`、`lib/utils/account_config_builder.dart`、`lib/widgets/cloud_storage_account_dialog*.dart`、`lib/pages/config_setup_page.dart`、`lib/pages/config_setup_save.dart`、`lib/widgets/config_right_form*.dart` - 持久化设置并呈现协议专属账号表单;首启向导的草稿映射与保存分支在 save part。
 
 ### Gotchas
 

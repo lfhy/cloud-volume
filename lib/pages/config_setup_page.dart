@@ -5,9 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:remote_storage/models/bootstrap_state.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
 import 'package:remote_storage/models/config_backup.dart';
-import 'package:remote_storage/models/file_manager_bucket_entry.dart';
 import 'package:remote_storage/services/app_modal.dart';
 import 'package:remote_storage/theme/list_interaction_colors.dart';
+import 'package:remote_storage/utils/config_backup_picker.dart';
 import 'package:remote_storage/widgets/config_backup_restore.dart';
 import 'package:remote_storage/widgets/app_toast.dart';
 import 'package:remote_storage/widgets/cloud_storage_account_dialog.dart';
@@ -23,6 +23,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 part 'config_setup_baidu_auth.dart';
 part 'config_setup_restore.dart';
+part 'config_setup_save.dart';
 
 // 首次运行预设默认网关（IHEP 对象存储 / WebDAV）。
 const _kDefaultS3Endpoint = 'https://fgws3-ocloud.ihep.ac.cn';
@@ -196,133 +197,6 @@ class _ConfigSetupPageState extends State<ConfigSetupPage> {
             : 'S3';
       }
     });
-  }
-
-  Future<void> _save() async {
-    final isWebDav = _storageType == StorageType.webdav;
-    final isBaiduPan = _storageType == StorageType.baiduPan;
-    final isFTP =
-        _storageType == StorageType.ftp || _storageType == StorageType.sftp;
-    final name = _nameController.text.trim();
-    final config = RemoteStorageConfig(
-      endpoint: isBaiduPan
-          ? (_authorizedBaiduConfig?.endpoint ?? _kBaiduPanEndpoint)
-          : _endpointController.text,
-      storageType: _storageType,
-      providerType: isBaiduPan
-          ? StorageProviderType.baiduPan
-          : widget.initialState.config.providerType,
-      displayName: name,
-      mappedBucketName: isWebDav || isFTP
-          ? (_mappedBucketNameController.text.trim().isNotEmpty
-                ? _mappedBucketNameController.text
-                : name)
-          : isBaiduPan
-          ? (name.isEmpty ? '百度网盘' : name)
-          : name,
-      region: _regionController.text,
-      bucket: widget.initialState.config.bucket,
-      accessKeyId: isBaiduPan
-          ? (_authorizedBaiduConfig?.accessKeyId ?? '')
-          : isWebDav || isFTP
-          ? ''
-          : _accessKeyController.text,
-      secretAccessKey: isBaiduPan
-          ? (_authorizedBaiduConfig?.secretAccessKey ?? '')
-          : isWebDav || isFTP
-          ? ''
-          : _secretKeyController.text,
-      hasSecretAccessKey: isBaiduPan
-          ? (_authorizedBaiduConfig?.hasSecretAccessKey ?? false)
-          : !isWebDav &&
-                !isFTP &&
-                widget.initialState.config.hasSecretAccessKey,
-      webdavUsername: isWebDav
-          ? _webdavUsernameController.text
-          : isBaiduPan || isFTP
-          ? ''
-          : _accessKeyController.text,
-      webdavPassword: isWebDav
-          ? _webdavPasswordController.text
-          : isBaiduPan || isFTP
-          ? ''
-          : _secretKeyController.text,
-      hasWebdavPassword:
-          isWebDav && widget.initialState.config.hasWebdavPassword,
-      ftpUsername: isFTP ? _ftpUsernameController.text : '',
-      ftpPassword: isFTP ? _ftpPasswordController.text : '',
-      hasFtpPassword: isFTP && widget.initialState.config.hasFtpPassword,
-      ftpPort: isFTP ? (int.tryParse(_ftpPortController.text.trim()) ?? 0) : 0,
-      ftpAnonymous: false,
-      rootPrefix: widget.initialState.config.rootPrefix,
-      defaultDownloadDirectory:
-          widget.initialState.config.defaultDownloadDirectory,
-      cacheDirectory: widget.initialState.config.cacheDirectory,
-      resolvedCacheDirectory: widget.initialState.config.resolvedCacheDirectory,
-      hideDotFiles: widget.initialState.config.hideDotFiles,
-      fileOpenMode: FileOpenMode.singleClick,
-      trashDirectoryName: widget.initialState.config.trashDirectoryName,
-      trashRetentionDays: widget.initialState.config.trashRetentionDays,
-      bucketSettings: widget.initialState.config.bucketSettings,
-      bucketViews: widget.initialState.config.bucketViews,
-      writebackQuietSeconds: widget.initialState.config.writebackQuietSeconds,
-      mountMetadataCacheSeconds:
-          widget.initialState.config.mountMetadataCacheSeconds,
-      mountRemotePollSeconds: widget.initialState.config.mountRemotePollSeconds,
-      usePathStyle: _usePathStyle,
-      windowsMountMode: widget.initialState.config.windowsMountMode,
-      windowsMountEngine: widget.initialState.config.windowsMountEngine,
-      windowsWinFspCapacityGb:
-          widget.initialState.config.windowsWinFspCapacityGb,
-      windowsThisPcEntryEnabled:
-          widget.initialState.config.windowsThisPcEntryEnabled,
-      windowsWritebackConcurrency:
-          widget.initialState.config.windowsWritebackConcurrency,
-      cacheAutoCleanupEnabled:
-          widget.initialState.config.cacheAutoCleanupEnabled,
-      cacheMaxSizeMb: widget.initialState.config.cacheMaxSizeMb,
-      cacheMaxAgeDays: widget.initialState.config.cacheMaxAgeDays,
-      jwanfsGatewayMode: _jwanfsGatewayMode,
-      proxyMode: widget.initialState.config.proxyMode,
-      proxyType: widget.initialState.config.proxyType,
-      proxyHost: widget.initialState.config.proxyHost,
-      proxyPort: widget.initialState.config.proxyPort,
-      proxyUsername: widget.initialState.config.proxyUsername,
-      proxyPassword: widget.initialState.config.proxyPassword,
-    );
-
-    if (!config.isConfigured) {
-      setState(() {
-        _errorText = isBaiduPan
-            ? '请先完成百度网盘 OAuth 授权。'
-            : isWebDav
-            ? '请填写 WebDAV 地址、用户名和密码。'
-            : '请填写 Endpoint、Access Key 和 Secret Key。';
-      });
-      return;
-    }
-
-    setState(() {
-      _isSaving = true;
-      _errorText = null;
-    });
-
-    try {
-      await widget.api.saveConfig(config);
-      if (!mounted) return;
-      widget.onSaved();
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _errorText = describeBridgeError(error);
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSaving = false;
-        });
-      }
-    }
   }
 
   void _goToAccountForm() {

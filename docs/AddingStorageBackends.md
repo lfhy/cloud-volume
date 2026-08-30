@@ -1,7 +1,7 @@
 # 添加新的存储后端
 
 本指南说明如何在云卷中接入一个新的远端存储类型（例如 FTP、SFTP、WebDAV 变体等）。
-仓库已经实现了 S3、WebDAV、百度网盘三种后端，新增类型时请按下面的顺序改动。
+仓库已经实现了 S3、WebDAV、百度网盘、FTP、SFTP 后端，新增类型时请按下面的顺序改动。
 每一层都给出了需要修改的文件和参考实现，尽量复用已有的抽象，避免大改公共代码。
 
 ## 改动总览
@@ -64,7 +64,7 @@ type Backend interface {
 
 关键约定：
 
-- 单根后端（WebDAV、百度网盘）的 `ListBuckets` 只返回一个虚拟桶，桶名取自 `cfg.MappedBucketLabel()`。
+- 单根后端（WebDAV、百度网盘、FTP、SFTP）的 `ListBuckets` 只返回一个虚拟桶，桶名取自 `cfg.MappedBucketLabel()`。
 - `ObjectInfo.Key` 对目录要以 `/` 结尾，与 S3 约定一致。
 - 不支持回收站的操作可以直接返回空页或 `fmt.Errorf("...暂不支持...")`，参考百度网盘的 `ListTrashPage` / `RestoreTrashItem` 实现。
 - 如果后端无法提供配额，不要实现 `BucketQuotaProvider`；`GetBucketQuota` 会回退为仅含桶名的结果。
@@ -128,6 +128,7 @@ enum StorageType {
 - `lib/widgets/config_storage_type_step.dart` — 首次启动的类型选择卡片，加一个 `_typeTile`。
 - `lib/widgets/cloud_storage_account_dialog_steps.dart` — 账号管理对话框的类型选择步骤，更新 `_iconFor` 和 `_descriptionFor`。
 - `lib/pages/config_setup_page.dart` — 首次引导默认 endpoint 与 `_selectStorageType` 的名称回退。
+- `lib/pages/config_setup_save.dart` — 首次引导把表单字段映射为 `RemoteStorageConfig` 的保存分支;新类型必须明确鉴权字段、密钥保留与未配置提示,不得回落到 S3 语义。
 
 表单字段：
 

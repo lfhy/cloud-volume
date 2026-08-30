@@ -58,6 +58,7 @@
 - 简单是/否用 `showAppConfirmModal`;body 有表单/列表/进度时用专门 widget/helper。
 - 新增模态:只经 `showAppModal*` 进入,内容保持 500 行内(按 part/feature 拆),并更新本清单。
 - `RemoteDirectoryPickerDialog.initial` 只有桶名和 profile 都精确匹配时才恢复目录;空/失效目标停在桶列表,不得把旧 prefix 静默套到首桶。每次目录加载先清旧错误,成功结果必须解除错误态;较旧目录请求的迟到成功/失败都不得覆盖较新导航。回归见 `test/remote_directory_picker_dialog_test.dart`,理由见 [Agent Note](../notes/implemented/bug-fix/2026-08-30-android-backup-directory-picker.md)。
+- 选择器的桶、目录、只读文件三类行按**实际列表宽度**局部降级:`<560` 时传 `FileListTile(compact: true)`,把来源/大小等元数据收进标题下方,避免桌面固定元数据列挤压名称;宽屏继续使用标准列。不要按 Android、设备或主窗口宽度判断。
 
 **Known P2/P3 (review 2026-08-30):** P3 桶列表态只有确认动作组时,`OverflowBar` 的 `spaceBetween` 会把它放到左侧;已按动作组数量切换为 `end`,回归同上。
 
@@ -79,7 +80,7 @@
 
 - 账号编辑器:`DesktopModalSubWindowApp<RemoteStorageGateway>` + `scrollable: true`(内容超屏幕钳制时的溢出保护);bootstrap → `defaultRemoteStorageApiFactory()`;`onSaved` 通知父级再 `close()`。内容自适应缩放在 `CloudStorageAccountDialog`(`MeasureSize` + `fitModalSubWindowToContentSize`)。初始种子尺寸/编辑模式尺寸见 [account_management](account_management.md) 窗口尺寸策略。
 - 同步编辑器:`DesktopModalSubWindowApp<_SyncBootstrapResult>` + **`scrollable: false`**(编辑器自持步骤指示 + 内部滚动 + `Expanded` 固定导航);固定初始 `600×480`,步骤尺寸 600×480/500/480。
-- 远端目录选择器:`DesktopModalSubWindowApp<RemoteStorageGateway>` + **`scrollable: false`** + `useParentFocusRelay: false`(`lib/app/remote_directory_picker_window_app.dart`;args `lib/models/remote_directory_picker_window_args.dart`;服务 `lib/services/remote_directory_picker_window_service.dart`);`onConfirm` 暂存结果再 `close()`;标题栏 X 走 shell `onClose` → `_sendResult`(无选择则 null)。固定 `640×560`(min 480×400)。
+- 远端目录选择器:`DesktopModalSubWindowApp<RemoteStorageGateway>` + **`scrollable: false`** + `useParentFocusRelay: false`(`lib/app/remote_directory_picker_window_app.dart`;args `lib/models/remote_directory_picker_window_args.dart`;服务 `lib/services/remote_directory_picker_window_service.dart`);args JSON 同时携带真实桶 identity、`displayName` 与 `rootPrefix`,展示别名和限定根目录不得跨 debug 子窗口丢失;`onConfirm` 暂存结果再 `close()`;标题栏 X 走 shell `onClose` → `_sendResult`(无选择则 null)。固定 `640×560`(min 480×400)。
 - 未迁移:`FilePreviewWindowApp` — 非模态独立窗口(无 scrim、无 overlay release、可拖标题栏),模式根本不同,保持独立。
 - 近 500 行的双模式内容组件:`cloud_storage_account_dialog.dart`(~471)、`file_sync_profile_editor.dart`(~480)、`remote_directory_picker_dialog.dart`(~446);shell/服务远低于 500(除 `desktop_sub_window_modal.dart` ~355)。
 

@@ -358,15 +358,14 @@ class _RemoteDirectoryPickerDialogState
   }
 
   Widget _bucketTile(ShadThemeData theme, FileManagerBucketEntry entry) {
-    return FileListTile(
+    return _RemoteDirectoryPickerListTile(
       leading: const WhiteSurFileIcon(
         assetPath: 'assets/icons/whitesur/places/network-server-balanced.svg',
         size: 20,
       ),
       title: entry.label,
-      sizeLabel: entry.sourceLabel,
+      metadataLabel: entry.sourceLabel,
       onTap: () => _enterBucket(entry),
-      showDivider: false,
     );
   }
 
@@ -385,7 +384,7 @@ class _RemoteDirectoryPickerDialogState
   Widget _dirTile(ShadThemeData theme, ObjectInfo obj) {
     final isParent = obj.key == '../';
     final name = isParent ? '..' : obj.displayName;
-    return FileListTile(
+    return _RemoteDirectoryPickerListTile(
       leading: isParent
           ? SizedBox.square(
               dimension: 20,
@@ -399,7 +398,7 @@ class _RemoteDirectoryPickerDialogState
             )
           : LocalCloudPanFileIcon(name: name, isDirectory: true, size: 20),
       title: name,
-      sizeLabel: isParent ? '返回上一级' : '',
+      metadataLabel: isParent ? '返回上一级' : '',
       onTap: () {
         if (isParent) {
           _navigateUp();
@@ -407,7 +406,6 @@ class _RemoteDirectoryPickerDialogState
           _openDirectory(obj);
         }
       },
-      showDivider: false,
     );
   }
 }

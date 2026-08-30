@@ -5,10 +5,26 @@ part of 'remote_directory_picker_dialog.dart';
 extension _RemoteDirectoryPickerList on _RemoteDirectoryPickerDialogState {
   /// 多色 SVG（如 zip）用亮度矩阵去色，避免 srcATop 只染透明区、彩色图标不变灰。
   static const _fileIconGreyscale = ColorFilter.matrix(<double>[
-    0.2126, 0.7152, 0.0722, 0, 0,
-    0.2126, 0.7152, 0.0722, 0, 0,
-    0.2126, 0.7152, 0.0722, 0, 0,
-    0, 0, 0, 1, 0,
+    0.2126,
+    0.7152,
+    0.0722,
+    0,
+    0,
+    0.2126,
+    0.7152,
+    0.0722,
+    0,
+    0,
+    0.2126,
+    0.7152,
+    0.0722,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
   ]);
 
   static const _parentEntry = ObjectInfo(
@@ -31,11 +47,7 @@ extension _RemoteDirectoryPickerList on _RemoteDirectoryPickerDialogState {
       files = files.where((o) => !_isHiddenFileName(o.displayName)).toList();
     }
     files.sort((a, b) => a.displayName.compareTo(b.displayName));
-    return [
-      if (_prefix.isNotEmpty) _parentEntry,
-      ...dirs,
-      ...files,
-    ];
+    return [if (_prefix.isNotEmpty) _parentEntry, ...dirs, ...files];
   }
 
   Widget buildDirectoryList(ShadThemeData theme) {
@@ -101,7 +113,7 @@ extension _RemoteDirectoryPickerList on _RemoteDirectoryPickerDialogState {
 
   Widget _fileTile(ShadThemeData theme, ObjectInfo obj) {
     final name = obj.displayName;
-    return FileListTile(
+    return _RemoteDirectoryPickerListTile(
       leading: IgnorePointer(
         child: Opacity(
           opacity: 0.72,
@@ -116,10 +128,45 @@ extension _RemoteDirectoryPickerList on _RemoteDirectoryPickerDialogState {
         ),
       ),
       title: name,
-      sizeLabel: obj.sizeText,
+      metadataLabel: obj.sizeText,
       dimmed: true,
       onTap: () {},
-      showDivider: false,
+    );
+  }
+}
+
+const double _remoteDirectoryPickerCompactRowWidth = 560;
+
+/// Picker rows switch locally so shared file-list column alignment is unchanged.
+class _RemoteDirectoryPickerListTile extends StatelessWidget {
+  const _RemoteDirectoryPickerListTile({
+    required this.leading,
+    required this.title,
+    required this.onTap,
+    this.metadataLabel = '',
+    this.dimmed = false,
+  });
+
+  final Widget leading;
+  final String title;
+  final String metadataLabel;
+  final VoidCallback onTap;
+  final bool dimmed;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return FileListTile(
+          leading: leading,
+          title: title,
+          sizeLabel: metadataLabel,
+          onTap: onTap,
+          showDivider: false,
+          dimmed: dimmed,
+          compact: constraints.maxWidth < _remoteDirectoryPickerCompactRowWidth,
+        );
+      },
     );
   }
 }

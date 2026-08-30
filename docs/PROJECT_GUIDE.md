@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-08-30 目录选择器调用方审计(settings / file_sync_p2p / account_management 域)
+
+首启配置备份选择器的单根存储展示调查同时确认两个既有边界，均不由本次首启 helper 触发：
+
+- 设置页切换备份 profile 或独立连接时，`ConfigBackupTarget.copyWith` 会保留上一条连接的 `bucket/prefix`；新来源若有同名桶，`isReady` 仍可成立并把备份写到旧路径。后续复用单根自动进入前，应先按来源 identity 变化使旧位置失效。
+- 同步编辑器在已保存目标无法精确匹配时回退 `widget.buckets.first.config`；桶列表仍在异步加载、加载失败或过滤为空时会抛 `Bad state: No element`，非空时也可能借用无关首桶配置。后续修复应让空桶列表可安全构建，并显式呈现「已保存远端目标不可解析」，不回退无关账号。
+
+同批提交前结构评审发现 `lib/pages/config_setup_page.dart` 基线已有 577 行，超过手写 `lib` 文件 500 行上限(P1)。首启账号草稿校验与保存原样移入 `lib/pages/config_setup_save.dart` part，宿主降至 451 行；该拆分不改变配置字段、校验文案或保存时序。
+复审的 P2 指出新 part 尚未进入远端轮询、FTP/SFTP 正典与新增后端指南;同批补齐三处文件职责，并把指南的已实现 provider 列表与单根后端清单更新为 S3/WebDAV/百度网盘/FTP/SFTP 现状。
+
+扩大验证时 `test/widget_test.dart` 的三个主布局用例会触发 Flutter 3.47 新的 `ListTile` 被有背景 `DecoratedBox` 包裹断言；在 detached `HEAD=9daea5a0` 上单独复现 `App shows main layout when config exists` 仍同样失败，确认与本批 picker/首启保存拆分无关。本批针对性 17 项用例与静态分析均通过；该基线测试兼容问题待独立修复。
+
 ## 2026-08-29 macOS Android 调测链落地与评审(android_dev 域)
 
 新增 macOS Android 工具链(`make android-setup` / `make android-run`,设计决策见 [Agent Note](notes/implemented/process/2026-08-29-macos-android-dev-scripts.md);现状正典在 [android_dev](features/android_dev.md))。实机验证过程中钉住的关键上游事实:repository2-1 的 macOS emulator 归档只有 x86_64,该构建在 Apple Silicon 上跑不了任何镜像架构(arm64 镜像被 launcher 架构检查 FATAL、x86_64 镜像 HVF `Unknown error 0x4`),正解是 repository2-3 的同版本 `emulator-darwin_aarch64` 归档(不带 `package.xml`,需回填 sdkmanager 那份);Flutter 3.47 的 flutter-gradle-plugin 会自动 apply Kotlin 而 3.41 不会,`android/app/build.gradle.kts` 因此显式 apply。

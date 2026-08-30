@@ -36,7 +36,7 @@ Windows Cloud Files 侧的物理投影(placeholder 删除/重建)见 [windows_pl
 P0 是多客户端挂载变更发现的无服务兜底:只刷新用户近期打开的目录,远端对象存储仍是唯一字节与版本权威。
 
 - `go/config/config.go` / `go/config/config_account.go` / `lib/models/remote_storage_config.dart` / `remote_storage_config_copy.dart` — `mount_remote_poll_seconds` / `mountRemotePollSeconds` 是 P0 活跃轮询间隔(默认 5 秒,后端归一化到 1–300 秒);账户辅助方法与 Dart 不可变 `copyWith` 各自拆文件,避免配置模型超行数限制。
-- `lib/pages/settings_page.dart` / `settings_page_poll_actions.dart` / `settings_page_sections.dart` / `lib/widgets/settings_sync_section.dart` / `lib/pages/config_setup_page.dart` — 「同步设置」保存 P0 远端目录轮询间隔;首次配置编辑保留该值;保存后重新挂载,新会话才采用该间隔。
+- `lib/pages/settings_page.dart` / `settings_page_poll_actions.dart` / `settings_page_sections.dart` / `lib/widgets/settings_sync_section.dart` / `lib/pages/config_setup_page.dart` / `lib/pages/config_setup_save.dart` — 「同步设置」保存 P0 远端目录轮询间隔;首启页由独立 save part 在配置编辑时保留该值;保存后重新挂载,新会话才采用该间隔。
 - `go/mount/remote_poller.go` — `directoryActivityTracker` 在 `bucketAccess.listDirectory` 与 Cloud Files placeholder 回调中记录目录活动,保留上限 12 个目录(`remotePollDirectoryCap`),新目录活动时唤醒等待中的 poller。空闲条目不再被 warm window 删除;满了逐出最旧,`nextDelay` 作为节奏选择器(45 秒内活跃按 `mount_remote_poll_seconds` 刷新,45 秒–3 分钟 warm 间隔,之后两分钟空闲节奏)。3 分钟无活动目录时停止网络访问。它调 `fetchDirectory` 刷新 `bucketCache`,绝不用远端状态删除本地 overlay 或 writeback。
 - `go/mount/manager.go` / `go/mount/types.go` — 每个成功启动的 `mountSession` 创建 poller;卸载先停止轮询再关闭平台后端,避免访问已释放的 `bucketAccess`。
 - `go/mount/backend_windows_cloud_files_cgo.go` / `cloud_files_hydrator_windows.go` / `cloud_files_refresh_windows.go` — P0 轮询结果经 `externalDirectoryRefresh` 进入 `RefreshPlaceholders`。它记录已投影目录的远端快照:新对象创建占位符,已存在对象经 `CfUpdatePlaceholder` 更新元数据并对变更文件脱水,远端删除只移除之前投影且无本地写回/tombstone 的项。对象 ETag 参与文件标识,同大小同秒覆盖也会失效 Explorer 缓存。

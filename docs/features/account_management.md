@@ -61,7 +61,7 @@
 - **Step 1「连接信息」:** 全宽表单——左品牌**隐藏**使表单用满窗口宽;`ConfigRightFormPanel(fullWidth: true)`。宽窗口时 S3/WebDAV 字段两栏布局避免单栏滚动;Baidu OAuth 保持单栏(auth 块已宽)。
 - **步骤切换:** Next/Back 用 `TweenAnimationBuilder` + `ClipRect/Align(widthFactor)` 滑动折叠左品牌,右侧用非堆叠 `AnimatedSwitcher`(~240ms)淡入。无中间 spinner 页。
 
-**关键文件:** `lib/pages/config_setup_page.dart`(向导宿主)、`lib/widgets/config_storage_type_step.dart`(step 0 类型卡片)、`lib/widgets/config_right_form.dart`(step 1 表单壳 + Back/Save/高级对话框;`fullWidth` 放宽表单(max ~720)并在视口 ≥700 启用两栏)、`lib/widgets/config_right_form_fields.dart`(字段构建器 part 文件)、`lib/widgets/config_left_panel.dart`(品牌/标语/强调色选择器,仅 step 0)、`lib/pages/app_bootstrap_page.dart`(路由到此当 `!state.configured` 或「重新配置认证信息」)、`lib/pages/login_page.dart`(Web 登录仍用左品牌 + 表单分栏,独立于首启步骤布局)。
+**关键文件:** `lib/pages/config_setup_page.dart`(向导宿主)、`lib/pages/config_setup_save.dart`(首启账号草稿校验与持久化 part)、`lib/widgets/config_storage_type_step.dart`(step 0 类型卡片)、`lib/widgets/config_right_form.dart`(step 1 表单壳 + Back/Save/高级对话框;`fullWidth` 放宽表单(max ~720)并在视口 ≥700 启用两栏)、`lib/widgets/config_right_form_fields.dart`(字段构建器 part 文件)、`lib/widgets/config_left_panel.dart`(品牌/标语/强调色选择器,仅 step 0)、`lib/pages/app_bootstrap_page.dart`(路由到此当 `!state.configured` 或「重新配置认证信息」)、`lib/pages/login_page.dart`(Web 登录仍用左品牌 + 表单分栏,独立于首启步骤布局)。
 
 **默认网关(IHEP):** S3 `https://fgws3-ocloud.ihep.ac.cn`;WebDAV `https://webdav-ocloud.ihep.ac.cn`;百度网盘 `https://pan.baidu.com`(OAuth,不可编辑)。字段为空或仍是已知 preset 时应用;用户输入的自定义 URL 在切换协议卡片时**不**被覆盖。
 
@@ -148,3 +148,5 @@
 - 二段请求:`bridge/dispatch_bucket_quota.go` 暴露 `get_bucket_quota`;`lib/services/remote_storage_gateway.dart` 要求 `getBucketQuota` 使运行时能力检查失败也不能跳过;桌面在 `remote_storage_api_desktop_storage.dart` 实现,Web 经 `remote_storage_api_web_transfers.dart` / `go/webapi/invoke.go` 转发。`file_manager_page.dart` 持有页面会话配额缓存;`file_manager_page_bucket_loading.dart` 重新应用缓存并在单次列表 `setState` 前等待 `lib/pages/file_manager_page_quota.dart` 的 provider 请求(避免旧 post-frame 行重建破坏 hover)。成功结果按 profile/桶缓存 5 分钟。`go/storage/quota_cache.go` 把成功 `GetBucketQuota` 镜像进进程级 5 分钟缓存,key = 配额相关连接身份(协议/provider、endpoint、region、凭证、FTP 端口/匿名、path-style/JWan、代理)的 SHA-256——刻意排除显示、缓存、RootPrefix、挂载、写回、桶呈现设置,桶列表配置与挂载配置复用同一配额,而 endpoint/凭证变更隔离。命中/未命中日志只暴露短 hash 前缀。
 - 未来远端配额保持可选并与自定义显示值区分来源;不支持的 provider 保持未知而不是报零;配额失败不得让桶加载失败。
 - 测试:`test/bucket_quota_test.dart`、`test/widget_test.dart`(UI 复用)、`go/config/config_bucket_settings_test.go`、`go/mount/mount_capacity_test.go`、`go/mount/winfsp_statfs_windows_test.go`、`go/storage/quota_cache_test.go`、`go/mount/webdav_quota_test.go`。
+
+**Known P2/P3 (review 2026-08-30):** P2 首启保存职责拆入 `config_setup_save.dart` 后，远端轮询、FTP/SFTP 文件集与新增后端指南一度遗漏新 part；已在同批更新 [mount_external_sync](mount_external_sync.md)、[storage_backends](storage_backends.md) 与 [AddingStorageBackends](../AddingStorageBackends.md)，评审过程见 [PROJECT_GUIDE](../PROJECT_GUIDE.md)。
