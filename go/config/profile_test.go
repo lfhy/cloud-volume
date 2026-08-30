@@ -9,10 +9,18 @@ import (
 
 func setTestHome(t *testing.T, home string) {
 	t.Helper()
+	if err := switchConfigDBRoot(nil); err != nil {
+		t.Fatalf("close shared config db before HOME switch: %v", err)
+	}
 	t.Setenv("HOME", home)
 	if runtime.GOOS == "windows" {
 		t.Setenv("USERPROFILE", home)
 	}
+	t.Cleanup(func() {
+		if err := switchConfigDBRoot(nil); err != nil {
+			t.Errorf("close shared config db after HOME test: %v", err)
+		}
+	})
 }
 
 func validTestConfig() RemoteStorageConfig {

@@ -156,7 +156,7 @@ extension _ConfigSetupRestore on _ConfigSetupPageState {
               description: const Text('选择一份远端备份快照进行还原。'),
               constraints: const BoxConstraints(maxWidth: 520),
               child: SizedBox(
-                width: 480,
+                width: double.infinity,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,

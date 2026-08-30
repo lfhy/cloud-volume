@@ -1,6 +1,6 @@
 // Unified in-app modal API and platform-aware Shad dialog surface.
-// Business dialogs enter here so routing, Android fullscreen presentation,
-// system chrome, and desktop sizing stay consistent.
+// Business dialogs enter here so Android bottom sheets, system chrome, and
+// desktop sizing stay consistent.
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -17,24 +17,52 @@ const double kAppModalDefaultContentWidth = 420;
 // small in-viewport gutter so scroll clipping never cuts that focus ring.
 const EdgeInsets _androidModalScrollPadding = EdgeInsets.all(6);
 
-/// Whether app-modal surfaces should use Android's fullscreen presentation.
-bool get usesFullscreenAppModal =>
+// Keep a visible slice of the dimmed page above every Android sheet, including
+// editors with an Expanded middle pane. The route still supplies the keyboard
+// bound; this only caps the portion a sheet may occupy inside that bound.
+const double _androidSheetMaxHeightFraction = .90;
+
+/// Whether app-modal surfaces should use Android's bottom-sheet presentation.
+bool get usesAndroidAppModalSheet =>
     !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
-/// Whether Android has too little post-keyboard height for pinned dialog chrome.
-bool usesCompactFullscreenAppModal(BuildContext context) {
-  if (!usesFullscreenAppModal) return false;
+/// Compatibility alias for callers compiled against the former Android
+/// fullscreen presentation name.
+@Deprecated('Use usesAndroidAppModalSheet instead')
+bool get usesFullscreenAppModal => usesAndroidAppModalSheet;
+
+double _androidSheetMaxHeight(BuildContext context) {
+  final mediaQuery = MediaQuery.of(context);
+  final postImeHeight =
+      mediaQuery.size.height -
+      mediaQuery.viewInsets.vertical -
+      mediaQuery.padding.top;
+  return postImeHeight > 0 ? postImeHeight * _androidSheetMaxHeightFraction : 0;
+}
+
+/// Whether Android has too little post-keyboard height for pinned sheet chrome.
+bool usesCompactAndroidAppModalSheet(BuildContext context) {
+  if (!usesAndroidAppModalSheet) return false;
+  final mediaQuery = MediaQuery.of(context);
+  // The sheet deliberately leaves the status-bar band to the scrim and keeps
+  // its contents above the navigation area, so compact mode must account for
+  // both safe insets as well as the IME.
   final availableHeight =
-      MediaQuery.sizeOf(context).height -
-      MediaQuery.viewInsetsOf(context).vertical;
+      _androidSheetMaxHeight(context) - mediaQuery.padding.bottom;
   return availableHeight < 480;
 }
 
-/// A [ShadDialog] whose surface fills the available Android viewport.
+/// Compatibility alias for the former fullscreen compact-height helper.
+@Deprecated('Use usesCompactAndroidAppModalSheet instead')
+bool usesCompactFullscreenAppModal(BuildContext context) =>
+    usesCompactAndroidAppModalSheet(context);
+
+/// A [ShadDialog] that becomes a bottom-anchored Android sheet.
 ///
-/// Desktop and web retain every caller-supplied Shad property. On Android the
-/// surface itself extends behind system bars while Shad's inner [SafeArea]
-/// keeps title, content, actions, and the close button reachable.
+/// Desktop and web retain every caller-supplied Shad property. Android sheets
+/// keep their background attached to the physical bottom edge while Shad's
+/// inner [SafeArea] keeps title, content, actions, and the close button out of
+/// the system navigation area. Long editors opt into [androidFillHeight].
 class AppShadDialog extends ShadDialog {
   const AppShadDialog({
     super.key,
@@ -72,6 +100,7 @@ class AppShadDialog extends ShadDialog {
     super.titlePinned,
     super.descriptionPinned,
     super.actionsPinned,
+    this.androidFillHeight = false,
   });
 
   const AppShadDialog.alert({
@@ -110,14 +139,28 @@ class AppShadDialog extends ShadDialog {
     super.titlePinned,
     super.descriptionPinned,
     super.actionsPinned,
+    this.androidFillHeight = false,
   }) : super.alert();
+
+  /// Lets long Android editors fill the capped post-IME sheet height.
+  /// Compact sheets remain scrollable instead of forcing a bounded flex tree.
+  final bool androidFillHeight;
 
   @override
   Widget build(BuildContext context) {
-    if (!usesFullscreenAppModal) return super.build(context);
-    final compactHeight = usesCompactFullscreenAppModal(context);
+    if (!usesAndroidAppModalSheet) return super.build(context);
+    final compactHeight = usesCompactAndroidAppModalSheet(context);
+    final safeTop = MediaQuery.paddingOf(context).top;
+    final maxSheetHeight = _androidSheetMaxHeight(context);
+    final sheetConstraints = androidFillHeight && !compactHeight
+        ? BoxConstraints(
+            minWidth: double.infinity,
+            minHeight: maxSheetHeight,
+            maxHeight: maxSheetHeight,
+          )
+        : BoxConstraints(minWidth: double.infinity, maxHeight: maxSheetHeight);
 
-    return ShadDialog.raw(
+    final sheet = ShadDialog.raw(
       variant: variant,
       title: title,
       description: description,
@@ -125,17 +168,23 @@ class AppShadDialog extends ShadDialog {
       closeIcon: closeIcon,
       closeIconData: closeIconData,
       closeIconPosition: closeIconPosition,
-      radius: BorderRadius.zero,
+      radius: const BorderRadius.vertical(top: Radius.circular(20)),
       backgroundColor: backgroundColor,
       expandActionsWhenTiny: expandActionsWhenTiny,
       padding: compactHeight
           ? const EdgeInsets.symmetric(horizontal: 24, vertical: 8)
           : padding,
       gap: gap,
-      constraints: const BoxConstraints.expand(),
-      border: const Border(),
-      shadows: const <BoxShadow>[],
-      removeBorderRadiusWhenTiny: true,
+      // A loose cap lets ordinary confirmation/form sheets shrink-wrap.
+      // Editors that own an Expanded middle pane explicitly fill this cap.
+      constraints: sheetConstraints,
+      border: Border(
+        top: BorderSide(color: ShadTheme.of(context).colorScheme.border),
+      ),
+      shadows: shadows,
+      // Shad removes radii below its `sm` breakpoint by default. A sheet needs
+      // its upper corners on phones, so keep them regardless of width.
+      removeBorderRadiusWhenTiny: false,
       actionsAxis: actionsAxis,
       actionsMainAxisSize: actionsMainAxisSize,
       actionsMainAxisAlignment: actionsMainAxisAlignment,
@@ -144,7 +193,7 @@ class AppShadDialog extends ShadDialog {
       descriptionStyle: descriptionStyle,
       titleTextAlign: titleTextAlign,
       descriptionTextAlign: descriptionTextAlign,
-      alignment: alignment,
+      alignment: Alignment.bottomCenter,
       mainAxisAlignment: mainAxisAlignment,
       crossAxisAlignment: crossAxisAlignment,
       scrollable: scrollable,
@@ -156,13 +205,26 @@ class AppShadDialog extends ShadDialog {
       actionsPinned: actionsPinned,
       child: child,
     );
+
+    // SafeArea normally also adds the global top inset, which would create a
+    // phantom gap above short sheets. Reserve that band outside the surface so
+    // it stays dimmed, then remove only its top padding before Shad applies its
+    // own SafeArea. Left/right cutouts and the bottom navigation inset remain.
+    return Padding(
+      padding: EdgeInsets.only(top: safeTop),
+      child: MediaQuery.removePadding(
+        context: context,
+        removeTop: true,
+        child: sheet,
+      ),
+    );
   }
 }
 
 /// Presents an in-app modal route. Prefer this over bare [showShadDialog].
 ///
 /// The builder should return an [AppShadDialog] (or a widget that builds one)
-/// so Android presentation remains fullscreen without changing desktop sizes.
+/// so Android presentation is a bottom sheet without changing desktop sizes.
 Future<T?> showAppModal<T>({
   required BuildContext context,
   required WidgetBuilder builder,
@@ -172,12 +234,12 @@ Future<T?> showAppModal<T>({
   RouteSettings? routeSettings,
   Offset? anchorPoint,
 }) {
-  final fullscreen = usesFullscreenAppModal;
+  final androidSheet = usesAndroidAppModalSheet;
   return showShadDialog<T>(
     context: context,
     builder: (dialogContext) {
       final dialog = builder(dialogContext);
-      if (!fullscreen) return dialog;
+      if (!androidSheet) return dialog;
 
       final theme = ShadTheme.of(dialogContext);
       final iconBrightness = theme.brightness == Brightness.dark
@@ -186,8 +248,10 @@ Future<T?> showAppModal<T>({
       return AnnotatedRegion<SystemUiOverlayStyle>(
         value: SystemUiOverlayStyle(
           statusBarColor: Colors.transparent,
-          statusBarIconBrightness: iconBrightness,
-          statusBarBrightness: theme.brightness,
+          // The status bar stays over the dimmed backdrop rather than the
+          // sheet, whereas the navigation bar sits on the sheet surface.
+          statusBarIconBrightness: Brightness.light,
+          statusBarBrightness: Brightness.dark,
           systemNavigationBarColor: Colors.transparent,
           systemNavigationBarIconBrightness: iconBrightness,
           systemStatusBarContrastEnforced: false,
@@ -201,8 +265,26 @@ Future<T?> showAppModal<T>({
     useRootNavigator: useRootNavigator,
     routeSettings: routeSettings,
     anchorPoint: anchorPoint,
-    animateIn: fullscreen ? const [FadeEffect()] : null,
-    animateOut: fullscreen ? const [FadeEffect(begin: 1, end: 0)] : null,
+    animateIn: androidSheet
+        ? const [
+            SlideEffect(
+              begin: Offset(0, 1),
+              end: Offset.zero,
+              duration: Duration(milliseconds: 280),
+              curve: Curves.easeOutCubic,
+            ),
+          ]
+        : null,
+    animateOut: androidSheet
+        ? const [
+            SlideEffect(
+              begin: Offset.zero,
+              end: Offset(0, 1),
+              duration: Duration(milliseconds: 220),
+              curve: Curves.easeInCubic,
+            ),
+          ]
+        : null,
   );
 }
 
@@ -251,7 +333,7 @@ Future<T?> showAppModalDialog<T>({
           ? null
           : SizedBox(width: effectiveContentWidth, child: body);
       final constraints = BoxConstraints(maxWidth: maxWidth);
-      final effectiveScrollable = usesFullscreenAppModal || scrollable;
+      final effectiveScrollable = usesAndroidAppModalSheet || scrollable;
       if (alert) {
         return AppShadDialog.alert(
           title: title,

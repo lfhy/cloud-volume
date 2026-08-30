@@ -63,11 +63,11 @@ func DeleteProfile(name string) error {
 		return err
 	}
 	if activeName == cleanName {
-		db, err := openConfigDB()
+		db, release, err := acquireConfigDB()
 		if err != nil {
 			return err
 		}
-		defer db.Close()
+		defer release()
 		_ = db.Update(func(tx *bolt.Tx) error {
 			return tx.Bucket(metaBucketKey).Delete(activeProfileKey)
 		})
@@ -92,15 +92,16 @@ func ResetAllProfiles() error {
 }
 
 // MigrateDefault is a no-op kept for backward compatibility with bridge
-// callers. The TOML→bbolt migration now happens automatically inside
-// openConfigDB on first DB creation.
+// callers. The TOML→bbolt migration now happens automatically when the
+// process-wide config DB handle is first created.
 func MigrateDefault() error {
 	// Trigger DB creation + migration if not done yet.
-	db, err := openConfigDB()
+	_, release, err := acquireConfigDB()
 	if err != nil {
 		return err
 	}
-	return db.Close()
+	defer release()
+	return nil
 }
 
 // ProfilesDir returns the legacy profiles directory path (used during migration).

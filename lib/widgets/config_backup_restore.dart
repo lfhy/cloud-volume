@@ -82,7 +82,7 @@ Future<String?> showConfigBackupPasswordPrompt({
     context: context,
     title: const Text('输入备份密码'),
     description: Text('备份 $snapshotLabel 已加密，请输入加密时设置的备份密码。'),
-maxWidth: 420,
+    maxWidth: 420,
     child: StatefulBuilder(
       builder: (dialogContext, setDialogState) {
         return Column(

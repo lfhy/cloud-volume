@@ -68,7 +68,9 @@ void main() {
     await _openSettings(tester, onSelected: (value) => selected = value);
 
     await tester.enterText(find.byType(ShadInput).first, '1.5');
-    await tester.tap(find.text('保存'));
+    final save = find.text('保存');
+    await tester.ensureVisible(save);
+    await tester.tap(save);
     await tester.pumpAndSettle();
 
     expect(selected, isNotNull);
@@ -83,7 +85,9 @@ void main() {
     await _openSettings(tester, onSelected: (value) => selected = value);
 
     await tester.enterText(find.byType(ShadInput).first, '1.2.3');
-    await tester.tap(find.text('保存'));
+    final save = find.text('保存');
+    await tester.ensureVisible(save);
+    await tester.tap(save);
     await tester.pump();
 
     expect(selected, isNull);

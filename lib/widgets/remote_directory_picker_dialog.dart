@@ -226,17 +226,17 @@ class _RemoteDirectoryPickerDialogState
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    final fullscreen = widget.asDialog && usesFullscreenAppModal;
-    final compactFullscreen =
-        fullscreen && usesCompactFullscreenAppModal(context);
+    final androidSheet = widget.asDialog && usesAndroidAppModalSheet;
+    final compactAndroidSheet =
+        androidSheet && usesCompactAndroidAppModalSheet(context);
     final body = SizedBox(
       width: double.infinity,
-      height: widget.asDialog && !fullscreen
+      height: widget.asDialog && !androidSheet
           ? 480
-          : compactFullscreen
+          : compactAndroidSheet
           ? null
           : double.infinity,
-      child: _buildPickerBody(theme, compactHeight: compactFullscreen),
+      child: _buildPickerBody(theme, compactHeight: compactAndroidSheet),
     );
     if (!widget.asDialog) return body;
     return AppShadDialog(
@@ -245,7 +245,8 @@ class _RemoteDirectoryPickerDialogState
         _activeBucket == null ? '选择一个存储桶进入。' : '浏览目录后点击「选择当前目录」确认。',
       ),
       constraints: const BoxConstraints(maxWidth: 640),
-      scrollable: !fullscreen || compactFullscreen,
+      androidFillHeight: androidSheet,
+      scrollable: !androidSheet || compactAndroidSheet,
       child: body,
     );
   }

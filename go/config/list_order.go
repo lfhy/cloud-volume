@@ -22,11 +22,11 @@ var (
 // Unknown or empty names are ignored; missing profiles stay appendable later.
 func ReorderProfiles(names []string) error {
 	clean := sanitizeOrderNames(names)
-	db, err := openConfigDB()
+	db, release, err := acquireConfigDB()
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer release()
 	return db.Update(func(tx *bolt.Tx) error {
 		return putOrderJSON(tx, profileOrderKey, clean)
 	})
@@ -36,11 +36,11 @@ func ReorderProfiles(names []string) error {
 // (`profileName::bucketName`), matching Flutter FileManagerBucketEntry.id.
 func ReorderBuckets(ids []string) error {
 	clean := sanitizeOrderNames(ids)
-	db, err := openConfigDB()
+	db, release, err := acquireConfigDB()
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer release()
 	return db.Update(func(tx *bolt.Tx) error {
 		return putOrderJSON(tx, bucketOrderKey, clean)
 	})
@@ -48,11 +48,11 @@ func ReorderBuckets(ids []string) error {
 
 // ListBucketOrder returns the persisted bucket entry ids in display order.
 func ListBucketOrder() ([]string, error) {
-	db, err := openConfigDB()
+	db, release, err := acquireConfigDB()
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close()
+	defer release()
 	var order []string
 	err = db.View(func(tx *bolt.Tx) error {
 		order = loadOrderJSON(tx, bucketOrderKey)

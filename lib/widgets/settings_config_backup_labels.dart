@@ -64,12 +64,16 @@ String configBackupTargetStatusDetail({
 String configBackupPathPreview({
   required String bucket,
   required String prefix,
+  String? displayBucket,
 }) {
   final cleanBucket = bucket.trim();
   final cleanPrefix = prefix.trim().replaceAll(RegExp(r'^/+|/+$'), '');
   if (cleanBucket.isEmpty) return '尚未填写存储路径';
-  if (cleanPrefix.isEmpty) return cleanBucket;
-  return '$cleanBucket / $cleanPrefix';
+  final label = displayBucket?.trim().isNotEmpty == true
+      ? displayBucket!.trim()
+      : cleanBucket;
+  if (cleanPrefix.isEmpty) return label;
+  return '$label / $cleanPrefix';
 }
 
 String configBackupHistoryTitle({

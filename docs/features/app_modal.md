@@ -12,21 +12,23 @@
   - `showAppModal` — builder 返回 `AppShadDialog` / 会构造它的双模式编辑器。
   - `showAppModalDialog` — title/description/body/actions 简单表单 helper。
   - `showAppConfirmModal` — 是/否确认(`cancel` + `confirm`,可选 `destructive`)。
-  - `AppShadDialog` — 业务模态 surface;Android 全屏适配器,桌面/Web 透传原 `ShadDialog` 尺寸与属性。业务代码不得直接构造 `ShadDialog`。
+  - `AppShadDialog` — 业务模态 surface;Android 底部抽屉适配器,桌面/Web 透传原 `ShadDialog` 尺寸与属性。业务代码不得直接构造 `ShadDialog`。
   - 常量:`kAppModalDefaultMaxWidth = 480`、`kAppModalDefaultContentWidth = 420`。
   - 唯一允许的 `showShadDialog` 调用点。
 - `lib/services/modal_sub_window_debug.dart` — `preferModalSubWindows = kDebugMode && USE_MODAL_SUB_WINDOWS`(默认 false;debug 构建 `--dart-define=USE_MODAL_SUB_WINDOWS=true` 启用)。
 - `lib/services/desktop_overlay.dart` — `showDesktopOverlayOrDialog`:gate + 支持时开 debug OS 子窗口,否则应用内模态。**当前唯一生产调用方:** `showRemoteDirectoryPicker`。
 
-### Android 全屏呈现(binding)
+### Android 底部抽屉呈现(binding)
 
 - 判据为 `!kIsWeb && defaultTargetPlatform == TargetPlatform.android`;不得用 `dart:io Platform.isAndroid`,否则 widget 回归无法覆盖。
-- 所有业务 surface 必须使用 `AppShadDialog`:Android 强制 `BoxConstraints.expand`、零圆角/边框/阴影,白色/主题背景铺到系统栏下;`ShadDialog` 内层 `SafeArea` 保护标题、关闭按钮与内容。不得在 route 外再包 `SafeArea`,否则会重新露出截图中的上下暗色截断带。
+- 所有业务 surface 必须使用 `AppShadDialog`:Android 强制全宽、`Alignment.bottomCenter`、顶角 `20px`、物理底边贴屏;背景延伸到导航栏下,而 `ShadDialog` 内层 `SafeArea` 保证内容避开导航栏/侧边 cutout。状态栏高度留给 scrim,不得在 route 外再包 `SafeArea`。
+- 短确认框与普通表单只施加**上限**并按内容收缩;任何 Android sheet（含长编辑器）最多占状态栏下、IME 后可用高度的 `90%`,始终保留顶部暗层。`androidFillHeight` 只让 `RemoteDirectoryPickerDialog`、`FileSyncProfileEditor`、`FilePreviewDialog` 的 `Expanded` 中段填满该有限上限，绝不恢复全屏 `BoxConstraints.expand`。
 - Android 可滚动 surface 默认给内容四边 `6px` `scrollPadding`,容纳 Shad 输入框向外绘制 `4px` 的焦点环;显式覆盖时不得小于焦点环外扩量。增大 dialog 外层 padding 不能解决该裁剪,因为字段仍会贴住缩小后的滚动 viewport。
-- surface 高度由上游 `Align → Padding(viewInsets)` 的**键盘后可用约束**决定,不用 `MediaQuery` 硬设高度;`usesCompactFullscreenAppModal` 只用视口减 `viewInsets` 判定 480px 低高度降级。`showAppModal` 在 Android 仅保留 fade,并用 `AnnotatedRegion<SystemUiOverlayStyle>` 随主题设置系统栏图标,关闭 route 后自动恢复。
-- 普通收缩表单由 Shad 单滚动容器承载;`showAppModalDialog` 在 Android 强制可滚动且动作使用 `OverflowBar`。fill-height 内容(`RemoteDirectoryPickerDialog`、`FileSyncProfileEditor`、`FilePreviewDialog`)在常规高度下用 `scrollable: false` + 中间主体 `Expanded`,固定动作;低高度时同步编辑器与目录选择器移除 `Expanded`,切换为 Shad 外层单滚动面,让标题、说明、主体与动作一起可滚动;紧凑态纵向 padding 降为 8px,保持 SafeArea 内的聚焦与动作可达。
-- 手机动作组用获得整行宽度的 `Wrap`/`OverflowBar`,禁止用固定 `Row` 承载表单 footer;连接字段与同步路径动作按实际宽度改为单列,远端选择器深面包屑横向滚动。不得把“全屏”实现成只有背景变大、固定 480px 内容仍悬空或横向溢出。
-- 回归:`test/app_modal_test.dart` 固定 Android surface 四边、SafeArea、键盘、系统返回、账号编辑器焦点环绘制边距、同步 fill-height 及横屏 + IME,并对照 macOS 仍有限宽居中;`test/remote_directory_picker_dialog_test.dart` 覆盖 picker fill-height、深面包屑与创建目录的横屏 + IME 路径;`test/object_action_dialogs_test.dart` 覆盖窄屏大字体 footer 换行。
+- 高度仍由 Shad 的 `Align → Padding(viewInsets)` 约束，sheet 在 IME 打开后贴键盘上沿；`usesCompactAndroidAppModalSheet` 按 capped height + SafeArea 判定 `<480px` 低高度。`showAppModal` 用 280ms `easeOutCubic` 上移、220ms `easeInCubic` 下移；状态栏位于暗层上固定浅色图标，导航栏图标继续随 sheet 主题切换，关闭 route 后自动恢复。
+- 普通收缩表单由 Shad 单滚动容器承载;`showAppModalDialog` 在 Android 强制可滚动且动作使用 `OverflowBar`。fill-height 内容在常规高度下用 `scrollable: false` + 中间主体 `Expanded`,固定动作;低高度时同步编辑器与目录选择器移除 `Expanded`,切换为 Shad 外层单滚动面,让标题、说明、主体与动作一起可滚动;紧凑态纵向 padding 降为 8px,保持 SafeArea 内的聚焦与动作可达。
+- 不迁到 `ShadSheet`/draggable:现有 `AppShadDialog` 构造器、variant、root navigator 与滚动契约可原样保留；表单内纵向滚动也不与拖拽关闭手势竞争。barrier 点击、关闭按钮与系统返回的既有取消语义不变。
+- 手机动作组用获得整行宽度的 `Wrap`/`OverflowBar`,禁止用固定 `Row` 承载表单 footer;连接字段与同步路径动作按实际宽度改为单列,远端选择器深面包屑横向滚动。不得把“底部抽屉”实现成只有背景贴底、固定 480px 内容仍悬空或横向溢出。
+- 回归:`test/app_modal_test.dart` 固定 Android 短 sheet 收缩/贴底/顶角、SafeArea、上移/下移动画、键盘、系统返回、账号编辑器焦点环绘制边距、capped fill-height 及横屏 + IME,并对照 macOS 仍有限宽居中;`test/remote_directory_picker_dialog_test.dart` 覆盖 picker 的 capped fill-height、深面包屑与创建目录的横屏 + IME 路径;`test/object_action_dialogs_test.dart` 覆盖窄屏大字体 footer 换行。
 
 ### 开启路径路由策略
 
@@ -44,9 +46,9 @@
 
 | 模态 | 入口/组件 | 打开自 | 备注 |
 |-------|-----------|--------|------|
-| 账号编辑器 | `CloudStorageAccountDialog` | `account_editor_presenter.dart`(账号管理或文件管理恢复) | 桌面/Web 紧凑最大宽 **640**;Android 全屏。主表单只保留连接字段;path-style + 代理进嵌套**高级设置**模态。子窗口内仅内容自适应缩放。 |
-| 同步配置编辑器 | `FileSyncProfileEditor` | `file_sync_tasks_page_actions.dart` 增/改 | 桌面/Web 最大宽 **600**,Android 全屏 fill-height。三步向导:同步两端 → 同步策略 → 高级设置(排除规则/启用)。嵌套远端选择器。 |
-| 远端目录选择器 | `showRemoteDirectoryPicker` / `RemoteDirectoryPickerDialog` | 同步编辑器 step 1、配置备份等 | 桌面/Web 最大宽 **640**、体高 **480**;Android 全屏 fill-height。经 `showDesktopOverlayOrDialog`;底部两组动作以 `OverflowBar` + 组内 `Wrap` 按实际宽度自动换行。 |
+| 账号编辑器 | `CloudStorageAccountDialog` | `account_editor_presenter.dart`(账号管理或文件管理恢复) | 桌面/Web 紧凑最大宽 **640**;Android 内容自适应底部抽屉。主表单只保留连接字段;path-style + 代理进嵌套**高级设置**模态。子窗口内仅内容自适应缩放。 |
+| 同步配置编辑器 | `FileSyncProfileEditor` | `file_sync_tasks_page_actions.dart` 增/改 | 桌面/Web 最大宽 **600**,Android capped fill-height 底部抽屉。三步向导:同步两端 → 同步策略 → 高级设置(排除规则/启用)。嵌套远端选择器。 |
+| 远端目录选择器 | `showRemoteDirectoryPicker` / `RemoteDirectoryPickerDialog` | 同步编辑器 step 1、配置备份等 | 桌面/Web 最大宽 **640**、体高 **480**;Android capped fill-height 底部抽屉。经 `showDesktopOverlayOrDialog`;底部两组动作以 `OverflowBar` + 组内 `Wrap` 按实际宽度自动换行。 |
 
 ### 全部应用内模态清单
 
@@ -65,7 +67,7 @@
 - 内部有 `Expanded`/固定高列表的大编辑器**不要**外套 `SingleChildScrollView`。Android fill-height 用 `AppShadDialog(scrollable: false)`;桌面有限高或仅在 body 为 `mainAxisSize: min` 时 `scrollable: true`。
 - hover/关闭 chrome 遵循全局 hover 规范(`ListInteractionColors`;无水波纹;仅中性洗色,见 [ui_rules](ui_rules.md))。
 - Web 恒用应用内模态(窗口服务不支持)。
-- 桌面/Web 双模式编辑器必须**小于主窗口**:账号/同步 ~600–640、远端选择器 ~640×480;Android 是全屏例外。宁可加步骤/嵌套高级模态也不加宽(账号 path-style + 代理在嵌套高级设置;同步排除/启用是 step 3)。
+- 桌面/Web 双模式编辑器必须**小于主窗口**:账号/同步 ~600–640、远端选择器 ~640×480;Android 是 capped bottom-sheet 例外。宁可加步骤/嵌套高级模态也不加宽(账号 path-style + 代理在嵌套高级设置;同步排除/启用是 step 3)。
 - 简单是/否用 `showAppConfirmModal`;body 有表单/列表/进度时用专门 widget/helper。
 - 新增模态:只经 `showAppModal*` 进入并构造 `AppShadDialog`,内容保持 500 行内(按 part/feature 拆),并更新本清单。
 - `RemoteDirectoryPickerDialog.initial` 只有桶名和 profile 都精确匹配时才恢复目录;空/失效目标停在桶列表,不得把旧 prefix 静默套到首桶。每次目录加载先清旧错误,成功结果必须解除错误态;较旧目录请求的迟到成功/失败都不得覆盖较新导航。回归见 `test/remote_directory_picker_dialog_test.dart`,理由见 [Agent Note](../notes/implemented/bug-fix/2026-08-30-android-backup-directory-picker.md)。

@@ -1,4 +1,4 @@
-// App modal tests pin Android fullscreen chrome and desktop dialog sizing.
+// App modal tests pin Android bottom-sheet chrome and desktop dialog sizing.
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -19,7 +19,7 @@ const _surfaceColor = Color(0xfffefdfc);
 
 void main() {
   testWidgets(
-    'Android app modal surface fills the viewport behind safe areas',
+    'Android short app modal shrink-wraps at the bottom above safe content',
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
       try {
@@ -33,8 +33,12 @@ void main() {
         await tester.tap(find.text('打开'));
         await tester.pumpAndSettle();
 
-        final surfaceRect = tester.getRect(_surfaceFinder());
-        expect(surfaceRect, const Rect.fromLTWH(0, 0, 393, 852));
+        final surfaceRect = tester.getRect(_androidSheetSurfaceFinder());
+        expect(surfaceRect.left, 0);
+        expect(surfaceRect.width, 393);
+        expect(surfaceRect.bottom, 852);
+        expect(surfaceRect.top, greaterThan(24));
+        expect(surfaceRect.height, lessThan(852 - 24));
         expect(
           find.descendant(
             of: find.byType(AppShadDialog),
@@ -43,8 +47,12 @@ void main() {
           findsOneWidget,
         );
         expect(
-          tester.getTopLeft(find.text('Android 全屏')).dy,
-          greaterThanOrEqualTo(24),
+          tester.getTopLeft(find.text('Android 抽屉')).dy,
+          greaterThan(surfaceRect.top),
+        );
+        expect(
+          tester.getRect(find.text('模态内容')).bottom,
+          lessThanOrEqualTo(818),
         );
         final systemUiRegion = find.ancestor(
           of: find.byType(AppShadDialog),
@@ -53,7 +61,7 @@ void main() {
         final systemUiStyle = tester
             .widget<AnnotatedRegion<SystemUiOverlayStyle>>(systemUiRegion)
             .value;
-        expect(systemUiStyle.statusBarIconBrightness, Brightness.dark);
+        expect(systemUiStyle.statusBarIconBrightness, Brightness.light);
         expect(
           systemUiStyle.systemNavigationBarIconBrightness,
           Brightness.dark,
@@ -62,7 +70,7 @@ void main() {
 
         await tester.tap(find.byIcon(LucideIcons.x));
         await tester.pumpAndSettle();
-        expect(find.text('Android 全屏'), findsNothing);
+        expect(find.text('Android 抽屉'), findsNothing);
         expect(systemUiRegion, findsNothing);
       } finally {
         debugDefaultTargetPlatformOverride = null;
@@ -70,7 +78,7 @@ void main() {
     },
   );
 
-  testWidgets('Android modal fills only the keyboard-available viewport', (
+  testWidgets('Android short modal stays attached to the keyboard edge', (
     tester,
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
@@ -85,9 +93,48 @@ void main() {
       await tester.tap(find.text('打开'));
       await tester.pumpAndSettle();
 
+      final surfaceRect = tester.getRect(_androidSheetSurfaceFinder());
+      expect(surfaceRect.left, 0);
+      expect(surfaceRect.width, 393);
+      expect(surfaceRect.bottom, 552);
+      expect(surfaceRect.height, lessThan(552));
+      expect(tester.takeException(), isNull);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('Android modal slides up from and down to the bottom edge', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      _configureView(tester, size: const Size(393, 852));
+      await _pumpHost(tester);
+
+      await tester.tap(find.text('打开'));
+      await tester.pump();
+      // ShadAnimate starts its controller from a post-frame callback.
+      await tester.pump();
+      final enteringTop = tester.getRect(_androidSheetSurfaceFinder()).top;
+
+      await tester.pump(const Duration(milliseconds: 140));
+      final halfwayTop = tester.getRect(_androidSheetSurfaceFinder()).top;
+      expect(halfwayTop, lessThan(enteringTop));
+
+      await tester.pumpAndSettle();
+      final settledRect = tester.getRect(_androidSheetSurfaceFinder());
+      expect(settledRect.bottom, 852);
+      expect(settledRect.top, lessThan(halfwayTop));
+
+      await tester.tap(find.byIcon(LucideIcons.x));
+      await tester.pump();
+      await tester.pump();
+      final exitingTop = tester.getRect(_androidSheetSurfaceFinder()).top;
+      await tester.pump(const Duration(milliseconds: 110));
       expect(
-        tester.getRect(_surfaceFinder()),
-        const Rect.fromLTWH(0, 0, 393, 552),
+        tester.getRect(_androidSheetSurfaceFinder()).top,
+        greaterThan(exitingTop),
       );
       expect(tester.takeException(), isNull);
     } finally {
@@ -158,7 +205,7 @@ void main() {
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
 
-      expect(find.text('Android 全屏'), findsNothing);
+      expect(find.text('Android 抽屉'), findsNothing);
       expect(find.text('底层页面'), findsOneWidget);
       expect(result, isNull);
     } finally {
@@ -166,62 +213,54 @@ void main() {
     }
   });
 
-  testWidgets(
-    'backup storage editor also uses the Android fullscreen surface',
-    (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.android;
-      try {
-        _configureView(
-          tester,
-          size: const Size(393, 852),
-          padding: const FakeViewPadding(top: 24, bottom: 34),
-        );
-        await tester.pumpWidget(
-          ShadApp(
-            home: Scaffold(
-              body: Builder(
-                builder: (context) => ShadButton(
-                  onPressed: () => showAppModal<void>(
-                    context: context,
-                    builder: (_) => CloudStorageAccountDialog(
-                      api: _FakeGateway(),
-                      simpleMode: true,
-                      onSave: (_) async => true,
-                      onStartBaiduPanAuthorization: () async => '',
-                      onAuthorizeBaiduPan: (_, _) async =>
-                          RemoteStorageConfig.empty(),
-                      onListBuckets: (_) async => const <BucketInfo>[],
-                    ),
+  testWidgets('backup storage editor uses the Android bottom sheet surface', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      _configureView(
+        tester,
+        size: const Size(393, 852),
+        padding: const FakeViewPadding(top: 24, bottom: 34),
+      );
+      await tester.pumpWidget(
+        ShadApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ShadButton(
+                onPressed: () => showAppModal<void>(
+                  context: context,
+                  builder: (_) => CloudStorageAccountDialog(
+                    api: _FakeGateway(),
+                    simpleMode: true,
+                    onSave: (_) async => true,
+                    onStartBaiduPanAuthorization: () async => '',
+                    onAuthorizeBaiduPan: (_, _) async =>
+                        RemoteStorageConfig.empty(),
+                    onListBuckets: (_) async => const <BucketInfo>[],
                   ),
-                  child: const Text('配置备份'),
                 ),
+                child: const Text('配置备份'),
               ),
             ),
           ),
-        );
+        ),
+      );
 
-        await tester.tap(find.text('配置备份'));
-        await tester.pumpAndSettle();
+      await tester.tap(find.text('配置备份'));
+      await tester.pumpAndSettle();
 
-        expect(find.text('配置独立备份存储'), findsOneWidget);
-        final expandedSurface = find.descendant(
-          of: find.byType(CloudStorageAccountDialog),
-          matching: find.byWidgetPredicate(
-            (widget) =>
-                widget is ConstrainedBox &&
-                widget.constraints == const BoxConstraints.expand(),
-          ),
-        );
-        expect(
-          tester.getRect(expandedSurface),
-          const Rect.fromLTWH(0, 0, 393, 852),
-        );
-        expect(tester.takeException(), isNull);
-      } finally {
-        debugDefaultTargetPlatformOverride = null;
-      }
-    },
-  );
+      expect(find.text('配置独立备份存储'), findsOneWidget);
+      final surfaceRect = tester.getRect(_androidSheetSurfaceFinder());
+      expect(surfaceRect.left, 0);
+      expect(surfaceRect.width, 393);
+      expect(surfaceRect.bottom, 852);
+      expect(surfaceRect.top, greaterThanOrEqualTo(24));
+      expect(tester.takeException(), isNull);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
 
   testWidgets(
     'Android scrollable modal keeps the SFTP focus ring inside its viewport',
@@ -336,15 +375,12 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final expandedSurface = find.descendant(
-        of: find.byType(FileSyncProfileEditor),
-        matching: find.byWidgetPredicate(
-          (widget) =>
-              widget is ConstrainedBox &&
-              widget.constraints == const BoxConstraints.expand(),
-        ),
-      );
-      expect(tester.getSize(expandedSurface), const Size(360, 640));
+      final surfaceRect = tester.getRect(_androidSheetSurfaceFinder());
+      expect(surfaceRect.left, 0);
+      expect(surfaceRect.width, 360);
+      expect(surfaceRect.bottom, 640);
+      expect(surfaceRect.top, closeTo(64, .5));
+      expect(surfaceRect.height, closeTo(576, .5));
       expect(find.text('本地目录'), findsOneWidget);
       expect(find.text('远端目录'), findsOneWidget);
       expect(tester.takeException(), isNull);
@@ -396,15 +432,9 @@ void main() {
         final nextButton = find.widgetWithText(ShadButton, '下一步');
         await tester.ensureVisible(nextButton);
         await tester.pumpAndSettle();
-        final expandedSurface = find.descendant(
-          of: find.byType(FileSyncProfileEditor),
-          matching: find.byWidgetPredicate(
-            (widget) =>
-                widget is ConstrainedBox &&
-                widget.constraints == const BoxConstraints.expand(),
-          ),
-        );
-        final surfaceRect = tester.getRect(expandedSurface.first);
+        final surfaceRect = tester.getRect(_androidSheetSurfaceFinder());
+        expect(surfaceRect.bottom, closeTo(140, .5));
+        expect(surfaceRect.top, greaterThanOrEqualTo(24));
         final nextButtonRect = tester.getRect(nextButton);
         expect(nextButtonRect.top, greaterThanOrEqualTo(surfaceRect.top + 24));
         expect(
@@ -454,6 +484,10 @@ void main() {
       for (final label in const ['取消', '外部应用打开', '另存为', '下载']) {
         expect(find.text(label), findsOneWidget);
       }
+      final initialSurface = tester.getRect(_androidSheetSurfaceFinder());
+      expect(initialSurface.bottom, 640);
+      expect(initialSurface.top, greaterThan(0));
+      expect(initialSurface.height, lessThan(640));
       final shortPreviewHeight = tester
           .getSize(find.byType(FilePreviewPane))
           .height;
@@ -528,7 +562,7 @@ class _TestDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const AppShadDialog(
-      title: Text('Android 全屏'),
+      title: Text('Android 抽屉'),
       backgroundColor: _surfaceColor,
       constraints: BoxConstraints(maxWidth: 240),
       closeIconData: LucideIcons.x,
@@ -547,5 +581,16 @@ Finder _surfaceFinder() {
     }),
   );
 }
+
+Finder _androidSheetSurfaceFinder() => find.descendant(
+  of: find.byType(AppShadDialog),
+  matching: find.byWidgetPredicate((widget) {
+    if (widget is! DecoratedBox) return false;
+    final decoration = widget.decoration;
+    return decoration is BoxDecoration &&
+        decoration.borderRadius ==
+            const BorderRadius.vertical(top: Radius.circular(20));
+  }),
+);
 
 class _FakeGateway extends Fake implements RemoteStorageGateway {}

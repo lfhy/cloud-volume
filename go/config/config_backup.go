@@ -56,11 +56,11 @@ type ConfigBackupArchive struct {
 }
 
 func LoadConfigBackupSettings() (ConfigBackupSettings, error) {
-	db, err := openConfigDB()
+	db, release, err := acquireConfigDB()
 	if err != nil {
 		return ConfigBackupSettings{}, err
 	}
-	defer db.Close()
+	defer release()
 	var settings ConfigBackupSettings
 	err = db.View(func(tx *bolt.Tx) error {
 		data := tx.Bucket(metaBucketKey).Get(configBackupSettingsKey)
@@ -94,11 +94,11 @@ func SaveConfigBackupSettings(settings ConfigBackupSettings) error {
 	if err != nil {
 		return fmt.Errorf("encode config backup settings: %w", err)
 	}
-	db, err := openConfigDB()
+	db, release, err := acquireConfigDB()
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer release()
 	return db.Update(func(tx *bolt.Tx) error {
 		return tx.Bucket(metaBucketKey).Put(configBackupSettingsKey, payload)
 	})
@@ -106,11 +106,11 @@ func SaveConfigBackupSettings(settings ConfigBackupSettings) error {
 
 // ExportConfigBackup captures only restorable user configuration.
 func ExportConfigBackup() (ConfigBackupArchive, error) {
-	db, err := openConfigDB()
+	db, release, err := acquireConfigDB()
 	if err != nil {
 		return ConfigBackupArchive{}, err
 	}
-	defer db.Close()
+	defer release()
 	archive := ConfigBackupArchive{Version: 1, CreatedAt: time.Now().UTC(), Profiles: map[string]RemoteStorageConfig{}}
 	err = db.View(func(tx *bolt.Tx) error {
 		profiles := tx.Bucket(profilesBucketKey)
@@ -158,11 +158,11 @@ func RestoreConfigBackup(archive ConfigBackupArchive) error {
 		profilesByName[clean] = cfg
 	}
 	sort.Strings(names)
-	db, err := openConfigDB()
+	db, release, err := acquireConfigDB()
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer release()
 	return db.Update(func(tx *bolt.Tx) error {
 		if err := tx.DeleteBucket(profilesBucketKey); err != nil && err != bolt.ErrBucketNotFound {
 			return err

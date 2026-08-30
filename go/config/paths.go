@@ -54,10 +54,7 @@ func SetAppDataRoot(root string) error {
 	if root == "" {
 		return fmt.Errorf("app data root is empty")
 	}
-	appDataRootOverride.Lock()
-	appDataRootOverride.path = filepath.Clean(root)
-	appDataRootOverride.Unlock()
-	return nil
+	return setConfigDBRoot(filepath.Clean(root))
 }
 
 // legacyAppDataRoot returns the pre-Cloud Volume config root for upgrades.

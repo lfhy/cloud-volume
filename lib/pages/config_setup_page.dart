@@ -1,4 +1,4 @@
-// 首次启动配置页：协议选择 → 全屏账号表单；步骤切换只做轻量宽度/淡入动画。
+// 首次启动配置页：协议选择 → 账号表单；步骤切换只做轻量宽度/淡入动画。
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';

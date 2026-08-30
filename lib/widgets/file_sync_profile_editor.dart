@@ -306,14 +306,15 @@ class _FileSyncProfileEditorState extends State<FileSyncProfileEditor> {
     if (!widget.asDialog) {
       return _buildFillHeightLayout(theme);
     }
-    final fullscreen = usesFullscreenAppModal;
-    final compactFullscreen = usesCompactFullscreenAppModal(context);
+    final androidSheet = usesAndroidAppModalSheet;
+    final compactAndroidSheet = usesCompactAndroidAppModalSheet(context);
     return AppShadDialog(
       title: Text(widget.initial == null ? '新建同步配置' : '编辑同步配置'),
       description: const Text('将一个本地目录与远端桶目录保持同步。'),
       constraints: const BoxConstraints(maxWidth: 600),
-      scrollable: !fullscreen || compactFullscreen,
-      child: fullscreen && !compactFullscreen
+      androidFillHeight: androidSheet,
+      scrollable: !androidSheet || compactAndroidSheet,
+      child: androidSheet && !compactAndroidSheet
           ? _buildFillHeightLayout(theme)
           : _buildDialogContent(theme),
     );

@@ -14,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"time"
 
 	bolt "go.etcd.io/bbolt"
 )
@@ -36,44 +35,6 @@ func configDBPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(root, configDBFileName), nil
-}
-
-// openConfigDB opens (or creates) the bbolt config database, running the
-// one-time TOML→bbolt migration if the DB is new.
-func openConfigDB() (*bolt.DB, error) {
-	path, err := configDBPath()
-	if err != nil {
-		return nil, err
-	}
-	dbExists := pathExists(path)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("create config dir: %w", err)
-	}
-	db, err := bolt.Open(path, 0o600, &bolt.Options{Timeout: 5 * time.Second})
-	if err != nil {
-		return nil, fmt.Errorf("open config db: %w", err)
-	}
-	// Ensure buckets exist.
-	if err := db.Update(func(tx *bolt.Tx) error {
-		if _, err := tx.CreateBucketIfNotExists(profilesBucketKey); err != nil {
-			return fmt.Errorf("create profiles bucket: %w", err)
-		}
-		if _, err := tx.CreateBucketIfNotExists(metaBucketKey); err != nil {
-			return fmt.Errorf("create meta bucket: %w", err)
-		}
-		return nil
-	}); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	// Migrate from TOML files on first creation.
-	if !dbExists {
-		if err := migrateTomlToBbolt(db); err != nil {
-			// Log but don't fail — the user can still start fresh.
-			fmt.Fprintf(os.Stderr, "[config] TOML migration warning: %v\n", err)
-		}
-	}
-	return db, nil
 }
 
 // migrateTomlToBbolt reads all legacy TOML profile files and the legacy
@@ -179,11 +140,11 @@ func saveProfileToDB(name string, config RemoteStorageConfig) error {
 	if cleanName == "" {
 		return fmt.Errorf("profile name is empty")
 	}
-	db, err := openConfigDB()
+	db, release, err := acquireConfigDB()
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer release()
 	return db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(profilesBucketKey)
 		ensureProfileIdentity(bucket, cleanName, &config)
@@ -201,11 +162,11 @@ func saveProfileToDB(name string, config RemoteStorageConfig) error {
 // loadProfileFromDB reads a config for a named profile from bbolt.
 func loadProfileFromDB(name string) (RemoteStorageConfig, error) {
 	cleanName := sanitizeProfileName(name)
-	db, err := openConfigDB()
+	db, release, err := acquireConfigDB()
 	if err != nil {
 		return DefaultConfig(), err
 	}
-	defer db.Close()
+	defer release()
 	var config RemoteStorageConfig
 	err = db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(profilesBucketKey)
@@ -236,11 +197,11 @@ func loadProfileFromDB(name string) (RemoteStorageConfig, error) {
 
 // listProfilesFromDB returns all stored profiles from bbolt.
 func listProfilesFromDB() ([]ProfileInfo, error) {
-	db, err := openConfigDB()
+	db, release, err := acquireConfigDB()
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close()
+	defer release()
 
 	activeName := activeProfileNameFromDB(db)
 
@@ -300,11 +261,11 @@ func listProfilesFromDB() ([]ProfileInfo, error) {
 // deleteProfileFromDB removes a profile from bbolt.
 func deleteProfileFromDB(name string) error {
 	cleanName := sanitizeProfileName(name)
-	db, err := openConfigDB()
+	db, release, err := acquireConfigDB()
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer release()
 	return db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(profilesBucketKey)
 		if err := bucket.Delete([]byte(cleanName)); err != nil {
@@ -340,11 +301,11 @@ func setActiveProfileInDB(name string) error {
 	if cleanName == "" {
 		return fmt.Errorf("profile name is empty")
 	}
-	db, err := openConfigDB()
+	db, release, err := acquireConfigDB()
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer release()
 	return db.Update(func(tx *bolt.Tx) error {
 		// Verify the profile exists.
 		bucket := tx.Bucket(profilesBucketKey)
@@ -358,21 +319,21 @@ func setActiveProfileInDB(name string) error {
 
 // activeProfileName reads the active profile name, opening the DB as needed.
 func activeProfileName() (string, error) {
-	db, err := openConfigDB()
+	db, release, err := acquireConfigDB()
 	if err != nil {
 		return defaultProfileName, err
 	}
-	defer db.Close()
+	defer release()
 	return activeProfileNameFromDB(db), nil
 }
 
 // resetAllProfilesInDB removes every stored account from bbolt.
 func resetAllProfilesInDB() error {
-	db, err := openConfigDB()
+	db, release, err := acquireConfigDB()
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer release()
 	return db.Update(func(tx *bolt.Tx) error {
 		if err := tx.DeleteBucket(profilesBucketKey); err != nil && err != bolt.ErrBucketNotFound {
 			return err

@@ -24,11 +24,11 @@ type CacheIndexRecord struct {
 
 // FindCacheIndexRecord returns the cached record for bucket/objectKey, if any.
 func FindCacheIndexRecord(bucket, objectKey string) (*CacheIndexRecord, error) {
-	db, err := openConfigDB()
+	db, release, err := acquireConfigDB()
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close()
+	defer release()
 
 	var record *CacheIndexRecord
 	err = db.View(func(tx *bolt.Tx) error {
@@ -66,11 +66,11 @@ func UpsertCacheIndexRecord(record CacheIndexRecord) error {
 		return fmt.Errorf("encode cache index record: %w", err)
 	}
 
-	db, err := openConfigDB()
+	db, release, err := acquireConfigDB()
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer release()
 
 	return db.Update(func(tx *bolt.Tx) error {
 		cacheBucket, err := tx.CreateBucketIfNotExists(previewCacheBucketKey)
@@ -83,11 +83,11 @@ func UpsertCacheIndexRecord(record CacheIndexRecord) error {
 
 // RemoveCacheIndexRecord deletes a single cached-object index entry.
 func RemoveCacheIndexRecord(bucket, objectKey string) error {
-	db, err := openConfigDB()
+	db, release, err := acquireConfigDB()
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer release()
 
 	return db.Update(func(tx *bolt.Tx) error {
 		cacheBucket := tx.Bucket(previewCacheBucketKey)
@@ -101,11 +101,11 @@ func RemoveCacheIndexRecord(bucket, objectKey string) error {
 // RemoveCacheIndexPrefix deletes matching index entries and returns them so the
 // caller can remove their local files after the metadata update commits.
 func RemoveCacheIndexPrefix(bucket, objectKeyPrefix string) ([]CacheIndexRecord, error) {
-	db, err := openConfigDB()
+	db, release, err := acquireConfigDB()
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close()
+	defer release()
 
 	var removed []CacheIndexRecord
 	err = db.Update(func(tx *bolt.Tx) error {

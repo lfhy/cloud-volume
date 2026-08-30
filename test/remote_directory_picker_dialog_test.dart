@@ -12,12 +12,14 @@ import 'package:remote_storage/models/remote_directory_picker_window_args.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
 import 'package:remote_storage/models/s3_objects.dart';
 import 'package:remote_storage/pages/config_setup_page.dart';
+import 'package:remote_storage/services/app_modal.dart';
 import 'package:remote_storage/services/remote_storage_gateway.dart';
 import 'package:remote_storage/utils/config_backup_picker.dart';
 import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:remote_storage/widgets/file_list_tile.dart';
 import 'package:remote_storage/widgets/remote_directory_picker_dialog.dart';
 import 'package:remote_storage/widgets/settings_config_backup_labels.dart';
+import 'package:remote_storage/widgets/settings_config_backup_target.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 void main() {
@@ -49,6 +51,23 @@ void main() {
       }
     },
   );
+
+  test('backup bucket label helper aliases only synthetic-root providers', () {
+    expect(
+      configBackupBucketDisplayName(
+        storageType: StorageType.webdav,
+        bucket: 'webdav-synthetic-user',
+      ),
+      configBackupStorageDisplayName,
+    );
+    expect(
+      configBackupBucketDisplayName(
+        storageType: StorageType.s3,
+        bucket: 'root',
+      ),
+      'root',
+    );
+  });
 
   test('S3 keeps its real bucket name even when only one bucket exists', () {
     final model = buildConfigBackupPickerModel(
@@ -385,13 +404,91 @@ void main() {
     expect(find.byType(AppLoadingIndicator), findsNothing);
   });
 
-  testWidgets('Android dialog picker fills height without unbounded flex', (
+  testWidgets(
+    'settings backup picker aliases a synthetic bucket without changing its saved target',
+    (tester) async {
+      const bucket = 'webdav-synthetic-user';
+      const prefix = 'saved/config-backups/';
+      final config = RemoteStorageConfig.empty().copyWith(
+        storageType: StorageType.webdav,
+        endpoint: 'https://dav.example.test',
+        displayName: 'root',
+        mappedBucketName: bucket,
+        webdavUsername: 'root',
+        hasWebdavPassword: true,
+      );
+      final api = _SettingsBackupPickerGateway(
+        buckets: const [BucketInfo(name: bucket)],
+      );
+      ({String bucket, String prefix})? picked;
+
+      await tester.pumpWidget(
+        ShadApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: ConfigBackupTargetSection(
+                theme: ShadTheme.of(context),
+                api: api,
+                profiles: const [],
+                target: ConfigBackupTarget(
+                  standalone: config,
+                  bucket: bucket,
+                  prefix: prefix,
+                ),
+                busy: false,
+                backingUp: false,
+                encryptionEnabled: false,
+                onSelectTarget: (_) {},
+                onConfigureStandalone: (_) {},
+                onPickSaveLocation: (bucket, prefix) {
+                  picked = (bucket: bucket, prefix: prefix);
+                },
+                onToggleEncryption: (_) {},
+                onPasswordSaved: (_) {},
+                onBackupNow: () {},
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('备份存储 / saved/config-backups'), findsOneWidget);
+      await tester.tap(find.text('备份存储 / saved/config-backups'));
+      await tester.pumpAndSettle();
+
+      final picker = find.byType(RemoteDirectoryPickerDialog);
+      expect(picker, findsOneWidget);
+      expect(
+        find.descendant(
+          of: picker,
+          matching: find.text(configBackupStorageDisplayName),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: picker, matching: find.text(bucket)),
+        findsNothing,
+      );
+      expect(api.objectListCalls, const [(bucket: bucket, prefix: prefix)]);
+
+      await tester.tap(
+        find.descendant(of: picker, matching: find.text('选择当前目录')),
+      );
+      await tester.pumpAndSettle();
+      expect(picked, (bucket: bucket, prefix: prefix));
+    },
+  );
+
+  testWidgets('Android dialog picker fills bounded sheet height without flex', (
     tester,
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     try {
       tester.view.physicalSize = const Size(393, 852);
       tester.view.devicePixelRatio = 1;
+      tester.view.padding = FakeViewPadding.zero;
+      tester.view.viewPadding = FakeViewPadding.zero;
       addTearDown(tester.view.reset);
       final api = _PickerGateway();
 
@@ -406,22 +503,23 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final expandedSurface = find.descendant(
-        of: find.byType(RemoteDirectoryPickerDialog),
-        matching: find.byWidgetPredicate(
-          (widget) =>
-              widget is ConstrainedBox &&
-              widget.constraints == const BoxConstraints.expand(),
-        ),
-      );
-      expect(tester.getSize(expandedSurface), const Size(393, 852));
+      final surfaceRect = tester.getRect(_androidSheetSurfaceFinder());
+      expect(surfaceRect.left, 0);
+      expect(surfaceRect.width, 393);
+      expect(surfaceRect.top, greaterThan(0));
+      expect(surfaceRect.bottom, 852);
+      expect(surfaceRect.height, lessThan(852));
       expect(find.text('选择远端目录'), findsOneWidget);
       expect(find.text('取消'), findsOneWidget);
       expect(tester.takeException(), isNull);
 
       tester.view.physicalSize = const Size(800, 360);
       await tester.pumpAndSettle();
-      expect(tester.getSize(expandedSurface), const Size(800, 360));
+      final compactSurface = tester.getRect(_androidSheetSurfaceFinder());
+      expect(compactSurface.left, 0);
+      expect(compactSurface.width, 800);
+      expect(compactSurface.top, greaterThan(0));
+      expect(compactSurface.bottom, 360);
       expect(tester.takeException(), isNull);
     } finally {
       debugDefaultTargetPlatformOverride = null;
@@ -466,15 +564,11 @@ void main() {
         tester.view.viewInsets = const FakeViewPadding(bottom: 180);
         await tester.pumpAndSettle();
 
-        final expandedSurface = find.descendant(
-          of: find.byType(RemoteDirectoryPickerDialog),
-          matching: find.byWidgetPredicate(
-            (widget) =>
-                widget is ConstrainedBox &&
-                widget.constraints == const BoxConstraints.expand(),
-          ),
-        );
-        expect(tester.getSize(expandedSurface.first), const Size(800, 180));
+        final surfaceRect = tester.getRect(_androidSheetSurfaceFinder());
+        expect(surfaceRect.left, 0);
+        expect(surfaceRect.width, 800);
+        expect(surfaceRect.top, greaterThan(24));
+        expect(surfaceRect.bottom, closeTo(180, .5));
         expect(
           tester
               .widget<EditableText>(find.byType(EditableText))
@@ -485,7 +579,6 @@ void main() {
 
         await tester.ensureVisible(find.text('选择当前目录'));
         await tester.pumpAndSettle();
-        final surfaceRect = tester.getRect(expandedSurface.first);
         final actionRect = tester.getRect(find.text('选择当前目录'));
         expect(actionRect.top, greaterThanOrEqualTo(surfaceRect.top + 24));
         expect(actionRect.bottom, lessThanOrEqualTo(surfaceRect.bottom - 20));
@@ -496,6 +589,17 @@ void main() {
     },
   );
 }
+
+Finder _androidSheetSurfaceFinder() => find.descendant(
+  of: find.byType(AppShadDialog),
+  matching: find.byWidgetPredicate((widget) {
+    if (widget is! DecoratedBox) return false;
+    final decoration = widget.decoration;
+    return decoration is BoxDecoration &&
+        decoration.borderRadius ==
+            const BorderRadius.vertical(top: Radius.circular(20));
+  }),
+);
 
 Widget _pickerHarness({
   required _PickerGateway api,
@@ -596,4 +700,28 @@ class _PickerGateway extends Fake implements RemoteStorageGateway {
   Future<List<ConfigBackupSnapshot>> listConfigBackupsWithTarget(
     ConfigBackupTarget target,
   ) async => const [];
+}
+
+class _SettingsBackupPickerGateway extends Fake
+    implements RemoteStorageGateway {
+  _SettingsBackupPickerGateway({required this.buckets});
+
+  final List<BucketInfo> buckets;
+  final List<({String bucket, String prefix})> objectListCalls = [];
+
+  @override
+  Future<List<BucketInfo>> listBuckets(
+    RemoteStorageConfig config, {
+    bool force = false,
+  }) async => buckets;
+
+  @override
+  Future<List<ObjectInfo>> listObjects(
+    RemoteStorageConfig config,
+    String bucket,
+    String prefix,
+  ) async {
+    objectListCalls.add((bucket: bucket, prefix: prefix));
+    return const [];
+  }
 }

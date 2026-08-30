@@ -40,8 +40,12 @@ func TestSetAppDataRootRejectsEmptyPath(t *testing.T) {
 func restoreAppDataRoot(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
-		appDataRootOverride.Lock()
-		appDataRootOverride.path = ""
-		appDataRootOverride.Unlock()
+		if err := switchConfigDBRoot(func() {
+			appDataRootOverride.Lock()
+			appDataRootOverride.path = ""
+			appDataRootOverride.Unlock()
+		}); err != nil {
+			t.Errorf("reset app data root: %v", err)
+		}
 	})
 }

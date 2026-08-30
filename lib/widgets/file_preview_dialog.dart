@@ -42,7 +42,7 @@ class FilePreviewDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    final fullscreen = usesFullscreenAppModal;
+    final androidSheet = usesAndroidAppModalSheet;
     final hasTransfer = transfer != null;
     final previewPane = Container(
       clipBehavior: Clip.antiAlias,
@@ -69,10 +69,10 @@ class FilePreviewDialog extends StatelessWidget {
       onDownload: onDownload,
     );
     final body = Column(
-      mainAxisSize: fullscreen ? MainAxisSize.max : MainAxisSize.min,
+      mainAxisSize: androidSheet ? MainAxisSize.max : MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (fullscreen)
+        if (androidSheet)
           Expanded(child: previewPane)
         else
           SizedBox(height: 420, child: previewPane),
@@ -83,8 +83,9 @@ class FilePreviewDialog extends StatelessWidget {
     return AppShadDialog(
       title: Text(object.displayName),
       description: Text(previewKindLabel(kind)),
-      scrollable: !fullscreen,
-      child: fullscreen
+      androidFillHeight: androidSheet,
+      scrollable: !androidSheet,
+      child: androidSheet
           ? body
           : ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 760, maxHeight: 620),

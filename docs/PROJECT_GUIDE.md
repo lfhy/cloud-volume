@@ -4,6 +4,22 @@
 
 ---
 
+## 2026-08-30 Android 配置备份还原 bbolt 崩溃(settings 域)
+
+用户在 Android 首启「从备份存储还原」后观察到 Go `panic: page 2 already freed` 与 SIGABRT。事故后的 `bbolt check` 对落盘 `config.db` 通过，说明这不是备份内容或 `RestoreConfigBackup` 的 `DeleteBucket + CreateBucket` 事务把文件永久写坏；`page 2` 正是该文件的 freelist 页，错误发生在并发句柄各自维护的内存空闲页状态。
+
+Flutter 将桥接调用放进 `Isolate.run`，因此轮询读取与还原可同时进入 Go。Android bbolt 使用 `fcntl(F_SETLK)`，锁属于进程而非单个文件描述符，多个同进程 `bolt.Open` 不能互相隔离，且关闭任一描述符会影响该进程锁。配置层已收敛为一个带 lease 的进程级句柄；根目录切换等待 lease 清空、关闭旧句柄后再更新路径，同一路径重复设置不扰动正在执行的调用。现行契约见 [settings](features/settings.md)，取舍见 [Agent Note](notes/implemented/bug-fix/2026-08-30-android-config-db-singleton.md)。
+
+## 2026-08-30 Android 底部抽屉拟态框调整(app_modal 域)
+
+全屏 surface 虽解决了早期上下裁切，却让「还原备份」等短确认框占满手机屏幕、在动作下方留下大块空白。现改为 `AppShadDialog` 统一的全宽底部抽屉：短内容按高度收缩，背景物理贴底且延伸到导航栏下，内容由内层 `SafeArea` 避让；长编辑器只填状态栏下、IME 后可用高度的 90%，顶部始终露出 scrim。
+
+- 不能只把 `alignment` 改成 bottom：`SafeArea` 会把全局状态栏 inset 错加到短 sheet 顶部。外层保留状态栏的 dimmed band，再以 `MediaQuery.removePadding(removeTop: true)` 让 Shad 只保留侧边/底部安全区。
+- Shad 0.54 的 `Align → Padding(viewInsets) → ConstrainedBox` 已天然使 sheet 在 IME 后贴键盘上沿；通过有限 `maxHeight`/fill-height 约束复用它，而不通过 `MediaQuery` 固定屏幕高度。同步编辑器、目录选择器和预览都显式标注 fill-height，紧凑态仍移除 `Expanded` 并整体滚动。
+- Shad 小屏默认会去除圆角，故 Android 强制保留 20px 顶角；进入/退出使用 280ms `easeOutCubic` 上移与 220ms `easeInCubic` 下移。状态栏覆盖的是 scrim，图标固定浅色；导航栏覆盖 sheet，图标随主题切换。
+
+现行契约与回归清单见 [app_modal](features/app_modal.md)，取舍见 [Agent Note](notes/implemented/architecture/2026-07-11-in-app-modals-over-os-subwindows.md)。
+
 ## 2026-08-30 Android 全屏拟态框评审(app_modal 域)
 
 Android 业务拟态框统一迁入 `AppShadDialog` 全屏 surface 后,提交前 P0/P1 子代理评审发现两类 P1 边界:

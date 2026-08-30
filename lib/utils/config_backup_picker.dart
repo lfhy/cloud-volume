@@ -13,6 +13,18 @@ const _singleRootBackupStorageTypes = <StorageType>{
   StorageType.sftp,
 };
 
+/// Whether this provider exposes one synthetic root rather than real buckets.
+bool isConfigBackupSingleRootStorage(StorageType storageType) =>
+    _singleRootBackupStorageTypes.contains(storageType);
+
+/// Returns the backup-only presentation label without changing [bucket].
+String configBackupBucketDisplayName({
+  required StorageType storageType,
+  required String bucket,
+}) => isConfigBackupSingleRootStorage(storageType)
+    ? configBackupStorageDisplayName
+    : bucket.trim();
+
 /// Presentation model for choosing a standalone configuration-backup target.
 class ConfigBackupPickerModel {
   const ConfigBackupPickerModel({
@@ -34,7 +46,7 @@ ConfigBackupPickerModel buildConfigBackupPickerModel({
   required String profileName,
 }) {
   final singleSyntheticBucket =
-      _singleRootBackupStorageTypes.contains(config.storageType) &&
+      isConfigBackupSingleRootStorage(config.storageType) &&
       buckets.length == 1;
   final sourceLabel = singleSyntheticBucket
       ? config.storageType.label
@@ -49,8 +61,11 @@ ConfigBackupPickerModel buildConfigBackupPickerModel({
           sourceLabel: sourceLabel,
           config: config,
           view: singleSyntheticBucket
-              ? const BucketViewSettings(
-                  displayName: configBackupStorageDisplayName,
+              ? BucketViewSettings(
+                  displayName: configBackupBucketDisplayName(
+                    storageType: config.storageType,
+                    bucket: bucket.name,
+                  ),
                 )
               : null,
         ),

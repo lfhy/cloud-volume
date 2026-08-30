@@ -26,11 +26,11 @@ type ProxySettings struct {
 func LoadGlobalProxy() (RemoteStorageConfig, error) {
 	result := DefaultConfig()
 	result.ProxyMode = ProxyModeSystem
-	db, err := openConfigDB()
+	db, release, err := acquireConfigDB()
 	if err != nil {
 		return result, err
 	}
-	defer db.Close()
+	defer release()
 
 	err = db.View(func(tx *bolt.Tx) error {
 		data := tx.Bucket(metaBucketKey).Get(globalProxyKey)
@@ -66,11 +66,11 @@ func SaveGlobalProxy(cfg RemoteStorageConfig) error {
 	if err != nil {
 		return fmt.Errorf("encode global proxy: %w", err)
 	}
-	db, err := openConfigDB()
+	db, release, err := acquireConfigDB()
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer release()
 	return db.Update(func(tx *bolt.Tx) error {
 		return tx.Bucket(metaBucketKey).Put(globalProxyKey, data)
 	})
