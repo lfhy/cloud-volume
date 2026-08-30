@@ -13,6 +13,10 @@ const double kAppModalDefaultMaxWidth = 480;
 /// Default content width used inside many existing dialogs.
 const double kAppModalDefaultContentWidth = 420;
 
+// Shad paints its focused secondary border 4px outside input bounds. Keep a
+// small in-viewport gutter so scroll clipping never cuts that focus ring.
+const EdgeInsets _androidModalScrollPadding = EdgeInsets.all(6);
+
 /// Whether app-modal surfaces should use Android's fullscreen presentation.
 bool get usesFullscreenAppModal =>
     !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -144,7 +148,7 @@ class AppShadDialog extends ShadDialog {
       mainAxisAlignment: mainAxisAlignment,
       crossAxisAlignment: crossAxisAlignment,
       scrollable: scrollable,
-      scrollPadding: scrollPadding,
+      scrollPadding: scrollPadding ?? _androidModalScrollPadding,
       actionsGap: actionsGap,
       useSafeArea: true,
       titlePinned: titlePinned,

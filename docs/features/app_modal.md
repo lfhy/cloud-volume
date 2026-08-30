@@ -22,10 +22,11 @@
 
 - 判据为 `!kIsWeb && defaultTargetPlatform == TargetPlatform.android`;不得用 `dart:io Platform.isAndroid`,否则 widget 回归无法覆盖。
 - 所有业务 surface 必须使用 `AppShadDialog`:Android 强制 `BoxConstraints.expand`、零圆角/边框/阴影,白色/主题背景铺到系统栏下;`ShadDialog` 内层 `SafeArea` 保护标题、关闭按钮与内容。不得在 route 外再包 `SafeArea`,否则会重新露出截图中的上下暗色截断带。
+- Android 可滚动 surface 默认给内容四边 `6px` `scrollPadding`,容纳 Shad 输入框向外绘制 `4px` 的焦点环;显式覆盖时不得小于焦点环外扩量。增大 dialog 外层 padding 不能解决该裁剪,因为字段仍会贴住缩小后的滚动 viewport。
 - surface 高度由上游 `Align → Padding(viewInsets)` 的**键盘后可用约束**决定,不用 `MediaQuery` 硬设高度;`usesCompactFullscreenAppModal` 只用视口减 `viewInsets` 判定 480px 低高度降级。`showAppModal` 在 Android 仅保留 fade,并用 `AnnotatedRegion<SystemUiOverlayStyle>` 随主题设置系统栏图标,关闭 route 后自动恢复。
 - 普通收缩表单由 Shad 单滚动容器承载;`showAppModalDialog` 在 Android 强制可滚动且动作使用 `OverflowBar`。fill-height 内容(`RemoteDirectoryPickerDialog`、`FileSyncProfileEditor`、`FilePreviewDialog`)在常规高度下用 `scrollable: false` + 中间主体 `Expanded`,固定动作;低高度时同步编辑器与目录选择器移除 `Expanded`,切换为 Shad 外层单滚动面,让标题、说明、主体与动作一起可滚动;紧凑态纵向 padding 降为 8px,保持 SafeArea 内的聚焦与动作可达。
 - 手机动作组用获得整行宽度的 `Wrap`/`OverflowBar`,禁止用固定 `Row` 承载表单 footer;连接字段与同步路径动作按实际宽度改为单列,远端选择器深面包屑横向滚动。不得把“全屏”实现成只有背景变大、固定 480px 内容仍悬空或横向溢出。
-- 回归:`test/app_modal_test.dart` 固定 Android surface 四边、SafeArea、键盘、系统返回、截图账号编辑器、同步 fill-height 及横屏 + IME,并对照 macOS 仍有限宽居中;`test/remote_directory_picker_dialog_test.dart` 覆盖 picker fill-height、深面包屑与创建目录的横屏 + IME 路径;`test/object_action_dialogs_test.dart` 覆盖窄屏大字体 footer 换行。
+- 回归:`test/app_modal_test.dart` 固定 Android surface 四边、SafeArea、键盘、系统返回、账号编辑器焦点环绘制边距、同步 fill-height 及横屏 + IME,并对照 macOS 仍有限宽居中;`test/remote_directory_picker_dialog_test.dart` 覆盖 picker fill-height、深面包屑与创建目录的横屏 + IME 路径;`test/object_action_dialogs_test.dart` 覆盖窄屏大字体 footer 换行。
 
 ### 开启路径路由策略
 

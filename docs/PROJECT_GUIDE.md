@@ -10,6 +10,7 @@ Android 业务拟态框统一迁入 `AppShadDialog` 全屏 surface 后,提交前
 
 - 同步编辑器与远端目录选择器只让中段列表伸缩;横屏 + IME 将 surface 压缩后,步骤栏/面包屑、输入行与动作的固定高度仍可触发 `RenderFlex overflow`。初版只滚动业务 `child`,复审又证明 Shad 标题/说明/gap/padding/SafeArea 仍可耗尽视口;最终紧凑态移除 `Expanded`,让 Shad 外层滚动包含全部 chrome 与动作,并缩小纵向 padding。同步输入共享 `FocusNode`,避免切换布局时丢焦收键盘。
 - 桶设置/可见性、建目录、对象操作、高级设置、挂载、重置设置与关闭应用仍有固定 `Row` footer,窄屏大字体下可横向裁切;改为占满整行且右对齐的 `Wrap`,并以 240px / 1.5x 真实对象对话框回归。
+- 账号编辑器字段本身有 14px 纵向间距,新截图的裁切实际发生在横向:Shad 焦点环向输入框外绘制 4px,但字段横向贴住无 padding 的 `SingleChildScrollView` 后被 `Clip.hardEdge` 裁掉左右边。Android `AppShadDialog` 改为默认传入 6px 内层 `scrollPadding`,不改字段高度、外层 padding 或裁剪策略。
 
 组合回归覆盖 800×360 横屏、IME 压缩、1.5x 字体、聚焦保留与动作滚动可达;现行契约见 [app_modal](features/app_modal.md)。
 

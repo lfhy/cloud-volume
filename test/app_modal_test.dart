@@ -223,6 +223,95 @@ void main() {
     },
   );
 
+  testWidgets(
+    'Android scrollable modal keeps the SFTP focus ring inside its viewport',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      try {
+        _configureView(
+          tester,
+          size: const Size(393, 852),
+          padding: const FakeViewPadding(top: 24, bottom: 34),
+        );
+        await tester.pumpWidget(
+          ShadApp(
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => ShadButton(
+                  onPressed: () => showAppModal<void>(
+                    context: context,
+                    builder: (_) => CloudStorageAccountDialog(
+                      api: _FakeGateway(),
+                      simpleMode: true,
+                      onSave: (_) async => true,
+                      onStartBaiduPanAuthorization: () async => '',
+                      onAuthorizeBaiduPan: (_, _) async =>
+                          RemoteStorageConfig.empty(),
+                      onListBuckets: (_) async => const <BucketInfo>[],
+                    ),
+                  ),
+                  child: const Text('配置备份'),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.text('配置备份'));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.descendant(
+            of: find.byType(StorageProtocolCard),
+            matching: find.text('SFTP'),
+          ),
+        );
+        await tester.tap(find.widgetWithText(ShadButton, '下一步'));
+        await tester.pumpAndSettle();
+
+        final addressLabel = find.text('SFTP 地址');
+        final addressInput = find.ancestor(
+          of: find.text('host 或 sftp://host'),
+          matching: find.byType(ShadInput),
+        );
+        final addressEditable = find.descendant(
+          of: addressInput,
+          matching: find.byType(EditableText),
+        );
+        final outerScroll = find.ancestor(
+          of: addressLabel,
+          matching: find.byType(SingleChildScrollView),
+        );
+
+        await tester.showKeyboard(addressEditable);
+        tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+        await tester.pumpAndSettle();
+
+        final scrollRect = tester.getRect(outerScroll);
+        final inputRect = tester.getRect(addressInput);
+        final portRect = tester.getRect(find.text('端口'));
+        const focusRingExtent = 4.0;
+        expect(
+          inputRect.left - scrollRect.left,
+          greaterThanOrEqualTo(focusRingExtent),
+        );
+        expect(
+          scrollRect.right - inputRect.right,
+          greaterThanOrEqualTo(focusRingExtent),
+        );
+        expect(portRect.top - inputRect.bottom, greaterThanOrEqualTo(14));
+        expect(portRect.top, greaterThanOrEqualTo(scrollRect.top + 4));
+        expect(portRect.bottom, lessThanOrEqualTo(scrollRect.bottom - 4));
+        expect(
+          tester.widget<EditableText>(addressEditable).focusNode.hasFocus,
+          isTrue,
+        );
+        expect(tester.takeException(), isNull);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    },
+  );
+
   testWidgets('sync editor uses a bounded fill-height Android layout', (
     tester,
   ) async {
