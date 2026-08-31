@@ -27,16 +27,22 @@
 
 ## 导航结构
 
-- `lib/models/sidebar_item.dart` — `SidebarItem` 枚举(桌面侧栏与移动底栏/首页共用的单一事实来源,含移动端专属 `home`)+ `SidebarItemInfo` extension(icon / `desktopLabel` / `mobileLabel`)。
-- `lib/pages/main_layout_page.dart` — 根装配:桌面 `Row(DesktopSidebar + 内容)`;Android `PopScope + Scaffold(内容 + 底栏)`。内容是 `IndexedStack`(home 在索引 7)。`_selectItem` 是统一导航入口,移动端把访问记入 `TabNavHistory`。
-- `lib/widgets/desktop_sidebar.dart` — 桌面侧栏(品牌标识 + SidebarPalette 渐变 + 装饰圆 + 导航项 + 传输状态入口);`_SidebarNavItem` 是 hover 正典(见 [ui_rules](ui_rules.md)),桌面不显示 home。
+- `lib/models/sidebar_item.dart` — `SidebarItem` 枚举是桌面侧栏与移动底栏的单一事实来源;没有移动端 `home` 项,`SidebarItemInfo` 提供 icon / `desktopLabel` / `mobileLabel`。
+- `lib/pages/main_layout_page.dart` — 根装配:桌面 `Row(DesktopSidebar + 内容)`;Android `PopScope + Scaffold(内容 + 底栏)`。内容为 `IndexedStack`,文件页固定在索引 0。`_selectItem` 是统一导航入口,移动端把访问记入 `TabNavHistory`。系统 Back 先交给活动文件页处理目录或桶回收站,再回退可见 tab,历史耗尽才调用 `SystemNavigator.pop`。
+- `lib/pages/file_manager_page.dart` — 桌面文件管理入口与桌面表面,默认装配 `FileManagerWorkspace` 的桌面渲染。
+- `lib/pages/mobile_file_manager_page.dart` / `mobile_file_manager_actions.dart` — Android 专属文件页、全宽搜索、触控列表、行尾操作、FAB 与操作抽屉;页面持有 `MobileFileManagerNavigation` 的 bind/clear 生命周期,不依赖桌面布局。
+- `lib/pages/file_manager_workspace.dart` — 共享文件浏览运行时和公开 controller:持有桶/对象/回收站状态、加载和所有 mutation;controller 只暴露数据与命令,不返回桌面 Widget。移动与桌面复用它而不复用页面结构。
+- `lib/widgets/mobile_file_manager_surface.dart` / `mobile_file_manager_browser.dart` — Android chrome 与单列浏览器:状态栏 `SafeArea`、48px 搜索、大触控行、行尾 `…`、无列表/网格切换。可点击行 idle 使用 `basic` cursor,hover 才切 `click`(见 [ui_rules](ui_rules.md))。
+- `lib/state/mobile_file_manager_navigation.dart` — Android 文件页 Back 桥:当前页 bind 回调,销毁或替换时 `clear()`；避免以 Dart method tear-off 相等性作解绑判断。
+- `lib/widgets/desktop_sidebar.dart` — 桌面侧栏(品牌标识 + SidebarPalette 渐变 + 装饰圆 + 导航项 + 传输状态入口);`_SidebarNavItem` 是 hover 正典(见 [ui_rules](ui_rules.md))。
 - `lib/widgets/mobile_navigation_bar.dart` — 安卓底栏(取代 Material `NavigationBar`):纯 `ShadTheme` background 铺满物理底部(无渐变/装饰圆/胶囊),顶部一条全量 `colorScheme.border` 线与内容区分割(强度对齐参考设计 ≈ 白底 8% 黑),图标上文字下;选中态只有 `ThemeController` 强调色图标+文字和 w600,未选中 `mutedForeground`+w500。`MobileNavItem` 为泛型 value;`test/mobile_navigation_bar_test.dart` 锁定无渐变、分割线、强调色选中、muted 未选中与点击回调。
-- `lib/state/mobile_nav_preferences.dart` — 底栏自定义配置(SharedPreferences key `mobile.bottom_bar_items`):可见项 + 顺序,默认 `文件·账号·首页·任务·回收站`;可选池 `kMobileBottomBarPool`(home/fileManager/storage/transfers/trash/settings);约束 2–5 项且 home/settings 至少其一(保底设置入口),解析损坏数据回退默认。设置页「底部导航」节(仅 Android)写入,main_layout 监听重建。`test/mobile_nav_preferences_test.dart` 锁定默认/往返/容错/约束。
-- `lib/pages/mobile_home_page.dart` — 移动端首页(home tab):问候 + 账号概览、任务状态卡(进行中数 + 聚合速度,数据来自 `RemoteTaskStore`)、快捷入口 2×2(文件/账号/回收站/**设置**——底栏默认不含设置,首页是保底入口)、最近任务前 3 条。`test/mobile_home_page_test.dart` 锁定布局与导航回调。
+- `lib/state/mobile_nav_preferences.dart` — 底栏自定义配置(SharedPreferences key `mobile.bottom_bar_items`):可见项 + 顺序,默认 `文件·账号·任务·回收站·设置`;可选池仅有 fileManager/storage/transfers/trash/settings,约束 2–5 项且设置必须保留。旧数据的 `home` 会迁移为 settings,解析损坏数据回退默认。设置页「底部导航」节(仅 Android)写入,main_layout 监听重建。`test/mobile_nav_preferences_test.dart` 锁定默认/往返/迁移/约束。
 - `lib/state/tab_nav_history.dart` — 移动端 tab 访问历史(纯逻辑):安卓返回键经 `PopScope` 回退上一个 tab(`back(visible:)` 跳过已从底栏移除的项),历史耗尽才允许退出应用。`test/tab_nav_history_test.dart` 锁定语义。
-- `lib/pages/settings_page.dart` — 设置页,分组(通用设置、Windows 设置、关于)用**左垂直侧栏栏轨**(不是顶部 tab);「底部导航」卡(常规组,仅 Android)自定义底栏。同步管理已从设置移除,完全在文件同步任务页;过期的 Windows「此电脑」条目卡与锚点已删除(`windowsThisPcEntryEnabled` 仅为兼容保留在配置模型)。
+- `lib/pages/settings_page.dart` — 设置页,分组(通用设置、Windows 设置、关于)用**左垂直侧栏栏轨**(不是顶部 tab);「底部导航」卡(常规组,仅 Android)自定义底栏并保持设置可达。同步管理已从设置移除,完全在文件同步任务页;过期的 Windows「此电脑」条目卡与锚点已删除(`windowsThisPcEntryEnabled` 仅为兼容保留在配置模型)。
 
-**Known P2/P3 (review 2026-08-29):** 底栏视觉两轮评审的 P2(分割线未铺满物理底部、去胶囊后触控目标回落 42dp)与 P3(圆角不一致、Semantics label 连读)已随定稿重设计解决(无渐变、无胶囊;全量 border 分割线;GestureDetector 内 `minHeight: 48`)。移动导航重构评审发现并同批修复:P0 返回键死锁(栈底项被移出底栏后 `back()` 永不弹空且 `canPop` 不重算——`back` 增加整条历史不可见时 reset(current) 语义,PopScope null 分支补 setState)、P1 设置节第 6 项静默截断(save 超限显式报错 + 设置节监听偏好异步 load 同步本地副本)、P2 ui_rules 正典指针未随 `_SidebarNavItem` 迁移更新。有意行为(不改):底栏 `selectedValue` 无匹配项时全部项不高亮;测试的无渐变断言扫描整棵 pumped 树,shadcn 内部若引入装饰渐变需收窄 finder。延后:MobileHomePage 常驻 IndexedStack 的离台 RemoteTaskStore 监听无 `active:` 门控(小 widget 成本可忽略,与 TransfersPage 惯例不同)。
+**Known P2/P3 (review 2026-08-29):** 底栏视觉两轮评审的 P2(分割线未铺满物理底部、去胶囊后触控目标回落 42dp)与 P3(圆角不一致、Semantics label 连读)已随定稿重设计解决(无渐变、无胶囊;全量 border 分割线;GestureDetector 内 `minHeight: 48`)。移动导航重构评审发现并同批修复:P0 返回键死锁(栈底项被移出底栏后 `back()` 永不弹空且 `canPop` 不重算——`back` 增加整条历史不可见时 reset(current) 语义,PopScope null 分支补 setState)、P1 设置节第 6 项静默截断(save 超限显式报错 + 设置节监听偏好异步 load 同步本地副本)、P2 ui_rules 正典指针未随 `_SidebarNavItem` 迁移更新。有意行为(不改):底栏 `selectedValue` 无匹配项时全部项不高亮;测试的无渐变断言扫描整棵 pumped 树,shadcn 内部若引入装饰渐变需收窄 finder。
+
+**Known P2/P3 (review 2026-08-31):** P2 `FileManagerWorkspace` 仍是 `file_manager_page.dart` library 的 part，移动页因此暂时经该入口 import 共享工作区；controller 已避免布局泄漏，待公开契约明显扩张时再整体提升为独立 library。P2 尚未直接按 icon finder 断言 Android 页面不存在 `layoutGrid/list`，当前以无 `FileManagerActionBar`、独立 `MobileFileManagerBrowser` 和 widget 回归保护；若移动页加入新的工具栏，补上显式断言。
 
 ## 应用图标(桌面 + Android)
 

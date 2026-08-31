@@ -1,8 +1,8 @@
 // Widget tests verify the app boots and shows the Chinese bootstrap UI.
 
 import 'dart:async';
-import 'dart:typed_data';
-
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -24,10 +24,14 @@ import 'package:remote_storage/models/trash_item.dart';
 import 'package:remote_storage/models/transfer_job.dart';
 import 'package:remote_storage/models/sync_profile.dart';
 import 'package:remote_storage/pages/file_manager_page.dart';
+import 'package:remote_storage/pages/mobile_file_manager_page.dart';
+import 'package:remote_storage/services/app_modal.dart';
 import 'package:remote_storage/state/transfer_queue.dart';
 import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/state/sync_profile_notifier.dart';
 import 'package:remote_storage/widgets/file_manager_breadcrumb_bar.dart';
+import 'package:remote_storage/widgets/file_manager_action_bar.dart';
+import 'package:remote_storage/widgets/mobile_file_manager_surface.dart';
 
 void main() {
   setUp(() {
@@ -84,152 +88,377 @@ void main() {
   });
 
   testWidgets('App shows main layout when config exists', (tester) async {
-    SharedPreferences.setMockInitialValues({});
-    await tester.pumpWidget(
-      RemoteStorageApp(apiFactory: () async => _FakeApi(configured: true)),
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    try {
+      SharedPreferences.setMockInitialValues({});
+      await tester.pumpWidget(
+        RemoteStorageApp(apiFactory: () async => _FakeApi(configured: true)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(FileManagerPage), findsOneWidget);
+      expect(find.byType(MobileFileManagerPage), findsNothing);
+      expect(find.byType(MobileFileManagerSurface), findsNothing);
+      expect(find.byType(FileManagerActionBar), findsOneWidget);
+      expect(find.byType(FileManagerBreadcrumbBar), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      TransferQueue.instance.resetForTest();
+      RemoteTaskStore.instance.resetForTest();
+      SyncProfileNotifier.instance.stop();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('Android uses the touch-first file page without desktop tools', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      SharedPreferences.setMockInitialValues({});
+      final api = _FakeApi(
+        configured: true,
+        buckets: const <BucketInfo>[BucketInfo(name: '手机文件')],
+      );
+
+      await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(MobileFileManagerPage), findsOneWidget);
+      expect(find.byType(MobileFileManagerSurface), findsOneWidget);
+      expect(find.byType(FileManagerActionBar), findsNothing);
+      expect(find.byType(FileManagerBreadcrumbBar), findsNothing);
+      expect(find.text('首页'), findsNothing);
+      expect(find.text('设置'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(MobileFileManagerSurface),
+          matching: find.byType(SafeArea),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('手机文件'), findsOneWidget);
+
+      final search = find.descendant(
+        of: find.byType(MobileFileManagerSurface),
+        matching: find.byType(ShadInput),
+      );
+      expect(tester.getSize(search).height, 48);
+      await tester.enterText(search, '没有匹配');
+      await tester.pump();
+      expect(find.text('没有匹配的存储桶'), findsOneWidget);
+
+      await tester.enterText(search, '');
+      await tester.pump();
+      final bucketRow = find
+          .ancestor(
+            of: find.text('手机文件'),
+            matching: find.byType(GestureDetector),
+          )
+          .first;
+      await tester.tap(bucketRow);
+      await tester.pumpAndSettle();
+      expect(find.byIcon(LucideIcons.plus), findsOneWidget);
+      await tester.tap(find.byIcon(LucideIcons.plus));
+      await tester.pumpAndSettle();
+      expect(find.text('上传文件'), findsOneWidget);
+      expect(find.text('新建文件夹'), findsOneWidget);
+      expect(await tester.binding.handlePopRoute(), isTrue);
+      await tester.pumpAndSettle();
+      expect(find.byType(AppShadDialog), findsNothing);
+
+      expect(await tester.binding.handlePopRoute(), isTrue);
+      await tester.pumpAndSettle();
+      expect(find.text('手机文件'), findsOneWidget);
+      final menu = find.descendant(
+        of: bucketRow,
+        matching: find.byIcon(LucideIcons.ellipsisVertical),
+      );
+      await tester.tap(menu);
+      await tester.pumpAndSettle();
+      expect(find.byType(AppShadDialog), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      TransferQueue.instance.resetForTest();
+      RemoteTaskStore.instance.resetForTest();
+      SyncProfileNotifier.instance.stop();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('Android Back returns from a directory before switching tabs', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      SharedPreferences.setMockInitialValues({});
+      final api = _FakeApi(
+        configured: true,
+        buckets: const <BucketInfo>[BucketInfo(name: '手机文件')],
+        objectPagesByPrefix: const <String, ObjectListPage>{
+          '': ObjectListPage(
+            items: <ObjectInfo>[
+              ObjectInfo(key: '资料/', size: 0, lastModified: '', isDir: true),
+            ],
+            nextToken: '',
+          ),
+          '资料/': ObjectListPage(
+            items: <ObjectInfo>[
+              ObjectInfo(
+                key: '资料/说明.txt',
+                size: 24,
+                lastModified: '2026-08-31',
+                isDir: false,
+              ),
+            ],
+            nextToken: '',
+          ),
+        },
+      );
+
+      await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('手机文件'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('资料'));
+      await tester.pumpAndSettle();
+      expect(find.text('说明.txt'), findsOneWidget);
+
+      expect(await tester.binding.handlePopRoute(), isTrue);
+      await tester.pumpAndSettle();
+      expect(find.text('资料'), findsOneWidget);
+      expect(find.text('说明.txt'), findsNothing);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      TransferQueue.instance.resetForTest();
+      RemoteTaskStore.instance.resetForTest();
+      SyncProfileNotifier.instance.stop();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('Android Back closes trash, returns to files, then exits', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    var systemPopCalls = 0;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'SystemNavigator.pop') systemPopCalls++;
+        return null;
+      },
     );
-    await tester.pumpAndSettle();
-    expect(find.byType(FileManagerPage), findsOneWidget);
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump();
-    TransferQueue.instance.resetForTest();
-    RemoteTaskStore.instance.resetForTest();
-    SyncProfileNotifier.instance.stop();
+    try {
+      SharedPreferences.setMockInitialValues({});
+      final api = _FakeApi(
+        configured: true,
+        buckets: const <BucketInfo>[BucketInfo(name: '手机文件')],
+        objectPagesByPrefix: const <String, ObjectListPage>{
+          '': ObjectListPage(
+            items: <ObjectInfo>[
+              ObjectInfo(
+                key: '说明.txt',
+                size: 24,
+                lastModified: '2026-08-31',
+                isDir: false,
+              ),
+            ],
+            nextToken: '',
+          ),
+        },
+      );
+
+      await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('手机文件'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(LucideIcons.ellipsis));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('打开回收站'));
+      await tester.pumpAndSettle();
+      expect(find.text('回收站 · 手机文件'), findsOneWidget);
+
+      expect(await tester.binding.handlePopRoute(), isTrue);
+      await tester.pumpAndSettle();
+      expect(find.text('说明.txt'), findsOneWidget);
+      expect(find.text('回收站 · 手机文件'), findsNothing);
+
+      expect(await tester.binding.handlePopRoute(), isTrue);
+      await tester.pumpAndSettle();
+      expect(find.text('所有存储桶'), findsOneWidget);
+
+      await tester.tap(find.text('账号'));
+      await tester.pumpAndSettle();
+      expect(await tester.binding.handlePopRoute(), isTrue);
+      await tester.pumpAndSettle();
+      expect(find.text('所有存储桶'), findsOneWidget);
+
+      expect(await tester.binding.handlePopRoute(), isTrue);
+      await tester.pump();
+      expect(systemPopCalls, 1);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      TransferQueue.instance.resetForTest();
+      RemoteTaskStore.instance.resetForTest();
+      SyncProfileNotifier.instance.stop();
+    } finally {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      );
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 
   testWidgets('object load recovery edits the clicked bucket account', (
     tester,
   ) async {
     SharedPreferences.setMockInitialValues({});
-    final s3Config = RemoteStorageConfig.empty().copyWith(
-      endpoint: 'https://s3.example.com',
-      displayName: 'S3 Account',
-      mappedBucketName: 'S3 Account',
-      accessKeyId: 's3-access',
-      secretAccessKey: 's3-secret',
-      hasSecretAccessKey: true,
-    );
-    final baiduConfig = RemoteStorageConfig.empty().copyWith(
-      endpoint: 'https://pan.baidu.com',
-      storageType: StorageType.baiduPan,
-      providerType: StorageProviderType.baiduPan,
-      displayName: '百度账号',
-      mappedBucketName: '百度网盘',
-      accessKeyId: 'baidu-access',
-      secretAccessKey: 'baidu-refresh',
-      hasSecretAccessKey: true,
-    );
-    final api = _FakeApi(
-      configured: true,
-      configOverride: s3Config,
-      profiles: const <ProfileInfo>[
-        ProfileInfo(
-          name: 's3-profile',
-          displayName: 'S3 Account',
-          storageType: StorageType.s3,
-          providerType: StorageProviderType.s3,
-          endpoint: 'https://s3.example.com',
-          accessKeyId: 's3-access',
-          active: true,
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    try {
+      final s3Config = RemoteStorageConfig.empty().copyWith(
+        endpoint: 'https://s3.example.com',
+        displayName: 'S3 Account',
+        mappedBucketName: 'S3 Account',
+        accessKeyId: 's3-access',
+        secretAccessKey: 's3-secret',
+        hasSecretAccessKey: true,
+      );
+      final baiduConfig = RemoteStorageConfig.empty().copyWith(
+        endpoint: 'https://pan.baidu.com',
+        storageType: StorageType.baiduPan,
+        providerType: StorageProviderType.baiduPan,
+        displayName: '百度账号',
+        mappedBucketName: '百度网盘',
+        accessKeyId: 'baidu-access',
+        secretAccessKey: 'baidu-refresh',
+        hasSecretAccessKey: true,
+      );
+      final api = _FakeApi(
+        configured: true,
+        configOverride: s3Config,
+        profiles: const <ProfileInfo>[
+          ProfileInfo(
+            name: 's3-profile',
+            displayName: 'S3 Account',
+            storageType: StorageType.s3,
+            providerType: StorageProviderType.s3,
+            endpoint: 'https://s3.example.com',
+            accessKeyId: 's3-access',
+            active: true,
+          ),
+          ProfileInfo(
+            name: 'baidu-profile',
+            displayName: '百度账号',
+            storageType: StorageType.baiduPan,
+            providerType: StorageProviderType.baiduPan,
+            endpoint: 'https://pan.baidu.com',
+            accessKeyId: 'baidu-access',
+          ),
+        ],
+        profileConfigs: <String, RemoteStorageConfig>{
+          's3-profile': s3Config,
+          'baidu-profile': baiduConfig,
+        },
+        bucketsByStorageType: const <StorageType, List<BucketInfo>>{
+          StorageType.s3: <BucketInfo>[BucketInfo(name: 's3-bucket')],
+          StorageType.baiduPan: <BucketInfo>[BucketInfo(name: '百度网盘')],
+        },
+        failingObjectStorageType: StorageType.baiduPan,
+        baiduAuthorizationResult: baiduConfig.copyWith(
+          accessKeyId: 'new-baidu-access',
+          secretAccessKey: 'new-baidu-refresh',
         ),
-        ProfileInfo(
-          name: 'baidu-profile',
-          displayName: '百度账号',
-          storageType: StorageType.baiduPan,
-          providerType: StorageProviderType.baiduPan,
-          endpoint: 'https://pan.baidu.com',
-          accessKeyId: 'baidu-access',
-        ),
-      ],
-      profileConfigs: <String, RemoteStorageConfig>{
-        's3-profile': s3Config,
-        'baidu-profile': baiduConfig,
-      },
-      bucketsByStorageType: const <StorageType, List<BucketInfo>>{
-        StorageType.s3: <BucketInfo>[BucketInfo(name: 's3-bucket')],
-        StorageType.baiduPan: <BucketInfo>[BucketInfo(name: '百度网盘')],
-      },
-      failingObjectStorageType: StorageType.baiduPan,
-      baiduAuthorizationResult: baiduConfig.copyWith(
-        accessKeyId: 'new-baidu-access',
-        secretAccessKey: 'new-baidu-refresh',
-      ),
-    );
+      );
 
-    await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('百度网盘'));
-    await tester.pumpAndSettle();
-    // The object-list error view exposes a secondary action that jumps to the
-    // account-management page (instead of opening an in-place editor), so the
-    // user can edit, disable, or re-enable the failing account in one place.
-    // The sidebar also shows "账号管理", so find the button by type+text.
-    final secondaryAction = find.descendant(
-      of: find.byType(ShadButton),
-      matching: find.text('账号管理'),
-    );
-    expect(secondaryAction, findsOneWidget);
-    expect(find.text('编辑账号'), findsNothing);
+      await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('百度网盘'));
+      await tester.pumpAndSettle();
+      // The object-list error view exposes a secondary action that jumps to the
+      // account-management page (instead of opening an in-place editor), so the
+      // user can edit, disable, or re-enable the failing account in one place.
+      // The sidebar also shows "账号管理", so find the button by type+text.
+      final secondaryAction = find.descendant(
+        of: find.byType(ShadButton),
+        matching: find.text('账号管理'),
+      );
+      expect(secondaryAction, findsOneWidget);
+      expect(find.text('编辑账号'), findsNothing);
 
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump();
-    TransferQueue.instance.resetForTest();
-    RemoteTaskStore.instance.resetForTest();
-    SyncProfileNotifier.instance.stop();
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      TransferQueue.instance.resetForTest();
+      RemoteTaskStore.instance.resetForTest();
+      SyncProfileNotifier.instance.stop();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 
   testWidgets('bucket list renders after its initial quota resolution', (
     tester,
   ) async {
     SharedPreferences.setMockInitialValues({});
-    final quota = Completer<BucketInfo>();
-    final config = RemoteStorageConfig.empty().copyWith(
-      endpoint: 'https://pan.baidu.com',
-      storageType: StorageType.baiduPan,
-      providerType: StorageProviderType.baiduPan,
-      displayName: '百度账号',
-      mappedBucketName: '百度网盘',
-      accessKeyId: 'test-access-token',
-      secretAccessKey: 'test-refresh-token',
-      hasSecretAccessKey: true,
-    );
-    final api = _FakeApi(
-      configured: true,
-      configOverride: config,
-      buckets: const <BucketInfo>[BucketInfo(name: '百度网盘')],
-      quotaResult: quota.future,
-    );
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    try {
+      final quota = Completer<BucketInfo>();
+      final config = RemoteStorageConfig.empty().copyWith(
+        endpoint: 'https://pan.baidu.com',
+        storageType: StorageType.baiduPan,
+        providerType: StorageProviderType.baiduPan,
+        displayName: '百度账号',
+        mappedBucketName: '百度网盘',
+        accessKeyId: 'test-access-token',
+        secretAccessKey: 'test-refresh-token',
+        hasSecretAccessKey: true,
+      );
+      final api = _FakeApi(
+        configured: true,
+        configOverride: config,
+        buckets: const <BucketInfo>[BucketInfo(name: '百度网盘')],
+        quotaResult: quota.future,
+      );
 
-    await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
-    await tester.pump();
-    await tester.pump();
-    expect(api.quotaRequestCount, 1);
+      await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
+      await tester.pump();
+      await tester.pump();
+      expect(api.quotaRequestCount, 1);
 
-    quota.complete(
-      const BucketInfo(
-        name: '百度网盘',
-        quotaBytes: 20 * 1024 * 1024 * 1024,
-        usedBytes: 7 * 1024 * 1024 * 1024,
-        quotaKnown: true,
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.text('7.0 GB / 20.0 GB'), findsOneWidget);
-    await tester.tap(find.text('百度网盘'));
-    await tester.pumpAndSettle();
-    final breadcrumb = tester.widget<FileManagerBreadcrumbBar>(
-      find.byType(FileManagerBreadcrumbBar),
-    );
-    breadcrumb.onOpenBucketList();
-    await tester.pumpAndSettle();
-    expect(api.quotaRequestCount, 1);
-    expect(find.text('7.0 GB / 20.0 GB'), findsOneWidget);
+      quota.complete(
+        const BucketInfo(
+          name: '百度网盘',
+          quotaBytes: 20 * 1024 * 1024 * 1024,
+          usedBytes: 7 * 1024 * 1024 * 1024,
+          quotaKnown: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('7.0 GB / 20.0 GB'), findsOneWidget);
+      await tester.tap(find.text('百度网盘'));
+      await tester.pumpAndSettle();
+      final breadcrumb = tester.widget<FileManagerBreadcrumbBar>(
+        find.byType(FileManagerBreadcrumbBar),
+      );
+      breadcrumb.onOpenBucketList();
+      await tester.pumpAndSettle();
+      expect(api.quotaRequestCount, 1);
+      expect(find.text('7.0 GB / 20.0 GB'), findsOneWidget);
 
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump();
-    TransferQueue.instance.resetForTest();
-    RemoteTaskStore.instance.resetForTest();
-    SyncProfileNotifier.instance.stop();
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      TransferQueue.instance.resetForTest();
+      RemoteTaskStore.instance.resetForTest();
+      SyncProfileNotifier.instance.stop();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 }
 
@@ -243,6 +472,7 @@ class _FakeApi implements RemoteStorageGateway {
     this.profiles = const <ProfileInfo>[],
     this.profileConfigs = const <String, RemoteStorageConfig>{},
     this.bucketsByStorageType = const <StorageType, List<BucketInfo>>{},
+    this.objectPagesByPrefix = const <String, ObjectListPage>{},
     this.failingObjectStorageType,
     this.baiduAuthorizationResult,
   });
@@ -257,6 +487,7 @@ class _FakeApi implements RemoteStorageGateway {
   final List<ProfileInfo> profiles;
   final Map<String, RemoteStorageConfig> profileConfigs;
   final Map<StorageType, List<BucketInfo>> bucketsByStorageType;
+  final Map<String, ObjectListPage> objectPagesByPrefix;
   final StorageType? failingObjectStorageType;
   final RemoteStorageConfig? baiduAuthorizationResult;
   int quotaRequestCount = 0;
@@ -518,7 +749,7 @@ class _FakeApi implements RemoteStorageGateway {
     RemoteStorageConfig config,
     String bucket,
     String prefix,
-  ) async => [];
+  ) async => objectPagesByPrefix[prefix]?.items ?? const <ObjectInfo>[];
 
   @override
   Future<ObjectListPage> listObjectPage(
@@ -532,7 +763,8 @@ class _FakeApi implements RemoteStorageGateway {
     if (config.storageType == failingObjectStorageType) {
       throw StateError('object listing failed');
     }
-    return const ObjectListPage(items: <ObjectInfo>[], nextToken: '');
+    return objectPagesByPrefix[prefix] ??
+        const ObjectListPage(items: <ObjectInfo>[], nextToken: '');
   }
 
   @override

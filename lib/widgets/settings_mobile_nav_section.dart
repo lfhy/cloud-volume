@@ -43,7 +43,7 @@ class _SettingsMobileNavSectionState extends State<SettingsMobileNavSection> {
 
   bool _isSelected(SidebarItem item) => _selected.contains(item);
 
-  /// 应用变更:先本地校验约束(2–5 项、首页/设置至少保留一个、最多 5 项),
+  /// 应用变更:先本地校验约束(2–5 项、设置必须保留、最多 5 项),
   /// 通过后立即持久化;失败则提示且不动状态。
   Future<void> _apply(List<SidebarItem> next) async {
     try {
@@ -81,7 +81,7 @@ class _SettingsMobileNavSectionState extends State<SettingsMobileNavSection> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          '自定义底部导航栏显示的页面与顺序(2–5 项;「首页」与「设置」至少保留一个)。更改立即生效。',
+          '自定义底部导航栏显示的页面与顺序(2–5 项;必须保留「设置」)。更改立即生效。',
           style: TextStyle(
             fontSize: 12,
             color: theme.colorScheme.mutedForeground,
@@ -113,8 +113,9 @@ class _SettingsMobileNavSectionState extends State<SettingsMobileNavSection> {
                   color: theme.colorScheme.border.withValues(alpha: 0.5),
                 ),
                 // 未显示项:开启即追加到末尾。
-                for (final item
-                    in kMobileBottomBarPool.where((i) => !_isSelected(i)))
+                for (final item in kMobileBottomBarPool.where(
+                  (i) => !_isSelected(i),
+                ))
                   _navRow(item, enabled: false),
               ],
               const SizedBox(height: 6),

@@ -4,6 +4,12 @@
 
 ---
 
+## 2026-08-31 Android 文件首屏与独立呈现层(app_shell 域)
+
+用户要求取消 Android 首页，把文件管理做成独立维护的移动页面，并按大搜索、宽触控行、行尾操作和 FAB 的参考布局组织操作。探索确认旧实现虽已有移动组件，却通过 `file_manager_page.dart` 的私有 State extension 渲染，仍会让移动修改耦合到桌面页面。
+
+现已收敛为 `FileManagerPage` 的桌面表面、`MobileFileManagerPage` 的 Android 专属表面，以及共享的 `FileManagerWorkspace` 数据/命令 controller。系统 Back 由移动文件页先处理目录与桶回收站，再落入 `TabNavHistory` 和退出；回调解绑改成 `clear()`，避免 method tear-off 比较。正典见 [app_shell](features/app_shell.md)，取舍见 [Agent Note](notes/implemented/architecture/2026-08-31-mobile-file-manager-presentation.md)。提交前审查没有 P0/P1；保留的 P2 是 workspace 仍作为 `file_manager_page.dart` 的 part，待 controller 明显扩张时再提升为独立 library。
+
 ## 2026-08-30 Android 配置备份还原 bbolt 崩溃(settings 域)
 
 用户在 Android 首启「从备份存储还原」后观察到 Go `panic: page 2 already freed` 与 SIGABRT。事故后的 `bbolt check` 对落盘 `config.db` 通过，说明这不是备份内容或 `RestoreConfigBackup` 的 `DeleteBucket + CreateBucket` 事务把文件永久写坏；`page 2` 正是该文件的 freelist 页，错误发生在并发句柄各自维护的内存空闲页状态。

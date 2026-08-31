@@ -46,11 +46,7 @@ class DesktopSidebar extends StatelessWidget {
             left: -40,
             child: palette.decorCircle(120, 0.04),
           ),
-          Positioned(
-            top: 280,
-            right: 20,
-            child: palette.decorCircle(50, 0.03),
-          ),
+          Positioned(top: 280, right: 20, child: palette.decorCircle(50, 0.03)),
           Positioned(
             bottom: 200,
             right: -20,
@@ -88,7 +84,7 @@ class DesktopSidebar extends StatelessWidget {
                     ),
                   ),
                 ),
-                // 菜单项:桌面侧栏不含移动端首页(home)。
+                // 菜单项:桌面侧栏和移动端底栏共享同一组页面标识。
                 for (final entry in _desktopEntries)
                   if (entry != SidebarItem.shares || sharesAvailable)
                     if (entry != SidebarItem.fileSyncTasks || syncAvailable)
@@ -157,8 +153,8 @@ class _SidebarNavItemState extends State<_SidebarNavItem> {
     final fg = selected
         ? ac
         : _hovered
-            ? ac.withValues(alpha: 0.9)
-            : widget.muted;
+        ? ac.withValues(alpha: 0.9)
+        : widget.muted;
     final baseBg = selected ? ac.withValues(alpha: 0.1) : Colors.transparent;
     final hoverOverlay = selected
         ? Colors.transparent
@@ -174,9 +170,7 @@ class _SidebarNavItemState extends State<_SidebarNavItem> {
         onExit: (_) => setState(() => _hovered = false),
         // Use basic arrow when idle so the cursor doesn't get stuck on a
         // pointing hand inherited from an ancestor.
-        cursor: _hovered
-            ? SystemMouseCursors.click
-            : SystemMouseCursors.basic,
+        cursor: _hovered ? SystemMouseCursors.click : SystemMouseCursors.basic,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: widget.onTap,
@@ -184,9 +178,7 @@ class _SidebarNavItemState extends State<_SidebarNavItem> {
             duration: const Duration(milliseconds: 120),
             curve: Curves.easeOut,
             decoration: BoxDecoration(
-              color: selected
-                  ? baseBg
-                  : Color.alphaBlend(hoverOverlay, baseBg),
+              color: selected ? baseBg : Color.alphaBlend(hoverOverlay, baseBg),
               borderRadius: BorderRadius.circular(8),
               border: border,
             ),
@@ -199,8 +191,7 @@ class _SidebarNavItemState extends State<_SidebarNavItem> {
                   widget.label,
                   style: TextStyle(
                     fontSize: 13,
-                    fontWeight:
-                        selected ? FontWeight.w600 : FontWeight.w400,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
                     color: fg,
                   ),
                 ),

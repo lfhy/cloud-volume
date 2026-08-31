@@ -3,6 +3,11 @@ part of 'file_manager_page.dart';
 // 文件管理页派生状态：把筛选和当前视图相关计算单独拆出，避免主文件过长。
 
 extension _FileManagerPageDerivedState on _FileManagerPageState {
+  void _reconfigureUnavailableBucketSource(String profileName) {
+    // The account-management page is the single repair surface for a source.
+    widget.onOpenAccountManagement?.call();
+  }
+
   String? get _activeBucket => _activeBucketEntry?.bucket.name;
 
   String? get _activeBucketLabel => _activeBucketEntry?.label;

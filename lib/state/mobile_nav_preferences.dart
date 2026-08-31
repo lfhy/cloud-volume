@@ -9,10 +9,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// SharedPreferences key:JSON 数组字符串(枚举名,顺序即显示顺序)。
 const String kMobileBottomBarKey = 'mobile.bottom_bar_items';
+const String _legacyHomeItemName = 'home';
 
-/// 底栏可选池(固定展示顺序,设置 UI 与校验共用)。
+/// 底栏可选池(固定展示顺序,设置 UI 与校验共用)。移动端文件页就是
+/// 首屏,不再提供独立的 home tab;旧数据中的 home 会迁移为 settings。
 const List<SidebarItem> kMobileBottomBarPool = [
-  SidebarItem.home,
   SidebarItem.fileManager,
   SidebarItem.storage,
   SidebarItem.transfers,
@@ -20,13 +21,13 @@ const List<SidebarItem> kMobileBottomBarPool = [
   SidebarItem.settings,
 ];
 
-/// 默认底栏:文件 · 账号 · 首页(中间) · 任务 · 回收站;设置入口放首页。
+/// 默认底栏:文件 · 账号 · 任务 · 回收站 · 设置。
 const List<SidebarItem> kMobileBottomBarDefault = [
   SidebarItem.fileManager,
   SidebarItem.storage,
-  SidebarItem.home,
   SidebarItem.transfers,
   SidebarItem.trash,
+  SidebarItem.settings,
 ];
 
 /// 底栏配置单例:懒加载 + 变更通知。
@@ -70,14 +71,22 @@ class MobileNavPreferences extends ChangeNotifier {
 
   static List<SidebarItem> _decode(String? raw) {
     if (raw == null || raw.isEmpty) return List.from(kMobileBottomBarDefault);
-    // 容错解析:逐个名字映射,忽略未知/重复项;不满足约束回退默认。
+    // 容错解析:逐个名字映射,忽略未知/重复项;旧 home 项迁移为 settings。
     final names = raw.replaceAll('[', '').replaceAll(']', '').split(',');
     final parsed = <SidebarItem>[];
     for (final name in names) {
       final cleaned = name.trim().replaceAll('"', '');
       if (cleaned.isEmpty) continue;
+      if (cleaned == _legacyHomeItemName) {
+        if (!parsed.contains(SidebarItem.settings)) {
+          parsed.add(SidebarItem.settings);
+        }
+        continue;
+      }
       for (final item in SidebarItem.values) {
-        if (item.name == cleaned && !parsed.contains(item)) {
+        if (kMobileBottomBarPool.contains(item) &&
+            item.name == cleaned &&
+            !parsed.contains(item)) {
           parsed.add(item);
         }
       }
@@ -90,29 +99,26 @@ class MobileNavPreferences extends ChangeNotifier {
   /// 校验并归一:仅保留池内项、去重;项数超限显式报错(不静默截断,
   /// 设置 UI 需向用户提示而非默默丢弃操作)。
   static List<SidebarItem> _validate(List<SidebarItem> items) {
+    if (items.length > 5) {
+      throw ArgumentError('底部导航最多显示 5 项');
+    }
     final normalized = <SidebarItem>[];
     for (final item in items) {
-      if (kMobileBottomBarPool.contains(item) &&
-          !normalized.contains(item)) {
+      if (kMobileBottomBarPool.contains(item) && !normalized.contains(item)) {
         normalized.add(item);
       }
     }
     if (!_satisfiesConstraints(normalized)) {
-      if (normalized.length > 5) {
-        throw ArgumentError('底部导航最多显示 5 项');
-      }
-      throw ArgumentError(
-        '底部导航至少保留 2 项,且「首页」与「设置」至少保留一个(否则设置将无法进入)',
-      );
+      throw ArgumentError('底部导航至少保留 2 项,且必须保留「设置」(文件页也可从顶部进入设置)');
     }
     return normalized;
   }
 
-  /// 约束:2–5 项;home 与 settings 至少其一(保证设置入口可达)。
+  /// 约束:2–5 项;设置必须保留,保证底栏配置仍可恢复。
   static bool _satisfiesConstraints(List<SidebarItem> items) {
     if (items.length < 2 || items.length > 5) return false;
     if (!kMobileBottomBarPool.toSet().containsAll(items)) return false;
-    return items.contains(SidebarItem.home) || items.contains(SidebarItem.settings);
+    return items.contains(SidebarItem.settings);
   }
 
   /// 测试用途。

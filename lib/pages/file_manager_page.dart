@@ -1,8 +1,6 @@
 // 文件管理页：负责面包屑导航、桶/对象浏览，以及上传下载交互。
-
 import 'dart:async';
 import 'dart:typed_data';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as path;
@@ -52,7 +50,6 @@ import 'package:remote_storage/utils/file_preview_type.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:remote_storage/services/app_modal.dart';
 import 'package:remote_storage/services/bucket_source_service.dart';
-
 part 'file_manager_page_actions.dart';
 part 'file_manager_page_access.dart';
 part 'file_manager_page_bucket_policy.dart';
@@ -60,6 +57,7 @@ part 'file_manager_page_bucket_loading.dart';
 part 'file_manager_page_bucket_view.dart';
 part 'file_manager_page_mount.dart';
 part 'file_manager_page_object_loading.dart';
+part 'file_manager_page_object_view.dart';
 part 'file_manager_page_object_deletes.dart';
 part 'file_manager_page_paging.dart';
 part 'file_manager_page_preview.dart';
@@ -74,11 +72,13 @@ part 'file_manager_page_trash.dart';
 part 'file_manager_page_upload_feedback.dart';
 part 'file_manager_page_sync_nav.dart';
 part 'file_manager_page_webdav.dart';
+part 'file_manager_workspace.dart';
 
 // 文件管理页首页模式：既支持普通文件浏览，也支持侧边栏独立回收站入口。
 enum FileManagerHomeView { files, trash }
 
-class FileManagerPage extends StatefulWidget {
+/// Desktop entry point for the desktop file-manager presentation.
+class FileManagerPage extends StatelessWidget {
   const FileManagerPage({
     super.key,
     required this.api,
@@ -99,15 +99,25 @@ class FileManagerPage extends StatefulWidget {
   final SyncRemoteOpenRequest? pendingSyncRemoteOpen;
   final VoidCallback? onPendingSyncRemoteOpenConsumed;
 
-  /// Jumps to the account-management page. Used by the bucket-list error bar
-  /// so the user can fix/disable a failing account in one click.
+  /// Jumps to the account-management page when a source needs repair.
   final VoidCallback? onOpenAccountManagement;
 
   @override
-  State<FileManagerPage> createState() => _FileManagerPageState();
+  Widget build(BuildContext context) {
+    return FileManagerWorkspace(
+      api: api,
+      config: config,
+      profiles: profiles,
+      onRefresh: onRefresh,
+      homeView: homeView,
+      pendingSyncRemoteOpen: pendingSyncRemoteOpen,
+      onPendingSyncRemoteOpenConsumed: onPendingSyncRemoteOpenConsumed,
+      onOpenAccountManagement: onOpenAccountManagement,
+    );
+  }
 }
 
-class _FileManagerPageState extends State<FileManagerPage> {
+class _FileManagerPageState extends State<FileManagerWorkspace> {
   static const double _gridIconSize = 68;
   static const double _listIconSize = 20;
   static const double _bucketGridIconSize = 72;
@@ -162,13 +172,6 @@ class _FileManagerPageState extends State<FileManagerPage> {
       <String, RemoteTaskStatus>{};
   bool _metadataTaskRefreshInFlight = false;
 
-  void _reconfigureUnavailableBucketSource(String profileName) {
-    // Jump to the account-management page where the user can edit, disable,
-    // or re-enable the failing account. This is more discoverable than the
-    // old behavior of opening an in-place editor for just one profile.
-    widget.onOpenAccountManagement?.call();
-  }
-
   // Keep setState inside the State subclass; view extensions only coordinate UI.
   void _replaceBucketsAfterReorder(List<FileManagerBucketEntry> buckets) {
     setState(() => _buckets = buckets);
@@ -209,7 +212,7 @@ class _FileManagerPageState extends State<FileManagerPage> {
   }
 
   @override
-  void didUpdateWidget(covariant FileManagerPage oldWidget) {
+  void didUpdateWidget(covariant FileManagerWorkspace oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.config != widget.config ||
         oldWidget.profiles != widget.profiles) {
@@ -262,6 +265,10 @@ class _FileManagerPageState extends State<FileManagerPage> {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
+    final viewBuilder = widget.viewBuilder;
+    if (viewBuilder != null) {
+      return viewBuilder(context, FileManagerWorkspaceController._(this));
+    }
     return Padding(
       padding: const EdgeInsets.only(top: 56, left: 32, right: 32, bottom: 20),
       child: Column(
@@ -269,15 +276,13 @@ class _FileManagerPageState extends State<FileManagerPage> {
         children: [
           _buildHeader(theme),
           const SizedBox(height: 16),
-          Expanded(
-            child: _buildFileTransferSurface(theme),
-          ),
+          Expanded(child: _buildFileTransferSurface(theme)),
         ],
       ),
     );
   }
 
-  // Native desktop drop APIs are not packaged in the Android application.
+  // Native desktop drop APIs are only mounted around the desktop presentation.
   Widget _buildFileTransferSurface(ShadThemeData theme) {
     final content = _buildContentWithMountLoading(theme);
     if (!isDesktopPlatform && !isWebPlatform) {
@@ -431,57 +436,6 @@ class _FileManagerPageState extends State<FileManagerPage> {
           ],
         ],
       ),
-    );
-  }
-
-  Widget _buildObjectView(ShadThemeData theme) {
-    if (_objects == null) return const SizedBox();
-    final visibleObjects = _filteredVisibleObjects;
-    if (visibleObjects.isEmpty && _hasSearchQuery) {
-      return FileManagerEmptyState(
-        theme: theme,
-        icon: LucideIcons.folderSearch,
-        text: '当前搜索没有结果',
-      );
-    }
-    return FileManagerObjectBrowser(
-      objects: visibleObjects,
-      prefix: _prefix,
-      isGrid: _isGrid,
-      scrollController: _contentScrollController,
-      hasMore: _objectsHasMore,
-      loadingMore: _pagingObjects,
-      selectedKeys: _selectedObjectKeys,
-      deletingKeys: _deletingObjectKeys,
-      readOnly: _activeBucketReadOnly,
-      supportsDirectoryDownload:
-          widget.api.capabilities.supportsDownloadDirectory,
-      gridIconSize: _gridIconSize,
-      listIconSize: _listIconSize,
-      mountedToDesktop: _activeMountStatus?.mounted ?? false,
-      mountBucketName: _activeBucket,
-      profileId: _activeConfig.profileId,
-      showSyncStatus: true,
-      onOpenDirectory: (prefix) => unawaited(_navToPrefix(prefix)),
-      onOpenFile: (object) => unawaited(_openObject(object)),
-      onDownloadFile: (object) => unawaited(_downloadObject(object)),
-      onNavigateUp: () => unawaited(_navUp()),
-      onToggleSelection: _toggleObjectSelection,
-      onSelectionSetChanged: _replaceSelectedObjects,
-      onToggleSelectAll: _toggleSelectAllObjects,
-      onCreateDirectory: _showTrash || _loading || !_currentDirectoryWritable
-          ? null
-          : () => unawaited(_createDirectory()),
-      onUpload: _showTrash || _loading || !_currentDirectoryWritable
-          ? null
-          : () => unawaited(_upload()),
-      onClearSelection: _clearSelection,
-      onSelectionContextRequested: _selectObjectsForContextMenu,
-      onSelectionAction: (action) =>
-          unawaited(_handleSelectedObjectsAction(action)),
-      supportsShareLinks: _activeConfig.supportsShareLinks,
-      onObjectAction: (object, action) =>
-          unawaited(_handleObjectAction(object, action)),
     );
   }
 }

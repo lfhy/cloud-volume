@@ -1,30 +1,28 @@
-# Agent Note: 移动端可配置底栏与首页、返回键历史栈
+# Agent Note: 移动端可配置底栏、文件首屏与返回键历史栈
 
 Status: implemented
 
 ## Problem
 
-移动端底栏此前是硬编码五项(文件·账号·回收站·任务·设置),回收站落在中间位置观感奇怪;没有首页概念;安卓返回键直接退出应用而不是回到上一个页面。用户先提出"首页放中间、回收站后移",随后升级为更通用的诉求:底栏显示哪些页面、按什么顺序,应该让用户自己在设置里配置(且该配置是移动端专属)。
+手机上的远端文件操作需要把文件作为抵达应用后的直接入口。独立首页会把用户先带到概览，再要求一次跳转才能搜索、进入桶或上传；同时小屏不能照搬桌面文件页的导航与返回逻辑。底栏仍需允许用户按日常工作流调整项目和顺序，但不能让设置入口消失。
 
 ## Decision
 
-- **配置驱动底栏**:`lib/state/mobile_nav_preferences.dart` 把可见项+顺序持久化到 SharedPreferences(`mobile.bottom_bar_items`),默认 `文件·账号·首页·任务·回收站`;可选池 `kMobileBottomBarPool` = home/fileManager/storage/transfers/trash/settings。约束:**2–5 项,且 home 与 settings 至少保留其一**——两者都不在底栏时设置页将失去全部入口,这是防死锁的硬约束;解析损坏/非法数据回退默认。main_layout 以 `ListenableBuilder` 监听,设置里改动即时重建底栏。
-- **设置节(移动端专属)**:`SettingsMobileNavSection` 挂在设置页常规组,`_railGroups` 里用平台条件(**仅 Android 渲染**)。UI 为每项开关 + 上移/下移 + 恢复默认(触控场景不用拖拽排序);约束失败 toast 提示且不动状态。
-- **首页**:`MobileHomePage`(SidebarItem.home,IndexedStack 索引 7):问候 + 账号概览、任务状态卡、快捷入口 2×2(文件/账号/回收站/**设置**)、最近任务前 3 条;数据全部复用 `RemoteTaskStore` 与 `BootstrapState`,首页不发起新请求。桌面侧栏不显示 home。
-- **返回键历史栈**:`lib/state/tab_nav_history.dart` 纯逻辑类(visit 去重 / back 跳过不可见项 / 耗尽返回 null),main_layout 在 Android 上用 `PopScope(canPop: !canGoBack)` 拦截系统返回:回退到上一个仍在底栏配置中的 tab,历史耗尽才允许退出。
-- **结构**:`SidebarItem` 枚举迁到 `lib/models/sidebar_item.dart`(配置/首页/设置节/两个布局共用,附带 icon 与 desktopLabel/mobileLabel extension);桌面侧栏从 main_layout 拆出 `lib/widgets/desktop_sidebar.dart`(行为不变,主装配文件回到 500 行内)。
+- **配置驱动底栏:** `lib/state/mobile_nav_preferences.dart` 把可见项与顺序持久化到 SharedPreferences(`mobile.bottom_bar_items`),默认 `文件·账号·任务·回收站·设置`。可选池为 fileManager/storage/transfers/trash/settings;约束为 2–5 项且必须保留 settings。解析损坏或非法数据回退默认；历史数据中的 `home` 迁移为 settings。
+- **文件首屏:** Android 没有 `SidebarItem.home` 或 `MobileHomePage`;`MainLayoutPage` 的首个 IndexedStack 子项是 `MobileFileManagerPage`。设置仍在底栏并可由文件页顶部按钮打开。
+- **设置节(移动端专属):** `SettingsMobileNavSection` 挂在设置页常规组,只在 Android 渲染。它使用开关、上移/下移按钮和恢复默认管理底栏,在保存层与 UI 层共同拦截违反约束的修改。
+- **返回优先级:** `MobileFileManagerNavigation` 让活动文件页先消费 Android Back;桶回收站关闭到文件、子目录返回上级、桶根返回桶列表。文件页未消费时，`TabNavHistory` 才回退仍可见的底栏项目，历史耗尽后退出应用。
 
 ## Alternatives considered
 
-- **固定顺序(首页硬编码在中间)** — 用户明确改为要可配置;硬编码只是把"回收站在中间奇怪"换成"任何固定顺序都可能有人不满意"。
-- **拖拽排序** — Flutter 长按拖拽在 ReorderableListView 之外(自绘底栏预览)实现成本高、触控误操作多;上移/下移按钮在 6 个可选项规模下完全够用且可测。
-- **配置放进 Go 后端 config.db** — 该配置是纯 UI 偏好,与远端/挂载无关;SharedPreferences 与主题强调色、日志级别等既有 UI 偏好同渠道,同步到 Go 只增加格式与迁移负担。
-- **返回键直接回首页再退出** — 用户选定"回上一 tab,无历史再退出"(标准移动行为);且首项可配置,固定回首页语义会随配置漂移。
-- **无限层级历史** — 记录完整访问栈即可,不设上限;用户切 tab 次数天然有限,`back(visible:)` 过滤被移除项。
+- **保留独立首页作为默认首屏** — 概览和快捷入口会额外占用一次导航，不能满足以文件和搜索为中心的移动工作流。
+- **固定底栏顺序** — 用户已需要按任务频率调整入口；五个项目规模小，开关和上下移动比触控拖拽更稳且可测。
+- **允许移除设置** — 会使恢复底栏配置没有可靠入口，也会让设备上的全局设置难以访问。
+- **系统 Back 直接按 tab 或直接退出** — 会跳过用户正在浏览的目录或回收站，破坏移动文件浏览的层级直觉。
 
 ## Consequences
 
-- 用户可在手机上自由组织底栏(例如只留 文件·首页·任务 三项),设置入口由"首页快捷入口或底栏"双路保底;约束违反在保存层与解析层双重拦截。
-- 被移除的页面仍可通过首页快捷入口进入(回收站/设置等),页面本体都在 IndexedStack 中不销毁;底栏无匹配项不高亮的既有语义保留。
-- `SidebarItem` 迁移使 `main_layout_page.dart` 不再定义公共枚举,引用方(bootstrap)改从 models 导入;桌面行为零变化(侧栏列表/视觉原样搬入 DesktopSidebar)。
-- 验证:`flutter analyze` 零问题;152 个测试全过(新增 TabNavHistory 5 例、MobileNavPreferences 6 例、MobileHomePage 2 例);模拟器实际操作验收交用户。
+- Android 启动后立即显示文件和常驻搜索，不存在可配置或可恢复的首页页面。
+- 移动端底栏仍可缩减到 2–5 项，但设置永远可达；旧偏好无须手工重置。
+- 文件级 Back 与 tab 级 Back 有明确优先顺序，`test/mobile_file_manager_navigation_test.dart`、`test/tab_nav_history_test.dart` 和 `test/widget_test.dart` 覆盖导航桥、历史和系统退出路径。
+- 文件页视觉与业务工作区的分离由 [移动文件页呈现决策](../architecture/2026-08-31-mobile-file-manager-presentation.md) 持有。
