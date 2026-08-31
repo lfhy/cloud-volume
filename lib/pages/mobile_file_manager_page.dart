@@ -31,7 +31,9 @@ class MobileFileManagerPage extends StatefulWidget {
     required this.onRefresh,
     this.homeView = FileManagerHomeView.files,
     this.pendingSyncRemoteOpen,
+    this.pendingSyncRemoteOpenGeneration = 0,
     this.onPendingSyncRemoteOpenConsumed,
+    this.onCancelPendingSyncRemoteOpen,
     this.onOpenAccountManagement,
     this.onOpenSettings,
     this.navigation,
@@ -43,7 +45,9 @@ class MobileFileManagerPage extends StatefulWidget {
   final VoidCallback onRefresh;
   final FileManagerHomeView homeView;
   final SyncRemoteOpenRequest? pendingSyncRemoteOpen;
-  final VoidCallback? onPendingSyncRemoteOpenConsumed;
+  final int pendingSyncRemoteOpenGeneration;
+  final SyncRemoteOpenConsumer? onPendingSyncRemoteOpenConsumed;
+  final VoidCallback? onCancelPendingSyncRemoteOpen;
   final VoidCallback? onOpenAccountManagement;
   final VoidCallback? onOpenSettings;
   final MobileFileManagerNavigation? navigation;
@@ -87,6 +91,7 @@ class _MobileFileManagerPageState extends State<MobileFileManagerPage> {
       onRefresh: widget.onRefresh,
       homeView: widget.homeView,
       pendingSyncRemoteOpen: widget.pendingSyncRemoteOpen,
+      pendingSyncRemoteOpenGeneration: widget.pendingSyncRemoteOpenGeneration,
       onPendingSyncRemoteOpenConsumed: widget.onPendingSyncRemoteOpenConsumed,
       onOpenAccountManagement: widget.onOpenAccountManagement,
       viewBuilder: _buildWorkspace,
@@ -106,19 +111,23 @@ class _MobileFileManagerPageState extends State<MobileFileManagerPage> {
       searchEnabled: !workspace.isLoading,
       searchPlaceholder: _searchPlaceholderFor(workspace),
       body: _buildContent(context, workspace, theme),
-      onBack: workspace.canNavigateBack
-          ? () => unawaited(workspace.navigateBack())
-          : null,
+      onBack: workspace.canNavigateBack ? () => _handleBack(workspace) : null,
       onSettings: widget.onOpenSettings,
-      onMore: () => unawaited(showMobileFileManagerActions(context, workspace)),
+      // A previous bucket entry may carry a stale profile while inputs are
+      // rebinding, so no action sheet is exposed until the fresh list lands.
+      onMore: workspace.isLoading || workspace.isInputRebindPending
+          ? null
+          : () => unawaited(showMobileFileManagerActions(context, workspace)),
       onFab: () => unawaited(
         showMobileFileManagerActions(context, workspace, fromFab: true),
       ),
       showFab:
           workspace.hasActiveBucket &&
           !workspace.isShowingTrash &&
+          workspace.error == null &&
           workspace.currentDirectoryWritable &&
-          !workspace.isLoading,
+          !workspace.isLoading &&
+          !workspace.isInputRebindPending,
     );
   }
 
@@ -128,6 +137,15 @@ class _MobileFileManagerPageState extends State<MobileFileManagerPage> {
     if (workspace.isShowingTrash) return active.label;
     if (workspace.breadcrumbs.isEmpty) return active.label;
     return workspace.breadcrumbs.last;
+  }
+
+  void _handleBack(FileManagerWorkspaceController workspace) {
+    if (workspace.hasPendingSyncRemoteOpen &&
+        widget.onCancelPendingSyncRemoteOpen != null) {
+      widget.onCancelPendingSyncRemoteOpen!();
+      return;
+    }
+    unawaited(workspace.handleSystemBack());
   }
 
   String _subtitleFor(FileManagerWorkspaceController workspace) {

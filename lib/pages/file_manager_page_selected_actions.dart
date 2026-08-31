@@ -56,18 +56,40 @@ extension _FileManagerPageSelectedActions on _FileManagerPageState {
     FileSelectionAction action,
     List<ObjectInfo> selected,
   ) async {
+    final bucketEntry = _activeBucketEntry;
+    if (bucketEntry == null) return;
+    final prefix = _prefix;
+    final sourceListingViewGeneration = _listingViewGeneration;
+    final request = _captureMobileFileManagerRequest(
+      _MobileFileManagerLocation.objects(bucketEntry, prefix),
+    );
+    if (!_isCurrentMobileFileManagerRequest(request)) return;
     final primary = selected.first;
     final targetDirectory = await showObjectTargetPathDialog(
       context,
       primary,
       api: widget.api,
-      bucket: _activeBucketEntry!,
-      initialPrefix: _prefix,
+      bucket: bucketEntry,
+      initialPrefix: prefix,
     );
-    if (targetDirectory == null) {
+    if (targetDirectory == null ||
+        !_isCurrentObjectMutationCommand(
+          bucketEntry,
+          prefix,
+          sourceListingViewGeneration,
+          request,
+        )) {
       return;
     }
     for (final object in selected) {
+      if (!_isCurrentObjectMutationCommand(
+        bucketEntry,
+        prefix,
+        sourceListingViewGeneration,
+        request,
+      )) {
+        return;
+      }
       final targetKey = objectTargetPathInDirectory(targetDirectory, object);
       await _handleObjectAction(
         object,
@@ -78,7 +100,18 @@ extension _FileManagerPageSelectedActions on _FileManagerPageState {
         reloadAfterAction: false,
       );
     }
-    if (!mounted) return;
-    await _reloadObjectsAfterBucketMutation(_activeBucketEntry!, _prefix);
+    if (!_isCurrentObjectMutationCommand(
+      bucketEntry,
+      prefix,
+      sourceListingViewGeneration,
+      request,
+    )) {
+      return;
+    }
+    await _reloadObjectsAfterBucketMutation(
+      bucketEntry,
+      prefix,
+      mobileNavigationEpoch: request?.epoch,
+    );
   }
 }

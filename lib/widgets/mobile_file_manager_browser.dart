@@ -77,6 +77,8 @@ class MobileFileManagerBrowser extends StatelessWidget {
         final bucket = buckets[index];
         return MobileFileManagerRow(
           key: ValueKey('mobile-bucket-${bucket.id}'),
+          // Keep the established mobile bucket artwork rather than inheriting
+          // the desktop WhiteSur icon family.
           leading: LocalCloudPanFileIcon(
             name: bucket.label,
             isBucket: true,

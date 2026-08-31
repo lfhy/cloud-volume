@@ -8,17 +8,60 @@ extension _FileManagerPageActions on _FileManagerPageState {
   Future<void> _upload() async {
     if (_activeBucket == null) return;
     if (!_ensureCurrentDirectoryWritable()) return;
+    final bucketEntry = _activeBucketEntry;
+    if (bucketEntry == null) return;
+    final prefix = _prefix;
+    final sourceListingViewGeneration = _listingViewGeneration;
+    final request = _captureMobileFileManagerRequest(
+      _MobileFileManagerLocation.objects(bucketEntry, prefix),
+    );
+    if (!_isCurrentObjectMutationCommand(
+      bucketEntry,
+      prefix,
+      sourceListingViewGeneration,
+      request,
+    )) {
+      return;
+    }
     final result = await FilePicker.pickFiles();
-    if (result.isEmpty) return;
+    // Native file selection can remain open while a profile refresh rebinds
+    // the current bucket. Do not turn that late picker result into an upload
+    // through a different endpoint/root prefix.
+    if (result.isEmpty ||
+        !_isCurrentObjectMutationCommand(
+          bucketEntry,
+          prefix,
+          sourceListingViewGeneration,
+          request,
+        )) {
+      return;
+    }
     final tasks = <TransferTask>[];
     for (final file in result) {
       final path = file.path;
       if (isWebPlatform) {
-        final task = _queueBrowserUpload(file.name, await file.readAsBytes());
+        final bytes = await file.readAsBytes();
+        if (!_isCurrentObjectMutationCommand(
+          bucketEntry,
+          prefix,
+          sourceListingViewGeneration,
+          request,
+        )) {
+          return;
+        }
+        final task = _queueBrowserUpload(file.name, bytes);
         if (task != null) {
           tasks.add(task);
         }
       } else if (path != null) {
+        if (!_isCurrentObjectMutationCommand(
+          bucketEntry,
+          prefix,
+          sourceListingViewGeneration,
+          request,
+        )) {
+          return;
+        }
         final task = _queueLocalUpload(path);
         if (task != null) {
           tasks.add(task);
@@ -28,50 +71,22 @@ extension _FileManagerPageActions on _FileManagerPageState {
     await _showUploadProgressDialogForTasks(tasks);
   }
 
-  TransferTask? _queueLocalUpload(String localPath, {String? relativeKey}) {
-    if (_activeBucket == null ||
-        _activeBucketEntry == null ||
-        localPath.trim().isEmpty) {
-      return null;
-    }
-    if (!_ensureCurrentDirectoryWritable()) return null;
-    final bucket = _activeBucket!;
-    final uploadKey = relativeKey == null || relativeKey.trim().isEmpty
-        ? path.basename(localPath)
-        : relativeKey;
-    final key = _prefix + uploadKey;
-    final task = TransferQueue.instance.startTask(
-      kind: TransferKind.upload,
-      bucket: bucket,
-      key: key,
-      localPath: localPath,
-      publishRemoteTask: !_usesMetadataRemoteTasks,
-    );
-    unawaited(_runUploadTask(task, _activeBucketEntry!));
-    return task;
-  }
-
-  TransferTask? _queueBrowserUpload(String fileName, Uint8List bytes) {
-    if (_activeBucket == null || _activeBucketEntry == null) return null;
-    if (!_ensureCurrentDirectoryWritable()) return null;
-    final bucket = _activeBucket!;
-    final key = _prefix + fileName;
-    final task = TransferQueue.instance.startTask(
-      kind: TransferKind.upload,
-      bucket: bucket,
-      key: key,
-      localPath: fileName,
-      publishRemoteTask: !_usesMetadataRemoteTasks,
-    );
-    unawaited(
-      _runBrowserUploadTask(task, _activeBucketEntry!, bytes, fileName),
-    );
-    return task;
-  }
-
   Future<void> _createDirectory() async {
     if (_activeBucket == null) return;
     if (!_ensureCurrentDirectoryWritable()) return;
+    final bucketEntry = _activeBucketEntry;
+    if (bucketEntry == null) return;
+    final config = bucketEntry.config;
+    final bucket = bucketEntry.bucket.name;
+    final prefix = _prefix;
+    final sourceListingViewGeneration = _listingViewGeneration;
+    final request = _captureMobileFileManagerRequest(
+      _MobileFileManagerLocation.objects(bucketEntry, prefix),
+    );
+    if (!_isCurrentMobileFileManagerRequest(request)) return;
+    final usesMetadataRemoteTasks =
+        widget.api.capabilities.supportsMounts &&
+        config.profileId.trim().isNotEmpty;
     final controller = TextEditingController();
     String? errorText;
     bool creating = false;
@@ -92,6 +107,20 @@ extension _FileManagerPageActions on _FileManagerPageState {
                   setDialogState(() => errorText = '目录名称不能为空');
                   return;
                 }
+                // The confirmation sheet may have remained open while an
+                // Android bootstrap refresh rebound this bucket ID. Never
+                // write through the dialog's captured endpoint/root prefix.
+                if (!_isCurrentObjectMutationCommand(
+                  bucketEntry,
+                  prefix,
+                  sourceListingViewGeneration,
+                  request,
+                )) {
+                  if (dialogContext.mounted) {
+                    Navigator.of(dialogContext).pop();
+                  }
+                  return;
+                }
                 setDialogState(() {
                   creating = true;
                   errorText = null;
@@ -99,28 +128,53 @@ extension _FileManagerPageActions on _FileManagerPageState {
                 try {
                   final taskStartedAt = DateTime.now().toUtc();
                   await widget.api.createDirectory(
-                    _activeConfig,
-                    _activeBucket!,
-                    _prefix,
+                    config,
+                    bucket,
+                    prefix,
                     name,
                   );
-                  if (!mounted || !dialogContext.mounted) return;
-                  if (_usesMetadataRemoteTasks) {
+                  _invalidateObjectListingCache(bucketId: bucketEntry.id);
+                  if (usesMetadataRemoteTasks) {
                     _trackMetadataTaskForRefresh(
-                      bucketId: _activeBucketEntry!.id,
-                      bucket: _activeBucket!,
-                      profileId: _activeConfig.profileId,
-                      prefix: _prefix,
-                      path: _prefix + name,
+                      bucketId: bucketEntry.id,
+                      bucket: bucket,
+                      profileId: config.profileId,
+                      prefix: prefix,
+                      path: prefix + name,
                       startedAt: taskStartedAt,
+                      sourceListingViewGeneration: sourceListingViewGeneration,
                     );
                   }
+                  if (!mounted || !dialogContext.mounted) {
+                    return;
+                  }
                   Navigator.of(dialogContext).pop();
-                  await _reloadObjectsAfterBucketMutation(
-                    _activeBucketEntry!,
-                    _prefix,
-                  );
+                  if (!_isCurrentObjectMutationCommand(
+                    bucketEntry,
+                    prefix,
+                    sourceListingViewGeneration,
+                    request,
+                  )) {
+                    return;
+                  }
+                  await _reloadObjectsAfterBucketMutation(bucketEntry, prefix);
                 } catch (error) {
+                  final requestWasCurrent = _isCurrentObjectMutationCommand(
+                    bucketEntry,
+                    prefix,
+                    sourceListingViewGeneration,
+                    request,
+                  );
+                  unawaited(
+                    _recoverObjectsAfterUncertainMutation(
+                      bucketEntry,
+                      prefix,
+                      sourceListingViewGeneration,
+                    ),
+                  );
+                  if (!dialogContext.mounted || !requestWasCurrent) {
+                    return;
+                  }
                   setDialogState(() {
                     creating = false;
                     errorText = error.toString();
@@ -133,91 +187,6 @@ extension _FileManagerPageActions on _FileManagerPageState {
       },
     );
     controller.dispose();
-  }
-
-  Future<void> _runUploadTask(
-    TransferTask task,
-    FileManagerBucketEntry bucket,
-  ) async {
-    try {
-      await widget.api.uploadFile(
-        bucket.config,
-        task.bucket,
-        task.key,
-        task.localPath,
-        task.id,
-      );
-      TransferQueue.instance.markTaskDone(task.id);
-      // 上传成功后把本地副本 seed 进预览缓存，避免"刚传完就双击还要重下"。
-      // 用原始本地路径作为源；seed 内部异常被吞掉，不影响上传成功语义。
-      unawaited(
-        FileAccessService.instance.seedCacheFromUpload(
-          api: widget.api,
-          config: bucket.config,
-          bucket: task.bucket,
-          key: task.key,
-          localSourcePath: task.localPath,
-        ),
-      );
-      if (!mounted || _activeBucketId != bucket.id) return;
-      await _reloadObjectsAfterBucketMutation(bucket, _prefix);
-    } catch (error) {
-      TransferQueue.instance.markTaskFailed(task.id, error);
-      // 即使上传失败，也刷新当前目录让部分上传的对象（或回收站里的临时分片）立即可见。
-      if (mounted && _activeBucketId == bucket.id) {
-        await _reloadObjectsAfterBucketMutation(bucket, _prefix);
-      }
-    }
-  }
-
-  Future<void> _runBrowserUploadTask(
-    TransferTask task,
-    FileManagerBucketEntry bucket,
-    Uint8List bytes,
-    String fileName,
-  ) async {
-    try {
-      await widget.api.uploadBytes(
-        bucket.config,
-        task.bucket,
-        task.key,
-        bytes,
-        task.id,
-        fileName: fileName,
-      );
-      TransferQueue.instance.markTaskDone(task.id);
-      // 浏览器上传同样 seed 缓存（web 端实现为空操作，桌面端用上传时的 bytes）。
-      unawaited(
-        FileAccessService.instance.seedCacheFromUpload(
-          api: widget.api,
-          config: bucket.config,
-          bucket: task.bucket,
-          key: task.key,
-          bytes: bytes,
-        ),
-      );
-      if (!mounted || _activeBucketId != bucket.id) return;
-      await _reloadObjectsAfterBucketMutation(bucket, _prefix);
-    } catch (error) {
-      TransferQueue.instance.markTaskFailed(task.id, error);
-    }
-  }
-
-  Future<void> _downloadObject(ObjectInfo object) async {
-    if (_activeBucket == null) return;
-    try {
-      final request = FileAccessService.instance.startDownloadObjectWithPicker(
-        api: widget.api,
-        config: _activeConfig,
-        bucket: _activeBucket!,
-        object: object,
-        directoryLister: _downloadDirectoryLister(),
-      );
-      _watchDownloadRequest(request);
-      await _showDownloadProgressDialogForTasks(_tasksForRequests([request]));
-    } catch (error) {
-      _showPageError(error);
-    }
   }
 
   void _watchDownloadRequest(FileAccessTransferRequest request) {
@@ -239,7 +208,18 @@ extension _FileManagerPageActions on _FileManagerPageState {
     String? overrideTargetPath,
     bool reloadAfterAction = true,
   }) async {
-    if (!mounted || _activeBucket == null) return;
+    if (!mounted) return;
+    final bucketEntry = _activeBucketEntry;
+    if (bucketEntry == null) return;
+    final bucket = bucketEntry.bucket.name;
+    final config = bucketEntry.config;
+    final prefix = _prefix;
+    final sourceListingViewGeneration = _listingViewGeneration;
+    final request = _captureMobileFileManagerRequest(
+      _MobileFileManagerLocation.objects(bucketEntry, prefix),
+    );
+    if (!_isCurrentMobileFileManagerRequest(request)) return;
+    var writeMayHaveMutated = false;
     try {
       if (action == FileObjectAction.open) {
         await _openObject(object);
@@ -250,7 +230,7 @@ extension _FileManagerPageActions on _FileManagerPageState {
         return;
       }
       if (action == FileObjectAction.share) {
-        if (!_activeConfig.supportsShareLinks) {
+        if (!config.supportsShareLinks) {
           _showPageMessage(title: '暂不支持', message: '当前账号类型暂不支持创建分享链接。');
           return;
         }
@@ -263,15 +243,23 @@ extension _FileManagerPageActions on _FileManagerPageState {
         if (durationSec == null) {
           return;
         }
+        if (!_isCurrentObjectMutationCommand(
+          bucketEntry,
+          prefix,
+          sourceListingViewGeneration,
+          request,
+        )) {
+          return;
+        }
         final shareRecord = await widget.api.createShare(
-          _activeConfig,
-          _activeBucket!,
+          config,
+          bucket,
           object.key,
           object.displayName,
           durationSec,
         );
         ShareRecordsNotifier.instance.markChanged();
-        if (!mounted) {
+        if (!mounted || !_isCurrentMobileFileManagerRequest(request)) {
           return;
         }
         await showShareLinkDialog(context, record: shareRecord);
@@ -293,8 +281,8 @@ extension _FileManagerPageActions on _FileManagerPageState {
               context,
               object,
               api: widget.api,
-              bucket: _activeBucketEntry!,
-              initialPrefix: _prefix,
+              bucket: bucketEntry,
+              initialPrefix: prefix,
             );
         final targetPath =
             overrideTargetPath ??
@@ -303,14 +291,20 @@ extension _FileManagerPageActions on _FileManagerPageState {
                 : objectTargetPathInDirectory(targetDirectory, object));
         if (targetPath == null ||
             targetPath.isEmpty ||
-            targetPath == object.key) {
+            targetPath == object.key ||
+            !_isCurrentObjectMutationCommand(
+              bucketEntry,
+              prefix,
+              sourceListingViewGeneration,
+              request,
+            )) {
           return;
         }
         final task = TransferQueue.instance.startTask(
           kind: action == FileObjectAction.move
               ? TransferKind.move
               : TransferKind.copy,
-          bucket: _activeBucket!,
+          bucket: bucket,
           key: object.key,
           localPath: '',
           targetPath: targetPath,
@@ -319,29 +313,33 @@ extension _FileManagerPageActions on _FileManagerPageState {
         );
         try {
           if (action == FileObjectAction.move) {
+            writeMayHaveMutated = true;
             await widget.api.moveObject(
-              _activeConfig,
-              _activeBucket!,
+              config,
+              bucket,
               object.key,
               targetPath,
               object.isDir,
               task.id,
             );
+            _invalidateObjectListingCache(bucketId: bucketEntry.id);
             await FileAccessService.instance.evictCacheForObject(
               api: widget.api,
-              config: _activeConfig,
-              bucket: _activeBucket!,
+              config: config,
+              bucket: bucket,
               object: object,
             );
           } else {
+            writeMayHaveMutated = true;
             await widget.api.copyObject(
-              _activeConfig,
-              _activeBucket!,
+              config,
+              bucket,
               object.key,
               targetPath,
               object.isDir,
               task.id,
             );
+            _invalidateObjectListingCache(bucketId: bucketEntry.id);
           }
           TransferQueue.instance.markTaskDone(task.id);
         } catch (error) {
@@ -351,10 +349,24 @@ extension _FileManagerPageActions on _FileManagerPageState {
       }
       if (!mounted) return;
       if (action == FileObjectAction.rename) {
+        if (!_isCurrentObjectMutationCommand(
+          bucketEntry,
+          prefix,
+          sourceListingViewGeneration,
+          request,
+        )) {
+          return;
+        }
         final newName = await showRenameObjectDialog(context, object);
         if (newName == null ||
             newName.isEmpty ||
-            newName == object.displayName) {
+            newName == object.displayName ||
+            !_isCurrentObjectMutationCommand(
+              bucketEntry,
+              prefix,
+              sourceListingViewGeneration,
+              request,
+            )) {
           return;
         }
         final trimmedKey = object.key.replaceFirst(RegExp(r'/+$'), '');
@@ -364,21 +376,23 @@ extension _FileManagerPageActions on _FileManagerPageState {
             : '${trimmedKey.substring(0, slash + 1)}$newName';
         final task = TransferQueue.instance.startTask(
           kind: TransferKind.move,
-          bucket: _activeBucket!,
+          bucket: bucket,
           key: object.key,
           localPath: '',
           targetPath: targetPath,
           publishRemoteTask: !_usesMetadataRemoteTasks,
         );
         try {
+          writeMayHaveMutated = true;
           await widget.api.renameObject(
-            _activeConfig,
-            _activeBucket!,
+            config,
+            bucket,
             object.key,
             object.isDir,
             newName,
             taskId: task.id,
           );
+          _invalidateObjectListingCache(bucketId: bucketEntry.id);
           TransferQueue.instance.markTaskDone(task.id);
         } catch (error) {
           TransferQueue.instance.markTaskFailed(task.id, error);
@@ -386,71 +400,75 @@ extension _FileManagerPageActions on _FileManagerPageState {
         }
         await FileAccessService.instance.evictCacheForObject(
           api: widget.api,
-          config: _activeConfig,
-          bucket: _activeBucket!,
+          config: config,
+          bucket: bucket,
           object: object,
         );
       } else if (action == FileObjectAction.delete) {
-        if (!mounted) return;
+        if (!mounted ||
+            !_isCurrentObjectMutationCommand(
+              bucketEntry,
+              prefix,
+              sourceListingViewGeneration,
+              request,
+            )) {
+          return;
+        }
         final choice = await showDeleteObjectDialog(
           context,
           object,
           trashEnabled: _activeBucketTrashEnabled,
         );
-        if (!choice.confirmed) return;
+        if (!choice.confirmed ||
+            !_isCurrentObjectMutationCommand(
+              bucketEntry,
+              prefix,
+              sourceListingViewGeneration,
+              request,
+            )) {
+          return;
+        }
         final tasks = _queueObjectDeletes(<ObjectInfo>[
           object,
         ], permanent: choice.permanent);
         await _showDeleteProgressDialogForTasks(tasks);
         return;
       }
-      if (!mounted || !reloadAfterAction) return;
-      await _reloadObjectsAfterBucketMutation(_activeBucketEntry!, _prefix);
+      if (!reloadAfterAction ||
+          !_isCurrentObjectMutationCommand(
+            bucketEntry,
+            prefix,
+            sourceListingViewGeneration,
+            request,
+          )) {
+        return;
+      }
+      await _reloadObjectsAfterBucketMutation(bucketEntry, prefix);
     } catch (error) {
-      _showPageError(error);
-    }
-  }
-
-  void _showPageSnack(String message) {
-    if (!mounted) {
-      return;
-    }
-    showAppToast(context, message: message);
-  }
-
-  void _showPageError(Object error) {
-    if (!mounted) {
-      return;
-    }
-    _showPageMessage(title: '操作失败', message: describeBridgeError(error));
-  }
-
-  void _showPageMessage({required String title, required String message}) {
-    if (!mounted) {
-      return;
-    }
-    unawaited(
-      showAppModal<void>(
-        context: context,
-        builder: (dialogContext) => AppShadDialog(
-          title: Text(title),
-          description: Text(message),
-          child: SizedBox(
-            width: 360,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                const SizedBox(height: 12),
-                ShadButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('知道了'),
-                ),
-              ],
+      final requestWasCurrent = _isCurrentObjectMutationCommand(
+        bucketEntry,
+        prefix,
+        sourceListingViewGeneration,
+        request,
+      );
+      if (requestWasCurrent) {
+        _showPageError(error);
+      }
+      if (writeMayHaveMutated) {
+        if (reloadAfterAction) {
+          unawaited(
+            _recoverObjectsAfterUncertainMutation(
+              bucketEntry,
+              prefix,
+              sourceListingViewGeneration,
             ),
-          ),
-        ),
-      ),
-    );
+          );
+        } else {
+          // A batch retains its captured request until its single final
+          // refresh. Advancing the mobile epoch here would skip later rows.
+          _invalidateObjectListingCache(bucketId: bucketEntry.id);
+        }
+      }
+    }
   }
 }

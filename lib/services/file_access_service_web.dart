@@ -125,6 +125,7 @@ class FileAccessService {
     required String bucket,
     required ObjectInfo object,
     FileAccessDirectoryLister? directoryLister,
+    bool Function()? canStartDownload,
   }) {
     final task = TransferQueue.instance.startTask(
       kind: TransferKind.download,
@@ -132,6 +133,13 @@ class FileAccessService {
       key: object.key,
       localPath: object.displayName,
     );
+    if (canStartDownload != null && !canStartDownload()) {
+      TransferQueue.instance.markTaskCanceled(task.id);
+      return FileAccessTransferRequest(
+        task: task,
+        completion: Future.value(''),
+      );
+    }
     final completion = prepareDownloadObjectToPath(
       api: api,
       config: config,
@@ -209,6 +217,7 @@ class FileAccessService {
     required String savePath,
     TransferTask? existingTask,
     FileAccessDirectoryLister? directoryLister,
+    bool Function()? canStartDownload,
   }) async {
     if (object.isDir) {
       throw UnsupportedError('浏览器端暂不支持文件夹下载');
@@ -225,6 +234,13 @@ class FileAccessService {
           key: object.key,
           localPath: savePath,
         );
+    if (canStartDownload != null && !canStartDownload()) {
+      TransferQueue.instance.markTaskCanceled(task.id);
+      return FileAccessTransferRequest(
+        task: task,
+        completion: Future.value(''),
+      );
+    }
     final completion = _launch(target)
         .then((_) {
           TransferQueue.instance.markTaskDone(task.id);

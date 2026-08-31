@@ -150,9 +150,13 @@ class BucketSourceService {
     final failures = <BucketSourceLoadFailure>[];
     // Skip disabled accounts before any backend call: they must not connect,
     // appear in the bucket list, or surface as a load failure.
-    final profilesToLoad =
-        profiles.isEmpty ? <ProfileInfo>[] : profiles.where((p) => !p.disabled).toList();
-    if (profilesToLoad.isEmpty) {
+    final profilesToLoad = profiles
+        .where((profile) => !profile.disabled)
+        .toList(growable: false);
+    // Fallback is for the legacy no-profile configuration only. A non-empty
+    // profile list whose accounts are all disabled must perform zero backend
+    // calls rather than silently reconnecting through fallbackConfig.
+    if (profiles.isEmpty) {
       sources.add(
         BucketSource(
           profileName: 'default',
@@ -331,11 +335,7 @@ class _SourceLoadOutcome {
 /// error that prevented it. The source is always present so failures can be
 /// attributed to the right account.
 class _BucketListingOutcome {
-  const _BucketListingOutcome({
-    required this.source,
-    this.buckets,
-    this.error,
-  });
+  const _BucketListingOutcome({required this.source, this.buckets, this.error});
 
   final BucketSource source;
   final List<BucketInfo>? buckets;

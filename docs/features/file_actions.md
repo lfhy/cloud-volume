@@ -4,12 +4,19 @@
 
 文件管理器的复制/移动选择目标目录而不是要求用户拼对象 key;挂载同时保持跨客户端 metadata 与本地文件系统所有权一致。
 
+页面 mutation 的缓存契约:provider 成功（以及可能留下部分副作用的失败）后，先按源 bucket 失效对象列表缓存，再决定是否刷新可见 UI；每次失效推进 cache epoch，在途请求只有 epoch 未变时才能写回缓存。可见刷新要求逻辑源位置仍是同一 bucket+prefix、非回收站(Android 位置栈、桌面 resume target)，桌面同步 discovery 期另以开始时的 listing generation 作 fence。因而用户离开源目录后再次进入不会命中旧页，A→B 加载期间 A 的晚完成也绝不取消或重载 B，A→B→A 后完成的上传/复制/移动/重命名/删除仍会刷新新的 A；删除完成期间若用户已打开同桶回收站，也不得把页面强制切回对象根。回收站恢复事件也按 bucket 失效所有匹配来源的对象页缓存。
+
+下载命令同样绑定发起时的 source generation：单对象另存为 picker、批量下载的默认目录解析/浏览器准备，以及递归目录 lister 都捕获原始 bucket/config/prefix 和位置请求，并在每个异步等待返回后、首个 provider 调用前再次校验。profile 重绑定或用户离开源目录后，迟到的 picker 结果只会取消本地任务，不会用旧 endpoint/root prefix 发起 listing 或下载；批量流程也不会清除新位置的选区或弹出旧错误。`test/widget_test.dart` 的 Android stale directory-picker 回归锁定该契约。
+
 - `lib/widgets/object_action_dialogs.dart` / `lib/pages/file_manager_page_actions.dart` / `file_manager_page_selected_actions.dart` — 复制与移动打开限定当前桶的远端目录选择器,再用 `objectTargetPathInDirectory` 追加每个源对象的显示名;UI 绝不要求用户重建完整目标 key。
+- `lib/pages/file_manager_page_uploads.dart` / `file_manager_page_object_deletes.dart` / `file_manager_page_trash.dart` / `file_manager_page_restore_sync.dart` — 上传、删除、回收站恢复和事件刷新落实上述源缓存失效与当前位置刷新契约。
 - `lib/services/local_file_opener_io.dart` — Windows 用 `cmd /c start`,路径作为独立 argv 元素,避免 Explorer 文件名查找中的字面引号。
 - `go/s3/object_mutations.go` / `object_move_cleanup_test.go` — 重命名与移动删除初始 copy plan 期间捕获的精确源 key,避免延迟重列出把旧对象留在新名旁。
 - `go/mount/linux_fuse_nodes.go` / `linux_fuse_owner_test.go` — root 与条目属性用挂载进程 UID/GID,Linux FUSE `default_permissions` 授权桌面用户而不是把远端条目当 root 属主。
 
 回归锚点:`test/object_action_dialogs_test.dart` 验证目录→目标 key 组合;`go/s3/object_move_cleanup_test.go` 验证目录重命名一次规划 listing 并删除每个捕获源 key。Windows 外部打开修复经 `lib/services/local_file_opener_io.dart` 评审,含空格/非 ASCII 缓存路径的应用级检查仍待做。
+
+**Known P2/P3 (review 2026-08-31):** P2 `file_manager_page_preview.dart` 的预览关闭/404 后刷新仍只按 active bucket+prefix 识别桌面源目录；若 A 的预览结束恰逢 B 首屏加载，字段尚未切换时可能发起 A 刷新。后续让 preview 请求校验与 mutation 相同的逻辑源位置（桌面 resume target / Android 位置栈）。
 
 **Gotchas:** Cloud Files 刷新代码只在 `windows && cgo` 构建;macOS/Linux Go 测试验证共享行为但不能执行 Windows CFAPI 调用。改动水合文件、同大小仅 ETag 覆盖、远端删除、占用缓存重挂后,经 Windows 主机的 `scripts/run_windows.ps1` 验证。
 
@@ -44,7 +51,7 @@
 - `lib/services/file_access_service_io.dart` — `seedCacheFromUpload`(桌面)、`_ensureCachedObjectRequest`(预览/打开缓存命中)。
 - `lib/services/file_access_service_downloads_io.dart` — part 扩展:下载另存为/默认目录选择,保持主文件行数规则内。
 - `lib/services/file_access_service_web.dart` — Web 空操作(浏览器无本地缓存目录)。
-- `lib/pages/file_manager_page_actions.dart` — `_runUploadTask`(本地路径上传,传 `localSourcePath`)、`_runBrowserUploadTask`(bytes 上传)成功分支调 seed。
+- `lib/pages/file_manager_page_uploads.dart` — `_runUploadTask`(本地路径上传,传 `localSourcePath`)、`_runBrowserUploadTask`(bytes 上传)成功分支调 seed，并以捕获的源 bucket+prefix 决定可见刷新。
 - `lib/services/file_cache_store.dart` — 缓存路径生成、安全校验、size/mtime 比对、本地缓存文件删除;索引持久化全部委托 gateway 桥接方法。缓存文件本体在 `<cacheDir>/files/<bucket>/<key>`。
 - `lib/models/cached_file_record.dart` — Dart 缓存索引记录,JSON 用桥接 camelCase 字段并兼容旧 snake_case 读取。
 - `lib/services/remote_storage_gateway.dart` / `remote_storage_api_desktop_cache.dart` / `remote_storage_api_web.dart` — gateway 缓存索引 API;Web 本地缓存索引方法为 no-op/null。

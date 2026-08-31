@@ -82,9 +82,22 @@ extension _FileManagerPageSelection on _FileManagerPageState {
   }
 
   Future<void> _downloadSelectedObjects() async {
-    if (_activeBucket == null) {
-      return;
-    }
+    final bucketEntry = _activeBucketEntry;
+    if (bucketEntry == null) return;
+    final config = bucketEntry.config;
+    final bucket = bucketEntry.bucket.name;
+    final prefix = _prefix;
+    final sourceListingViewGeneration = _listingViewGeneration;
+    final mobileRequest = _captureMobileFileManagerRequest(
+      _MobileFileManagerLocation.objects(bucketEntry, prefix),
+    );
+    bool isCurrentDownloadCommand() => _isCurrentObjectMutationCommand(
+      bucketEntry,
+      prefix,
+      sourceListingViewGeneration,
+      mobileRequest,
+    );
+    if (!isCurrentDownloadCommand()) return;
     final selected = _selectedObjects;
     if (selected.isEmpty) {
       return;
@@ -96,26 +109,36 @@ extension _FileManagerPageSelection on _FileManagerPageState {
       }
       try {
         final requests = <FileAccessTransferRequest>[];
-        final directoryLister = _downloadDirectoryLister();
+        final directoryLister = _downloadDirectoryLister(
+          bucketEntry: bucketEntry,
+          mobileRequest: mobileRequest,
+          listingViewGeneration: sourceListingViewGeneration,
+          requestStillCurrent: isCurrentDownloadCommand,
+        );
         for (final object in files) {
-          requests.add(
-            await FileAccessService.instance.prepareDownloadObjectToPath(
-              api: widget.api,
-              config: _activeConfig,
-              bucket: _activeBucket!,
-              object: object,
-              savePath: object.displayName,
-              directoryLister: directoryLister,
-            ),
-          );
-        }
-        _clearSelection();
-        for (final request in requests) {
+          if (!isCurrentDownloadCommand()) return;
+          final request = await FileAccessService.instance
+              .prepareDownloadObjectToPath(
+                api: widget.api,
+                config: config,
+                bucket: bucket,
+                object: object,
+                savePath: object.displayName,
+                directoryLister: directoryLister,
+                canStartDownload: isCurrentDownloadCommand,
+              );
+          requests.add(request);
+          // Attach the completion observer immediately. If a later selected
+          // item loses the source-generation race, earlier requests may still
+          // finish in the background and must not become unhandled futures.
           _watchDownloadRequest(request);
+          if (!isCurrentDownloadCommand()) return;
         }
+        if (!isCurrentDownloadCommand()) return;
+        _clearSelection();
         await _showDownloadProgressDialogForTasks(_tasksForRequests(requests));
       } catch (error) {
-        if (!mounted) {
+        if (!mounted || !isCurrentDownloadCommand()) {
           return;
         }
         _showPageError(error);
@@ -123,10 +146,11 @@ extension _FileManagerPageSelection on _FileManagerPageState {
       return;
     }
     final targetDirectory = await resolveDefaultDownloadDirectory(
-      _activeConfig.defaultDownloadDirectory,
+      config.defaultDownloadDirectory,
     );
+    if (!isCurrentDownloadCommand()) return;
     if (targetDirectory == null || targetDirectory.isEmpty) {
-      if (!mounted) {
+      if (!mounted || !isCurrentDownloadCommand()) {
         return;
       }
       _showPageMessage(title: '下载失败', message: '无法确定默认下载目录');
@@ -135,26 +159,33 @@ extension _FileManagerPageSelection on _FileManagerPageState {
 
     try {
       final requests = <FileAccessTransferRequest>[];
-      final directoryLister = _downloadDirectoryLister();
+      final directoryLister = _downloadDirectoryLister(
+        bucketEntry: bucketEntry,
+        mobileRequest: mobileRequest,
+        listingViewGeneration: sourceListingViewGeneration,
+        requestStillCurrent: isCurrentDownloadCommand,
+      );
       for (final object in selected) {
-        requests.add(
-          await FileAccessService.instance.prepareDownloadObjectToPath(
-            api: widget.api,
-            config: _activeConfig,
-            bucket: _activeBucket!,
-            object: object,
-            savePath: path.join(targetDirectory, object.displayName),
-            directoryLister: directoryLister,
-          ),
-        );
-      }
-      _clearSelection();
-      for (final request in requests) {
+        if (!isCurrentDownloadCommand()) return;
+        final request = await FileAccessService.instance
+            .prepareDownloadObjectToPath(
+              api: widget.api,
+              config: config,
+              bucket: bucket,
+              object: object,
+              savePath: path.join(targetDirectory, object.displayName),
+              directoryLister: directoryLister,
+              canStartDownload: isCurrentDownloadCommand,
+            );
+        requests.add(request);
         _watchDownloadRequest(request);
+        if (!isCurrentDownloadCommand()) return;
       }
+      if (!isCurrentDownloadCommand()) return;
+      _clearSelection();
       await _showDownloadProgressDialogForTasks(_tasksForRequests(requests));
     } catch (error) {
-      if (!mounted) {
+      if (!mounted || !isCurrentDownloadCommand()) {
         return;
       }
       _showPageError(error);
@@ -169,6 +200,21 @@ extension _FileManagerPageSelection on _FileManagerPageState {
       _ensureCurrentDirectoryWritable();
       return;
     }
+    final bucketEntry = _activeBucketEntry;
+    if (bucketEntry == null) return;
+    final prefix = _prefix;
+    final sourceListingViewGeneration = _listingViewGeneration;
+    final request = _captureMobileFileManagerRequest(
+      _MobileFileManagerLocation.objects(bucketEntry, prefix),
+    );
+    if (!_isCurrentObjectMutationCommand(
+      bucketEntry,
+      prefix,
+      sourceListingViewGeneration,
+      request,
+    )) {
+      return;
+    }
     final selected = _selectedObjects;
     final choice = await showDeleteObjectsDialog(
       context,
@@ -176,6 +222,17 @@ extension _FileManagerPageSelection on _FileManagerPageState {
       trashEnabled: _activeBucketTrashEnabled,
     );
     if (!choice.confirmed) {
+      return;
+    }
+    // The selection dialog may stay open while Android replaces the bucket
+    // entry during a bootstrap refresh. Do not let the current-state queue
+    // turn this old selection into a write through the previous config.
+    if (!_isCurrentObjectMutationCommand(
+      bucketEntry,
+      prefix,
+      sourceListingViewGeneration,
+      request,
+    )) {
       return;
     }
     final tasks = _queueObjectDeletes(selected, permanent: choice.permanent);

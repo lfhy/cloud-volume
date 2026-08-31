@@ -16,6 +16,7 @@ extension _FileManagerPageObjectDeletes on _FileManagerPageState {
     }
     final bucketEntry = _activeBucketEntry!;
     final listingPrefix = _prefix;
+    final sourceListingViewGeneration = _listingViewGeneration;
     final targets = objects
         .where((object) => !_deletingObjectKeys.contains(object.key))
         .toList();
@@ -47,15 +48,19 @@ extension _FileManagerPageObjectDeletes on _FileManagerPageState {
           bucketEntry,
           targets[index],
           tasks[index],
+          sourcePrefix: listingPrefix,
+          sourceListingViewGeneration: sourceListingViewGeneration,
           permanent: permanent,
         ),
       );
     }
     unawaited(() async {
       final errors = await Future.wait(futures);
-      if (!mounted ||
-          _activeBucketId != bucketEntry.id ||
-          _prefix != listingPrefix) {
+      if (!_isCurrentObjectMutationSource(
+        bucketEntry,
+        listingPrefix,
+        sourceListingViewGeneration,
+      )) {
         return;
       }
       final deletedKeys = <String>{
@@ -84,6 +89,8 @@ extension _FileManagerPageObjectDeletes on _FileManagerPageState {
     FileManagerBucketEntry bucket,
     ObjectInfo object,
     TransferTask task, {
+    required String sourcePrefix,
+    required int sourceListingViewGeneration,
     bool permanent = false,
   }) async {
     try {
@@ -95,6 +102,7 @@ extension _FileManagerPageObjectDeletes on _FileManagerPageState {
         task.id,
         permanent: permanent,
       );
+      _invalidateObjectListingCache(bucketId: bucket.id);
       await FileAccessService.instance.evictCacheForObject(
         api: widget.api,
         config: bucket.config,
@@ -102,19 +110,38 @@ extension _FileManagerPageObjectDeletes on _FileManagerPageState {
         object: object,
       );
       TransferQueue.instance.markTaskDone(task.id);
-      _completeObjectDeleteInView(bucket.id, object.key);
+      _completeObjectDeleteInView(
+        bucket,
+        object.key,
+        sourcePrefix,
+        sourceListingViewGeneration,
+      );
       return null;
     } catch (error) {
       TransferQueue.instance.markTaskFailed(task.id, error);
-      if (mounted) {
+      _invalidateObjectListingCache(bucketId: bucket.id);
+      if (_isCurrentObjectMutationSource(
+        bucket,
+        sourcePrefix,
+        sourceListingViewGeneration,
+      )) {
         setState(() => _deletingObjectKeys.remove(object.key));
       }
       return error;
     }
   }
 
-  void _completeObjectDeleteInView(String bucketId, String objectKey) {
-    if (!mounted || _activeBucketId != bucketId) {
+  void _completeObjectDeleteInView(
+    FileManagerBucketEntry bucket,
+    String objectKey,
+    String sourcePrefix,
+    int sourceListingViewGeneration,
+  ) {
+    if (!_isCurrentObjectMutationSource(
+      bucket,
+      sourcePrefix,
+      sourceListingViewGeneration,
+    )) {
       return;
     }
     setState(() {

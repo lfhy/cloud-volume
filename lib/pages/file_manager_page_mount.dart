@@ -302,6 +302,15 @@ extension _FileManagerPageMount on _FileManagerPageState {
     if (targetBucket == null || _mountBusyBuckets.contains(targetBucket.id)) {
       return;
     }
+    final sourceListingViewGeneration = _listingViewGeneration;
+    final inputGeneration = _mobileInputGeneration;
+    if (!_isCurrentBucketCommand(
+      targetBucket,
+      sourceListingViewGeneration,
+      inputGeneration,
+    )) {
+      return;
+    }
     final choice = await showUnmountBucketDialog(
       context,
       bucket: targetBucket.bucket.name,
@@ -310,7 +319,14 @@ extension _FileManagerPageMount on _FileManagerPageState {
           targetBucket.config.windowsMountEngine ==
               WindowsMountEngine.cloudFiles,
     );
-    if (choice == null || !mounted) return;
+    if (choice == null ||
+        !_isCurrentBucketCommand(
+          targetBucket,
+          sourceListingViewGeneration,
+          inputGeneration,
+        )) {
+      return;
+    }
     setState(() => _mountBusyBuckets.add(targetBucket.id));
     try {
       final status = await widget.api.unmountBucket(

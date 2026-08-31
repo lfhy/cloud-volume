@@ -335,6 +335,7 @@ class FileAccessService {
     required String savePath,
     TransferTask? existingTask,
     FileAccessDirectoryLister? directoryLister,
+    bool Function()? canStartDownload,
   }) async {
     if (savePath.trim().isEmpty) {
       return FileAccessTransferRequest(completion: Future.value(savePath));
@@ -349,6 +350,13 @@ class FileAccessService {
         );
     if (task.localPath != savePath) {
       TransferQueue.instance.updateTaskLocalPath(task.id, savePath);
+    }
+    if (canStartDownload != null && !canStartDownload()) {
+      TransferQueue.instance.markTaskCanceled(task.id);
+      return FileAccessTransferRequest(
+        task: task,
+        completion: Future.value(''),
+      );
     }
     final completion = _runDownloadObjectToPath(
       api: api,

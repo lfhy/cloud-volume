@@ -51,11 +51,14 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:remote_storage/services/app_modal.dart';
 import 'package:remote_storage/services/bucket_source_service.dart';
 part 'file_manager_page_actions.dart';
+part 'file_manager_page_action_feedback.dart';
 part 'file_manager_page_access.dart';
 part 'file_manager_page_bucket_policy.dart';
 part 'file_manager_page_bucket_loading.dart';
 part 'file_manager_page_bucket_view.dart';
+part 'file_manager_page_downloads.dart';
 part 'file_manager_page_mount.dart';
+part 'file_manager_page_mobile_rebind.dart';
 part 'file_manager_page_object_loading.dart';
 part 'file_manager_page_object_view.dart';
 part 'file_manager_page_object_deletes.dart';
@@ -70,6 +73,7 @@ part 'file_manager_page_sources.dart';
 part 'file_manager_page_transfer_inputs.dart';
 part 'file_manager_page_trash.dart';
 part 'file_manager_page_upload_feedback.dart';
+part 'file_manager_page_uploads.dart';
 part 'file_manager_page_sync_nav.dart';
 part 'file_manager_page_webdav.dart';
 part 'file_manager_workspace.dart';
@@ -87,6 +91,7 @@ class FileManagerPage extends StatelessWidget {
     required this.onRefresh,
     this.homeView = FileManagerHomeView.files,
     this.pendingSyncRemoteOpen,
+    this.pendingSyncRemoteOpenGeneration = 0,
     this.onPendingSyncRemoteOpenConsumed,
     this.onOpenAccountManagement,
   });
@@ -97,7 +102,8 @@ class FileManagerPage extends StatelessWidget {
   final VoidCallback onRefresh;
   final FileManagerHomeView homeView;
   final SyncRemoteOpenRequest? pendingSyncRemoteOpen;
-  final VoidCallback? onPendingSyncRemoteOpenConsumed;
+  final int pendingSyncRemoteOpenGeneration;
+  final SyncRemoteOpenConsumer? onPendingSyncRemoteOpenConsumed;
 
   /// Jumps to the account-management page when a source needs repair.
   final VoidCallback? onOpenAccountManagement;
@@ -111,6 +117,7 @@ class FileManagerPage extends StatelessWidget {
       onRefresh: onRefresh,
       homeView: homeView,
       pendingSyncRemoteOpen: pendingSyncRemoteOpen,
+      pendingSyncRemoteOpenGeneration: pendingSyncRemoteOpenGeneration,
       onPendingSyncRemoteOpenConsumed: onPendingSyncRemoteOpenConsumed,
       onOpenAccountManagement: onOpenAccountManagement,
     );
@@ -161,7 +168,31 @@ class _FileManagerPageState extends State<FileManagerWorkspace> {
   String _trashNextToken = '';
   bool _trashHasMore = false;
   bool _pagingTrash = false;
-  int _seenObjectListingMutationVersion = 0, _bucketQuotaRefreshGeneration = 0;
+  // Android keeps its own file-location history so an in-flight bucket or
+  // recycle-bin request still consumes Back before the shell changes tabs.
+  final List<_MobileFileManagerLocation> _mobileLocationHistory =
+      <_MobileFileManagerLocation>[];
+  _MobileFileManagerLocation _mobileLocation =
+      const _MobileFileManagerLocation.bucketList();
+  int _mobileNavigationEpoch = 0;
+  // Input generation is separate from navigation: A → B → A stays valid,
+  // while a bootstrap/profile replacement invalidates every old source entry.
+  int _mobileInputGeneration = 0;
+  Future<void>? _mobileInputRebind;
+  bool _mobileInputRefreshNeedsRebind = false;
+  final Map<int, int> _mobileInputGenerationByListingView = <int, int>{};
+  int _pendingSyncRemoteOpenGeneration = 0;
+  int? _activeDesktopSyncRemoteOpenGeneration;
+  _FileManagerLoadingSnapshot? _desktopSyncLoadingSnapshot;
+  _DesktopListingResumeTarget? _desktopListingResumeTarget;
+  SyncRemoteOpenRequest? _activeMobileSyncRemoteOpen;
+  int? _activeMobileSyncRemoteOpenTicket;
+  _MobileFileManagerLocation? _mobileSyncRemoteOpenOrigin;
+  int? _mobileSyncRemoteOpenHistoryBase;
+  int _seenObjectListingMutationVersion = 0,
+      _bucketQuotaRefreshGeneration = 0,
+      _listingViewGeneration = 0,
+      _objectListingCacheGeneration = 0;
   List<BucketSourceLoadFailure> _unavailableBucketSources =
       const <BucketSourceLoadFailure>[];
   final Map<String, _PendingUploadRefresh> _pendingUploadRefreshes =
@@ -196,7 +227,10 @@ class _FileManagerPageState extends State<FileManagerWorkspace> {
     }
     final pending = widget.pendingSyncRemoteOpen;
     if (pending != null) {
-      schedulePendingSyncRemoteOpen(pending);
+      schedulePendingSyncRemoteOpen(
+        pending,
+        widget.pendingSyncRemoteOpenGeneration,
+      );
     }
   }
 
@@ -216,17 +250,36 @@ class _FileManagerPageState extends State<FileManagerWorkspace> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.config != widget.config ||
         oldWidget.profiles != widget.profiles) {
-      unawaited(_loadBuckets());
+      if (widget.viewBuilder == null) {
+        _mobileLocationHistory.clear();
+        _mobileLocation = const _MobileFileManagerLocation.bucketList();
+        _mobileNavigationEpoch++;
+        unawaited(_loadBuckets());
+      } else {
+        // Soft bootstrap refreshes replace config/profile instances even when
+        // the open Android file location is still valid.
+        _scheduleMobileFileManagerInputRebind();
+      }
     }
     final pending = widget.pendingSyncRemoteOpen;
-    if (pending != null && pending != oldWidget.pendingSyncRemoteOpen) {
-      schedulePendingSyncRemoteOpen(pending);
+    if (pending == null) {
+      if (widget.viewBuilder == null) {
+        _cancelPendingDesktopSyncRemoteOpen();
+      } else {
+        _cancelPendingMobileSyncRemoteOpen(notifyParent: false);
+      }
+    } else if (pending != oldWidget.pendingSyncRemoteOpen ||
+        widget.pendingSyncRemoteOpenGeneration !=
+            oldWidget.pendingSyncRemoteOpenGeneration) {
+      schedulePendingSyncRemoteOpen(
+        pending,
+        widget.pendingSyncRemoteOpenGeneration,
+      );
     }
   }
 
   void _startMountStatusRefreshTimer() {
     _mountStatusRefreshTimer?.cancel();
-    ObjectListingNotifier.instance.removeListener(_handleObjectListingMutation);
     if (!widget.api.capabilities.supportsMounts) {
       return;
     }
@@ -243,6 +296,8 @@ class _FileManagerPageState extends State<FileManagerWorkspace> {
       _loadingMessage = message;
       _loadingDetail = null;
       _error = null;
+      _pagingObjects = false;
+      _pagingTrash = false;
     });
     if (delayedDetail == null) {
       return;
@@ -350,7 +405,7 @@ class _FileManagerPageState extends State<FileManagerWorkspace> {
                   _showTrash ||
                   !_activeBucketTrashEnabled
               ? null
-              : _openBucketTrash,
+              : () => _openBucketTrash(),
           onCloseTrash: _activeBucket == null || _loading || !_showTrash
               ? null
               : _closeBucketTrash,

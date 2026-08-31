@@ -52,6 +52,7 @@ extension FileAccessDownloadPicker on FileAccessService {
     required String bucket,
     required ObjectInfo object,
     FileAccessDirectoryLister? directoryLister,
+    bool Function()? canStartDownload,
   }) {
     final task = TransferQueue.instance.startTask(
       kind: TransferKind.download,
@@ -66,6 +67,13 @@ extension FileAccessDownloadPicker on FileAccessService {
           if (savePath == null || savePath.trim().isEmpty) {
             TransferQueue.instance.markTaskCanceled(task.id);
             throw StateError('已取消选择保存位置');
+          }
+          // A native picker can remain open while its source profile is
+          // rebound. Verify its captured source immediately before the first
+          // provider request so a late selection cannot use an old endpoint.
+          if (canStartDownload != null && !canStartDownload()) {
+            TransferQueue.instance.markTaskCanceled(task.id);
+            return '';
           }
           TransferQueue.instance.updateTaskLocalPath(task.id, savePath);
           await _runDownloadObjectToPath(

@@ -54,22 +54,53 @@ class MainLayoutPage extends StatefulWidget {
 
 class _MainLayoutPageState extends State<MainLayoutPage> {
   SyncRemoteOpenRequest? _pendingSyncRemoteOpen;
+  int _pendingSyncRemoteOpenGeneration = 0;
   // 移动端访问历史:安卓返回键按此回退,耗尽后才允许退出应用。
   final TabNavHistory<SidebarItem> _navHistory = TabNavHistory<SidebarItem>();
   final MobileFileManagerNavigation _mobileFileNavigation =
       MobileFileManagerNavigation();
 
   void _onOpenSyncRemoteFromSyncPage(SyncRemoteOpenRequest request) {
+    final generation = ++_pendingSyncRemoteOpenGeneration;
     setState(() => _pendingSyncRemoteOpen = request);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _selectItem(SidebarItem.fileManager);
+      if (!mounted || !_isCurrentPendingSyncRemoteOpen(request, generation)) {
+        return;
+      }
+      _selectItem(
+        SidebarItem.fileManager,
+        pendingSyncRemoteOpenGeneration: generation,
+      );
     });
   }
 
-  void _clearPendingSyncRemoteOpen() {
+  bool _consumePendingSyncRemoteOpen(
+    SyncRemoteOpenRequest request,
+    int generation,
+  ) {
+    if (!_isCurrentPendingSyncRemoteOpen(request, generation)) {
+      return false;
+    }
+    setState(() {
+      _pendingSyncRemoteOpen = null;
+      _pendingSyncRemoteOpenGeneration++;
+    });
+    return true;
+  }
+
+  bool _isCurrentPendingSyncRemoteOpen(
+    SyncRemoteOpenRequest request,
+    int generation,
+  ) =>
+      generation == _pendingSyncRemoteOpenGeneration &&
+      identical(_pendingSyncRemoteOpen, request);
+
+  void _cancelPendingSyncRemoteOpen() {
     if (_pendingSyncRemoteOpen == null) return;
-    setState(() => _pendingSyncRemoteOpen = null);
+    setState(() {
+      _pendingSyncRemoteOpen = null;
+      _pendingSyncRemoteOpenGeneration++;
+    });
   }
 
   bool get _isAndroid => defaultTargetPlatform == TargetPlatform.android;
@@ -115,7 +146,21 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
   }
 
   /// 统一的导航入口:移动端把访问记入返回历史。
-  void _selectItem(SidebarItem item) {
+  void _selectItem(SidebarItem item, {int? pendingSyncRemoteOpenGeneration}) {
+    if (pendingSyncRemoteOpenGeneration != null) {
+      final pending = _pendingSyncRemoteOpen;
+      if (pending == null ||
+          !_isCurrentPendingSyncRemoteOpen(
+            pending,
+            pendingSyncRemoteOpenGeneration,
+          )) {
+        return;
+      }
+    }
+    if (pendingSyncRemoteOpenGeneration == null) {
+      // A bottom-bar or in-page navigation choice wins over an async sync jump.
+      _cancelPendingSyncRemoteOpen();
+    }
     if (_isAndroid) _navHistory.visit(item);
     widget.onSelectedItemChanged(item);
   }
@@ -153,10 +198,18 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
   }
 
   Future<void> _handleAndroidBack() async {
+    // A sync target can be replaced before its hidden IndexedStack child gets
+    // the new widget. Cancel the shell's latest ticket before delegating Back.
+    if (_effectiveSelectedItem == SidebarItem.fileManager &&
+        _pendingSyncRemoteOpen != null) {
+      _cancelPendingSyncRemoteOpen();
+      return;
+    }
     if (_effectiveSelectedItem == SidebarItem.fileManager &&
         await _mobileFileNavigation.handleBack()) {
       return;
     }
+    _cancelPendingSyncRemoteOpen();
     final previous = _navHistory.back(
       (item) => MobileNavPreferences.instance.items.contains(item),
       current: _effectiveSelectedItem,
@@ -214,7 +267,9 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
             profiles: widget.state.profiles,
             onRefresh: widget.onRefresh,
             pendingSyncRemoteOpen: _pendingSyncRemoteOpen,
-            onPendingSyncRemoteOpenConsumed: _clearPendingSyncRemoteOpen,
+            pendingSyncRemoteOpenGeneration: _pendingSyncRemoteOpenGeneration,
+            onPendingSyncRemoteOpenConsumed: _consumePendingSyncRemoteOpen,
+            onCancelPendingSyncRemoteOpen: _cancelPendingSyncRemoteOpen,
             onOpenAccountManagement: () => _selectItem(SidebarItem.storage),
             onOpenSettings: () => _selectItem(SidebarItem.settings),
             navigation: _mobileFileNavigation,
@@ -226,7 +281,8 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
             profiles: widget.state.profiles,
             onRefresh: widget.onRefresh,
             pendingSyncRemoteOpen: _pendingSyncRemoteOpen,
-            onPendingSyncRemoteOpenConsumed: _clearPendingSyncRemoteOpen,
+            pendingSyncRemoteOpenGeneration: _pendingSyncRemoteOpenGeneration,
+            onPendingSyncRemoteOpenConsumed: _consumePendingSyncRemoteOpen,
             onOpenAccountManagement: () => _selectItem(SidebarItem.storage),
           ),
         CloudStoragePage(

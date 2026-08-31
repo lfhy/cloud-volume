@@ -10,8 +10,8 @@ extension _FileManagerPageTransferInputs on _FileManagerPageState {
       return;
     }
     unawaited(() async {
-      final paths =
-          await DesktopFileTransferService.instance.localFilePathsFromClipboard();
+      final paths = await DesktopFileTransferService.instance
+          .localFilePathsFromClipboard();
       if (paths.isNotEmpty) {
         await _uploadLocalPaths(paths);
       }
@@ -68,7 +68,16 @@ extension _FileManagerPageTransferInputs on _FileManagerPageState {
       // this local shell must not also appear as a duplicate queue row.
       publishRemoteTask: !_usesMetadataRemoteTasks,
     );
-    unawaited(_runUploadDirectoryTask(task, _activeBucketEntry!, targetPrefix));
+    final bucketEntry = _activeBucketEntry!;
+    final sourceListingViewGeneration = _listingViewGeneration;
+    unawaited(
+      _runUploadDirectoryTask(
+        task,
+        bucketEntry,
+        targetPrefix,
+        sourceListingViewGeneration,
+      ),
+    );
     return task;
   }
 
@@ -76,6 +85,7 @@ extension _FileManagerPageTransferInputs on _FileManagerPageState {
     TransferTask task,
     FileManagerBucketEntry bucket,
     String targetPrefix,
+    int sourceListingViewGeneration,
   ) async {
     try {
       await widget.api.uploadDirectory(
@@ -85,9 +95,21 @@ extension _FileManagerPageTransferInputs on _FileManagerPageState {
         task.localPath,
         task.id,
       );
-      _trackUploadTaskForRefresh(task.id, bucket.id, targetPrefix);
+      _trackUploadTaskForRefresh(
+        task.id,
+        bucket.id,
+        targetPrefix,
+        sourceListingViewGeneration,
+      );
     } catch (error) {
       TransferQueue.instance.markTaskFailed(task.id, error);
+      unawaited(
+        _recoverObjectsAfterUncertainMutation(
+          bucket,
+          targetPrefix,
+          sourceListingViewGeneration,
+        ),
+      );
     }
   }
 

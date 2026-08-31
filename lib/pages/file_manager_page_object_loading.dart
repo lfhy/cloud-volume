@@ -35,7 +35,23 @@ extension _FileManagerPageObjectLoading on _FileManagerPageState {
     String prefix, {
     bool forceRefresh = false,
     Set<String> suppressObjectKeys = const <String>{},
+    int? mobileNavigationEpoch,
+    bool Function()? requestStillCurrent,
   }) async {
+    final request = _captureMobileFileManagerRequest(
+      _MobileFileManagerLocation.objects(bucketEntry, prefix),
+      epoch: mobileNavigationEpoch,
+    );
+    if (!_isCurrentMobileFileManagerRequest(request)) return false;
+    _recordDesktopListingResumeTarget(
+      _DesktopListingResumeTarget.objects(bucketEntry, prefix),
+    );
+    final listingViewGeneration = _beginListingViewRequest();
+    bool isCurrentRequest() =>
+        _isCurrentListingViewRequest(listingViewGeneration) &&
+        _isCurrentMobileFileManagerRequest(request) &&
+        (requestStillCurrent?.call() ?? true);
+    if (!isCurrentRequest()) return false;
     final mayWaitForBaiduRetry =
         bucketEntry.config.storageType == StorageType.baiduPan &&
         (forceRefresh ||
@@ -52,7 +68,7 @@ extension _FileManagerPageObjectLoading on _FileManagerPageState {
     if (forceRefresh) {
       _invalidateObjectListingCache(bucketId: bucketEntry.id, prefix: prefix);
       // 清掉内存里的列表，让加载态/错误态能在请求过程中正确显示。
-      if (mounted) {
+      if (mounted && isCurrentRequest()) {
         setState(() {
           _objects = null;
           _objectsNextToken = '';
@@ -68,19 +84,24 @@ extension _FileManagerPageObjectLoading on _FileManagerPageState {
         '',
         _FileManagerPageState._listPageSize,
         forceRefresh: forceRefresh,
+        mobileRequest: request,
+        requestStillCurrent: isCurrentRequest,
+        listingViewGeneration: listingViewGeneration,
       );
       final pageItems = suppressObjectKeys.isEmpty
           ? page.items
           : page.items
                 .where((object) => !suppressObjectKeys.contains(object.key))
                 .toList(growable: false);
-      if (suppressObjectKeys.isNotEmpty) {
+      if (suppressObjectKeys.isNotEmpty && isCurrentRequest()) {
         // A successful delete is authoritative even if the provider briefly
         // returns a stale row. Drop the raw page cache so later navigation
         // rechecks the backend instead of resurrecting that stale snapshot.
         _invalidateObjectListingCache(bucketId: bucketEntry.id, prefix: prefix);
       }
-      if (!mounted) return false;
+      if (!mounted || !isCurrentRequest()) {
+        return false;
+      }
       setState(() {
         final visibleKeys = pageItems.map((object) => object.key).toSet();
         _activeBucketEntry = bucketEntry;
@@ -105,7 +126,9 @@ extension _FileManagerPageObjectLoading on _FileManagerPageState {
       _afterObjectListingLoaded(bucketEntry, prefix);
       return true;
     } catch (e) {
-      if (!mounted) return false;
+      if (!mounted || !isCurrentRequest()) {
+        return false;
+      }
       setState(() {
         _error = describeBridgeError(e);
         _endLoading();
@@ -116,7 +139,7 @@ extension _FileManagerPageObjectLoading on _FileManagerPageState {
 
   Future<void> _navToBucket(FileManagerBucketEntry bucketEntry) {
     if (_isTrashHome) {
-      return _openBucketTrash(bucketEntry);
+      return _openBucketTrash(bucket: bucketEntry);
     }
     return _loadObjects(bucketEntry, '');
   }
@@ -152,6 +175,9 @@ extension _FileManagerPageObjectLoading on _FileManagerPageState {
     String nextToken,
     int pageSize, {
     bool forceRefresh = false,
+    _MobileFileManagerRequest? mobileRequest,
+    bool Function()? requestStillCurrent,
+    int? listingViewGeneration,
   }) async {
     final key = _ObjectListingCacheKey(
       bucketId: bucketEntry.id,
@@ -168,6 +194,10 @@ extension _FileManagerPageObjectLoading on _FileManagerPageState {
         return cached;
       }
     }
+    // An invalidation may happen while this request is on the wire. Keep a
+    // separate cache epoch so that response cannot repopulate an invalidated
+    // page even when its visible-view request is no longer active.
+    final cacheGeneration = _objectListingCacheGeneration;
     final page = await widget.api.listObjectPage(
       bucketEntry.config,
       bucketEntry.bucket.name,
@@ -178,31 +208,62 @@ extension _FileManagerPageObjectLoading on _FileManagerPageState {
     );
     // 即便是 forceRefresh，也只在请求成功后才写入缓存；失败时不污染缓存，
     // 这样用户重试时仍会真正请求后端而不是返回上一次的错误快照。
-    _objectListingCache[key] = page;
+    // A response that lost its Android location/epoch or sync-ticket race may
+    // still finish after the UI dropped it. Never cache stale pages.
+    if (_isCurrentMobileFileManagerRequest(mobileRequest) &&
+        (requestStillCurrent?.call() ?? true) &&
+        (listingViewGeneration == null ||
+            _isCurrentListingViewRequest(listingViewGeneration)) &&
+        cacheGeneration == _objectListingCacheGeneration) {
+      _objectListingCache[key] = page;
+    }
     return page;
   }
 
-  FileAccessDirectoryLister? _downloadDirectoryLister() {
-    final bucketEntry = _activeBucketEntry;
+  FileAccessDirectoryLister? _downloadDirectoryLister({
+    FileManagerBucketEntry? bucketEntry,
+    _MobileFileManagerRequest? mobileRequest,
+    int? listingViewGeneration,
+    bool Function()? requestStillCurrent,
+  }) {
+    bucketEntry ??= _activeBucketEntry;
     if (bucketEntry == null) {
       return null;
     }
-    return (prefix) => _listObjectsForDownload(bucketEntry, prefix);
+    return (prefix) => _listObjectsForDownload(
+      bucketEntry!,
+      prefix,
+      mobileRequest: mobileRequest,
+      listingViewGeneration: listingViewGeneration,
+      requestStillCurrent: requestStillCurrent,
+    );
   }
 
   Future<List<ObjectInfo>> _listObjectsForDownload(
     FileManagerBucketEntry bucketEntry,
-    String prefix,
-  ) async {
+    String prefix, {
+    _MobileFileManagerRequest? mobileRequest,
+    int? listingViewGeneration,
+    bool Function()? requestStillCurrent,
+  }) async {
     final items = <ObjectInfo>[];
     var nextToken = '';
     do {
+      if (!(requestStillCurrent?.call() ?? true)) {
+        throw StateError('下载源已更新，请在当前目录重新开始下载。');
+      }
       final page = await _listObjectPageCached(
         bucketEntry,
         prefix,
         nextToken,
         _FileManagerPageState._listPageSize,
+        mobileRequest: mobileRequest,
+        listingViewGeneration: listingViewGeneration,
+        requestStillCurrent: requestStillCurrent,
       );
+      if (!(requestStillCurrent?.call() ?? true)) {
+        throw StateError('下载源已更新，请在当前目录重新开始下载。');
+      }
       items.addAll(page.items);
       nextToken = page.nextToken;
     } while (nextToken.isNotEmpty);
@@ -226,6 +287,9 @@ extension _FileManagerPageObjectLoading on _FileManagerPageState {
   }
 
   void _invalidateObjectListingCache({String? bucketId, String? prefix}) {
+    // In-flight page requests retain this epoch and cannot reinsert an old
+    // page after a write (including a timeout with an unknown remote result).
+    _objectListingCacheGeneration++;
     _objectListingCache.removeWhere((key, _) {
       final bucketMatches = bucketId == null || key.bucketId == bucketId;
       final prefixMatches = prefix == null || key.prefix == prefix;
@@ -237,14 +301,74 @@ extension _FileManagerPageObjectLoading on _FileManagerPageState {
     FileManagerBucketEntry bucketEntry,
     String prefix, {
     Set<String> suppressObjectKeys = const <String>{},
+    int? mobileNavigationEpoch,
   }) {
+    final request = _captureMobileFileManagerRequest(
+      _MobileFileManagerLocation.objects(bucketEntry, prefix),
+      epoch: mobileNavigationEpoch,
+    );
+    if (!_isCurrentMobileFileManagerRequest(request)) {
+      return Future<bool>.value(false);
+    }
+    final reloadRequest = _supersedeMobileFileManagerRequest(request);
     _invalidateObjectListingCache(bucketId: bucketEntry.id);
     return _loadObjects(
       bucketEntry,
       prefix,
       forceRefresh: true,
       suppressObjectKeys: suppressObjectKeys,
+      mobileNavigationEpoch: reloadRequest?.epoch,
     );
+  }
+
+  Future<void> _recoverObjectsAfterUncertainMutation(
+    FileManagerBucketEntry bucketEntry,
+    String prefix,
+    int sourceListingViewGeneration,
+  ) async {
+    // A transport failure can arrive after the provider committed the write.
+    // Always expire its cache, then refresh only if this source is still open.
+    _invalidateObjectListingCache(bucketId: bucketEntry.id);
+    if (!_isCurrentObjectMutationSource(
+      bucketEntry,
+      prefix,
+      sourceListingViewGeneration,
+    )) {
+      return;
+    }
+    await _reloadObjectsAfterBucketMutation(bucketEntry, prefix);
+  }
+
+  bool _isCurrentObjectMutationSource(
+    FileManagerBucketEntry bucketEntry,
+    String prefix,
+    int sourceListingViewGeneration,
+  ) {
+    if (!mounted) return false;
+    if (widget.viewBuilder != null) {
+      // Rebinding retains bucket IDs for Back history but replaces their config
+      // entries. A mutation captured before that replacement may only expire
+      // cache; it must never reload through its old endpoint/root prefix.
+      return !_mobileInputRefreshNeedsRebind &&
+          _mobileInputGenerationByListingView[sourceListingViewGeneration] ==
+              _mobileInputGeneration &&
+          identical(_mobileLocation.bucket, bucketEntry) &&
+          identical(_activeBucketEntry, bucketEntry) &&
+          _mobileLocation.matches(
+            _MobileFileManagerLocation.objects(bucketEntry, prefix),
+          );
+    }
+    // A sync target has not yet committed its new desktop resume target
+    // during discovery. Its generation fence keeps old A mutations from
+    // canceling that pending B open, while normal A→B→A follows identity.
+    if (_activeDesktopSyncRemoteOpenGeneration != null &&
+        !_isCurrentListingViewRequest(sourceListingViewGeneration)) {
+      return false;
+    }
+    return _desktopListingResumeTarget?.matches(
+          _DesktopListingResumeTarget.objects(bucketEntry, prefix),
+        ) ??
+        false;
   }
 
   void _afterObjectListingLoaded(
@@ -259,7 +383,9 @@ extension _FileManagerPageObjectLoading on _FileManagerPageState {
       unawaited(_refreshMountStatus(bucketEntry));
     }
     if (bucketEntry.config.storageType == StorageType.webdav) {
-      unawaited(_refreshDirectoryAccess(bucketEntry, prefix));
+      unawaited(
+        _refreshDirectoryAccess(bucketEntry, prefix, _listingViewGeneration),
+      );
     }
   }
 }

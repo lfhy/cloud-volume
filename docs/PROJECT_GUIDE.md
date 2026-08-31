@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-08-31 Android 文件页返回与桶图标回归(app_shell 域)
+
+用户反馈移动桶行未沿用旧图标，且在二级文件页、桶或桶回收站的加载/错误期没有可用的左上返回；这时 Android 系统 Back 落入 `TabNavHistory`，会跳到另一个一级页。审计确认 Android 旧图标是 LocalCloudPan `sidebar/bucket.svg`，而新移动列表误换成 WhiteSur 存储桶图标；普通对象行也沿用 `LocalCloudPanFileIcon`。
+
+共享 workspace 现以移动逻辑位置栈记录桶列表、桶+prefix 和桶回收站。目标位置在请求前提交，Back 先回到栈中前一位置；首屏、分页和操作收尾刷新都以位置+递增 epoch 校验，使用户离开后迟到的响应无法重新覆盖页面。子目录打开桶回收站后会恢复原子目录，目录 overflow 的「打开文件夹」也改为真正进入目录。同步目录的 latest-wins ticket 同时保护桌面和移动端的加载提交与缓存写入。桌面审计还发现只限制同步目标不足以阻止旧的桶、对象、回收站与分页请求覆盖当前视图，因此这些路径以统一 listing generation 门控 state、缓存和 finally 标记；取消同步目标时恢复原来的 loading/error 快照，并以快照中的真实桶列表、目录或回收站 target 续载，不能从旧可见状态猜测。补充审计还修复了静默刷新失败后 page-2 guard 残留，以及 Android A 被缺失的 B 替换时无执行者 loading 残留。正典见 [app_shell](features/app_shell.md)，取舍已并入 [Agent Note](notes/implemented/architecture/2026-08-31-mobile-file-manager-presentation.md)。针对性 widget 回归覆盖底栏历史优先级、左上返回及其加载中直点、加载中 Back、对象/回收站分页、回收站恢复、目录 mutation 的迟到响应、删除期间打开回收站、回收站来源目录，以及桌面/Android 同步 A/B 乱序和桌面取消同步的已加载、目标不存在、初始加载场景。
+
+收尾评审补充确认 mutation 的失败也可能发生在 provider 已产生副作用之后。对象页缓存因此有独立 invalidation epoch，旧 page-2 在失效后不得回填；可见 mutation 刷新按逻辑源位置（Android 位置栈、桌面 resume target）而非旧 state 字段确认，桌面同步 discovery 期再加 listing generation fence，因而既不会在 B 的首屏尚未返回时取消 B，也能在 A→B→A 后刷新新的 A。Android 重命名失败 + 在途 page-2 与桌面 A→B 加载期间的 mutation 回归锁定这两个边界。
+
 ## 2026-08-31 Android 文件首屏与独立呈现层(app_shell 域)
 
 用户要求取消 Android 首页，把文件管理做成独立维护的移动页面，并按大搜索、宽触控行、行尾操作和 FAB 的参考布局组织操作。探索确认旧实现虽已有移动组件，却通过 `file_manager_page.dart` 的私有 State extension 渲染，仍会让移动修改耦合到桌面页面。

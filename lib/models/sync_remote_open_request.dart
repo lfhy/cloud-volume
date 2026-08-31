@@ -20,8 +20,13 @@ class SyncRemoteOpenRequest {
   }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-        'profileName': profileName,
-        'bucket': bucket,
-        'remotePrefix': remotePrefix,
-      };
+    'profileName': profileName,
+    'bucket': bucket,
+    'remotePrefix': remotePrefix,
+  };
 }
+
+/// Reports whether a particular external-open ticket was still the newest
+/// pending request when a file page finished or cancelled it.
+typedef SyncRemoteOpenConsumer =
+    bool Function(SyncRemoteOpenRequest request, int generation);

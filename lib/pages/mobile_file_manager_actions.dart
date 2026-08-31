@@ -178,9 +178,9 @@ Future<void> showMobileObjectActions(
     _MobileFileManagerAction(
       label: object.isDir ? '打开文件夹' : '打开',
       icon: LucideIcons.folderOpen,
-      onPressed: () => unawaited(
-        workspace.performObjectAction(object, FileObjectAction.open),
-      ),
+      onPressed: object.isDir
+          ? () => unawaited(workspace.openDirectory(object.key))
+          : () => unawaited(workspace.openFile(object)),
     ),
   ];
   if (!object.isDir || workspace.supportsDirectoryDownload) {

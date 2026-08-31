@@ -17,20 +17,46 @@ extension _FileManagerPageAccess on _FileManagerPageState {
   Future<void> _refreshDirectoryAccess(
     FileManagerBucketEntry bucket,
     String prefix,
+    int sourceListingViewGeneration,
   ) async {
+    final request = _captureMobileFileManagerRequest(
+      _MobileFileManagerLocation.objects(bucket, prefix),
+    );
+    if (!_isCurrentObjectMutationCommand(
+      bucket,
+      prefix,
+      sourceListingViewGeneration,
+      request,
+    )) {
+      return;
+    }
     try {
       final access = await widget.api.directoryAccess(
         bucket.config,
         bucket.bucket.name,
         prefix,
       );
-      if (!mounted || _activeBucketId != bucket.id || _prefix != prefix) return;
+      if (!_isCurrentObjectMutationCommand(
+        bucket,
+        prefix,
+        sourceListingViewGeneration,
+        request,
+      )) {
+        return;
+      }
       setState(() {
         _directoryAccess = access;
         _checkingDirectoryAccess = false;
       });
     } catch (error) {
-      if (!mounted || _activeBucketId != bucket.id || _prefix != prefix) return;
+      if (!_isCurrentObjectMutationCommand(
+        bucket,
+        prefix,
+        sourceListingViewGeneration,
+        request,
+      )) {
+        return;
+      }
       setState(() {
         _directoryAccess = const DirectoryAccess(writable: true, known: false);
         _checkingDirectoryAccess = false;

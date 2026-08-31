@@ -4,7 +4,21 @@ part of 'file_manager_page.dart';
 
 // Bucket loading applies only the newest request and keeps source errors profile-aware.
 extension _FileManagerPageBucketLoading on _FileManagerPageState {
-  Future<bool> _loadBuckets({bool force = false}) async {
+  Future<bool> _loadBuckets({
+    bool force = false,
+    int? mobileNavigationEpoch,
+  }) async {
+    final request = _captureMobileFileManagerRequest(
+      const _MobileFileManagerLocation.bucketList(),
+      epoch: mobileNavigationEpoch,
+    );
+    if (!_isCurrentMobileFileManagerRequest(request)) {
+      return false;
+    }
+    _recordDesktopListingResumeTarget(
+      const _DesktopListingResumeTarget.bucketList(),
+    );
+    final listingViewGeneration = _beginListingViewRequest();
     final generation = ++_bucketQuotaRefreshGeneration;
     _beginLoading(message: '加载存储桶...');
     try {
@@ -13,14 +27,22 @@ extension _FileManagerPageBucketLoading on _FileManagerPageState {
       // _buckets and destroy FileListTile hover state (the "hover又坏了" bug).
       final sourceResult = await _loadBucketEntries(force: force);
       final baseEntries = _applyCachedBucketQuotas(sourceResult.entries);
-      if (!mounted || generation != _bucketQuotaRefreshGeneration) {
+      if (!mounted ||
+          generation != _bucketQuotaRefreshGeneration ||
+          !_isCurrentListingViewRequest(listingViewGeneration) ||
+          !_isCurrentMobileFileManagerRequest(request)) {
         return false;
       }
       final entriesWithQuota = await _populateBucketQuotas(
         baseEntries,
         generation,
+        listingViewGeneration: listingViewGeneration,
+        mobileRequest: request,
       );
-      if (!mounted || generation != _bucketQuotaRefreshGeneration) {
+      if (!mounted ||
+          generation != _bucketQuotaRefreshGeneration ||
+          !_isCurrentListingViewRequest(listingViewGeneration) ||
+          !_isCurrentMobileFileManagerRequest(request)) {
         return false;
       }
       setState(() {
@@ -55,7 +77,10 @@ extension _FileManagerPageBucketLoading on _FileManagerPageState {
       }
       return true;
     } catch (error) {
-      if (!mounted || generation != _bucketQuotaRefreshGeneration) {
+      if (!mounted ||
+          generation != _bucketQuotaRefreshGeneration ||
+          !_isCurrentListingViewRequest(listingViewGeneration) ||
+          !_isCurrentMobileFileManagerRequest(request)) {
         return false;
       }
       setState(() {

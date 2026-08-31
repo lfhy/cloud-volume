@@ -33,15 +33,29 @@ extension _FileManagerPagePaging on _FileManagerPageState {
         _showTrash) {
       return;
     }
-    _pagingObjects = true;
+    final bucketEntry = _activeBucketEntry!;
+    final prefix = _prefix;
+    final nextToken = _objectsNextToken;
+    final listingViewGeneration = _listingViewGeneration;
+    final request = _captureMobileFileManagerRequest(
+      _MobileFileManagerLocation.objects(bucketEntry, prefix),
+    );
+    bool isCurrentRequest() =>
+        _isCurrentListingViewRequest(listingViewGeneration) &&
+        _isCurrentMobileFileManagerRequest(request);
+    if (!isCurrentRequest()) return;
+    setState(() => _pagingObjects = true);
     try {
       final page = await _listObjectPageCached(
-        _activeBucketEntry!,
-        _prefix,
-        _objectsNextToken,
+        bucketEntry,
+        prefix,
+        nextToken,
         _FileManagerPageState._listPageSize,
+        mobileRequest: request,
+        requestStillCurrent: isCurrentRequest,
+        listingViewGeneration: listingViewGeneration,
       );
-      if (!mounted) {
+      if (!mounted || !isCurrentRequest()) {
         return;
       }
       setState(() {
@@ -50,14 +64,13 @@ extension _FileManagerPagePaging on _FileManagerPageState {
         _objectsHasMore = page.hasMore;
       });
     } catch (error) {
-      if (!mounted) {
+      if (!mounted || !isCurrentRequest()) {
         return;
       }
       _showPageError(error);
     } finally {
-      _pagingObjects = false;
-      if (mounted) {
-        setState(() {});
+      if (mounted && isCurrentRequest()) {
+        setState(() => _pagingObjects = false);
       }
     }
   }
@@ -70,15 +83,25 @@ extension _FileManagerPagePaging on _FileManagerPageState {
         !_showTrash) {
       return;
     }
-    _pagingTrash = true;
+    final bucketEntry = _activeBucketEntry!;
+    final nextToken = _trashNextToken;
+    final listingViewGeneration = _listingViewGeneration;
+    final request = _captureMobileFileManagerRequest(
+      _MobileFileManagerLocation.trash(bucketEntry),
+    );
+    bool isCurrentRequest() =>
+        _isCurrentListingViewRequest(listingViewGeneration) &&
+        _isCurrentMobileFileManagerRequest(request);
+    if (!isCurrentRequest()) return;
+    setState(() => _pagingTrash = true);
     try {
       final page = await widget.api.listTrashPage(
-        _activeConfig,
-        _activeBucket!,
-        _trashNextToken,
+        bucketEntry.config,
+        bucketEntry.bucket.name,
+        nextToken,
         _FileManagerPageState._trashPageSize,
       );
-      if (!mounted) {
+      if (!mounted || !isCurrentRequest()) {
         return;
       }
       setState(() {
@@ -89,14 +112,13 @@ extension _FileManagerPagePaging on _FileManagerPageState {
         _trashHasMore = page.hasMore;
       });
     } catch (error) {
-      if (!mounted) {
+      if (!mounted || !isCurrentRequest()) {
         return;
       }
       _showPageError(error);
     } finally {
-      _pagingTrash = false;
-      if (mounted) {
-        setState(() {});
+      if (mounted && isCurrentRequest()) {
+        setState(() => _pagingTrash = false);
       }
     }
   }

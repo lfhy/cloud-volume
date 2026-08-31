@@ -25,12 +25,29 @@ extension _FileManagerPageBucketPolicy on _FileManagerPageState {
   }
 
   Future<void> _configureBucket(FileManagerBucketEntry bucket) async {
+    final inputGeneration = _mobileInputGeneration;
+    final sourceListingViewGeneration = _listingViewGeneration;
+    if (!_isCurrentBucketCommand(
+      bucket,
+      sourceListingViewGeneration,
+      inputGeneration,
+    )) {
+      return;
+    }
     final updated = await showBucketSettingsDialog(
       context,
       bucket: bucket.bucket.name,
       config: bucket.config,
     );
-    if (updated == null) {
+    // Settings are derived from the captured config. If Android refreshed the
+    // profile while the editor was open, saving it would overwrite fresh
+    // endpoint/root-prefix input with that stale snapshot.
+    if (updated == null ||
+        !_isCurrentBucketCommand(
+          bucket,
+          sourceListingViewGeneration,
+          inputGeneration,
+        )) {
       return;
     }
     try {

@@ -38,7 +38,7 @@ extension _FileManagerPageBucketView on _FileManagerPageState {
             showActionColumn: !_isTrashHome,
             onOpenTrashBucket: _isTrashHome
                 ? null
-                : (bucket) => unawaited(_openBucketTrash(bucket)),
+                : (bucket) => unawaited(_openBucketTrash(bucket: bucket)),
             onConfigureBucket: _isTrashHome
                 ? null
                 : (bucket) => unawaited(_configureBucket(bucket)),

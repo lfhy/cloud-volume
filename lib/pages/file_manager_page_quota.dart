@@ -25,8 +25,15 @@ extension _FileManagerPageQuota on _FileManagerPageState {
   /// setState that renders the bucket rows, so hover state is never disrupted.
   Future<List<FileManagerBucketEntry>> _populateBucketQuotas(
     List<FileManagerBucketEntry> entries,
-    int generation,
-  ) async {
+    int generation, {
+    required int listingViewGeneration,
+    required _MobileFileManagerRequest? mobileRequest,
+  }) async {
+    bool isCurrentRequest() =>
+        mounted &&
+        generation == _bucketQuotaRefreshGeneration &&
+        _isCurrentListingViewRequest(listingViewGeneration) &&
+        _isCurrentMobileFileManagerRequest(mobileRequest);
     final now = DateTime.now();
     final candidates = entries
         .where((entry) => !_hasFreshQuotaCache(entry, now))
@@ -39,6 +46,7 @@ extension _FileManagerPageQuota on _FileManagerPageState {
           final quota = await widget.api
               .getBucketQuota(entry.config, entry.bucket.name)
               .timeout(_bucketQuotaRequestTimeout);
+          if (!isCurrentRequest()) return null;
           _bucketQuotaCache[entry.id] = _BucketQuotaCacheValue(
             bucket: quota,
             configSignature: _quotaConfigSignature(entry),
@@ -58,8 +66,9 @@ extension _FileManagerPageQuota on _FileManagerPageState {
         }
       }),
     );
-    // A newer load may have superseded this one; bail without touching _buckets.
-    if (!mounted || generation != _bucketQuotaRefreshGeneration) return entries;
+    // A newer file view may have superseded this one; do not let its quota
+    // cache values outlive the listing that requested them.
+    if (!isCurrentRequest()) return entries;
 
     final updates = Map<String, BucketInfo>.fromEntries(
       results.whereType<MapEntry<String, BucketInfo>>(),
