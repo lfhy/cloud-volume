@@ -1,4 +1,4 @@
-package cn.ihep.cloudvolume.remote_storage
+package com.cloud.volume
 
 import io.flutter.embedding.android.FlutterActivity
 
