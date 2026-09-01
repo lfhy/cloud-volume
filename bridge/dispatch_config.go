@@ -113,7 +113,6 @@ func saveConfig(args json.RawMessage) (storageconfig.BootstrapState, error) {
 		return storageconfig.BootstrapState{}, err
 	}
 	_ = storageconfig.SetActiveProfile("default")
-	queueAutomaticConfigBackup()
 	if err := ensureP2PManagers(map[string]storageconfig.RemoteStorageConfig{
 		"default": input.Config,
 	}); err != nil {
@@ -179,7 +178,6 @@ func saveProfile(args json.RawMessage) (any, error) {
 	if err := storageconfig.SaveProfile(input.Name, input.Config); err != nil {
 		return nil, err
 	}
-	queueAutomaticConfigBackup()
 	if err := ensureP2PManagers(map[string]storageconfig.RemoteStorageConfig{
 		input.Name: input.Config,
 	}); err != nil {

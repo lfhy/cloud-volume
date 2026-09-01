@@ -101,7 +101,7 @@ Dart 的 `HttpClient.findProxyFromEnvironment` 只读 `http_proxy`/`https_proxy`
 - `go/config/config_backup.go` — bbolt `meta` 保存 `ConfigBackupSettings`;目标可引用 profile 或保存独立 `RemoteStorageConfig`。`ExportConfigBackup`/`RestoreConfigBackup` 只处理 profiles、活跃账号、全局代理、显示顺序,刻意不打包本地缓存;还原保留备份目标设置。
 - `go/config/config_db_shared.go` / `config_db_shared_test.go` — 所有运行时配置读写经同一进程级 `config.db` bbolt 句柄取得 lease；Android 私有数据根目录切换等待未完成 lease 后再关闭旧句柄，同一路径重设不打断现有调用。回归覆盖共享句柄、根目录切换、重复还原、并发轮询读取与 `tx.Check()` 完整性检查。
 - `go/configbackup/backups.go` — 解析目标,用用户自设备份密码派生 AES-GCM 密钥(`cloud-volume/config-backup/v2` + password 的 SHA-256),上传/列举/下载 `*.cloud-volume-config.json.enc` 快照。恢复前校验前缀、后缀、最大 32 MiB,再验证解密标签并导入。空密码走明文 JSON;加密但无密码返回 `此备份已加密,请先设置加密密码`,密码错误包装为 `无法解密配置备份:...`。
-- `bridge/dispatch_config_backup.go` — 加载/保存目标、立即备份、列快照、还原;`restore_config_backup_with_target` 成功后把 inline target(含密码)固化为本地备份设置并默认开启自动备份。普通 profile/代理/排序变动以 2 秒合并窗口异步自动备份,远端失败不阻塞本地保存。
+- `bridge/dispatch_config_backup.go` — 加载/保存目标、立即备份、列快照、还原;`restore_config_backup_with_target` 成功后把 inline target(含密码)固化为本地备份设置并默认开启自动备份。普通 profile/代理/排序变动以及后台百度网盘 OAuth token 刷新都会进入同一个 2 秒合并窗口异步自动备份,远端失败不阻塞本地保存;若刷新发生在备份上传期间,队列会在当前轮次结束后补传一份包含新 token 的快照。
 - `lib/models/config_backup.dart` / gateway — Flutter 模型/API;Web 明确不支持本地配置备份。
 - `lib/utils/bridge_error_text.dart` / `test/config_backup_restore_test.dart` — `isConfigBackupDecryptionError` 只匹配 Go 稳定解密失败文案(`无法解密配置备份`/`此备份已加密`/`message authentication failed`),网络/解析错误不误进密码重试。
 - `lib/widgets/config_backup_restore.dart` — 共享密码输入弹窗 + 解密失败重试循环;`skipInitialAttempt` 用于「本地密码已经失败过」路径;取消抛 `ConfigBackupRestoreCancelled`,调用方静默退出。

@@ -144,8 +144,7 @@ func saveProfileToDB(name string, config RemoteStorageConfig) error {
 	if err != nil {
 		return err
 	}
-	defer release()
-	return db.Update(func(tx *bolt.Tx) error {
+	if err := db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(profilesBucketKey)
 		ensureProfileIdentity(bucket, cleanName, &config)
 		data, err := json.Marshal(config)
@@ -156,7 +155,13 @@ func saveProfileToDB(name string, config RemoteStorageConfig) error {
 			return err
 		}
 		return appendProfileToOrderIfNeeded(tx, cleanName)
-	})
+	}); err != nil {
+		release()
+		return err
+	}
+	release()
+	notifyProfileMutation()
+	return nil
 }
 
 // loadProfileFromDB reads a config for a named profile from bbolt.

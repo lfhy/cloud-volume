@@ -17,7 +17,20 @@ import (
 
 var automaticConfigBackup struct {
 	sync.Mutex
-	pending bool
+	pending   bool
+	uploading bool
+	rerun     bool
+}
+
+var (
+	automaticConfigBackupDelay = 2 * time.Second
+	backupConfigSnapshot       = configbackup.BackupNow
+)
+
+func init() {
+	// Profile writes from storage, including background OAuth refreshes, must
+	// enter the same coalesced automatic-backup queue as bridge mutations.
+	storageconfig.SetProfileMutationHook(queueAutomaticConfigBackup)
 }
 
 type configBackupSettingsArgs struct {
@@ -174,6 +187,9 @@ func verifyBackupPassword(args json.RawMessage) (any, error) {
 func queueAutomaticConfigBackup() {
 	automaticConfigBackup.Lock()
 	if automaticConfigBackup.pending {
+		if automaticConfigBackup.uploading {
+			automaticConfigBackup.rerun = true
+		}
 		automaticConfigBackup.Unlock()
 		return
 	}
@@ -182,18 +198,29 @@ func queueAutomaticConfigBackup() {
 	go func() {
 		defer func() {
 			automaticConfigBackup.Lock()
+			automaticConfigBackup.uploading = false
 			automaticConfigBackup.pending = false
+			rerun := automaticConfigBackup.rerun
+			automaticConfigBackup.rerun = false
 			automaticConfigBackup.Unlock()
+			if rerun {
+				// A token refresh can persist a profile while the upload is in
+				// flight; queue one follow-up snapshot so it contains that write.
+				queueAutomaticConfigBackup()
+			}
 		}()
 		// Coalesce the multiple writes made by a single settings edit.
-		time.Sleep(2 * time.Second)
+		time.Sleep(automaticConfigBackupDelay)
 		settings, err := storageconfig.LoadConfigBackupSettings()
 		if err != nil || !settings.Enabled {
 			return
 		}
+		automaticConfigBackup.Lock()
+		automaticConfigBackup.uploading = true
+		automaticConfigBackup.Unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
-		if _, err := configbackup.BackupNow(ctx); err != nil {
+		if _, err := backupConfigSnapshot(ctx); err != nil {
 			log.Printf("[config-backup] automatic backup failed: %v", err)
 		}
 	}()
