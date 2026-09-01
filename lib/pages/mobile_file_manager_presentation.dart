@@ -119,16 +119,19 @@ extension _MobileFileManagerPresentation on _FileManagerPageState {
     void addAction(String label, IconData icon, VoidCallback? callback) {
       if (callback == null) return;
       actions.add(
-        ShadButton.ghost(
-          size: ShadButtonSize.sm,
-          onPressed: callback,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 15, color: theme.colorScheme.primary),
-              const SizedBox(width: 5),
-              Text(label),
-            ],
+        SizedBox(
+          height: 48,
+          child: ShadButton.ghost(
+            size: ShadButtonSize.sm,
+            onPressed: callback,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 15, color: theme.colorScheme.primary),
+                const SizedBox(width: 5),
+                Text(label),
+              ],
+            ),
           ),
         ),
       );
@@ -168,7 +171,7 @@ extension _MobileFileManagerPresentation on _FileManagerPageState {
     }
     if (actions.isEmpty) return const SizedBox.shrink();
     return SizedBox(
-      height: 36,
+      height: 48,
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(children: actions),

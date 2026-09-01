@@ -48,6 +48,8 @@
 
 **Known P2/P3 (review 2026-09-01, resolved):** P2 文件页根目录与桶根目录此前分别渲染设置按钮，初始回归只覆盖无返回按钮的根目录。删除重复入口后，`test/widget_test.dart` 在两个状态都断言仅保留底栏的一个 `settings2` 图标，防止目录页重新引入顶栏设置入口。
 
+**Known P2/P3 (review 2026-09-01, resolved):** Android 独立呈现初版的快捷操作沿用 `ShadButtonSize.sm`，实际触控高度低于 48dp。快捷操作行现在由 48dp `SizedBox` 约束，和页头返回、桶更多操作保持同一触控基线。
+
 ## 应用图标(桌面 + Android)
 
 所有平台共享同一云+驱动器品牌图,各平台按其 shell 期望的格式与轮廓打包。
