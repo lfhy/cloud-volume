@@ -687,6 +687,22 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('打开存储桶'), findsOneWidget);
       expect(find.text('桶设置'), findsOneWidget);
+      final openBucketAction = find.ancestor(
+        of: find.text('打开存储桶'),
+        matching: find.byType(ShadButton),
+      );
+      expect(
+        find.descendant(
+          of: openBucketAction,
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget is Row &&
+                widget.mainAxisSize == MainAxisSize.max &&
+                widget.mainAxisAlignment == MainAxisAlignment.spaceBetween,
+          ),
+        ),
+        findsOneWidget,
+      );
       expect(find.text('挂载'), findsNothing);
       expect(find.text('卸载'), findsNothing);
       expect(find.text('打开挂载目录'), findsNothing);

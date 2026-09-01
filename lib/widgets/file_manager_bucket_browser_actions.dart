@@ -261,10 +261,9 @@ class _BucketOverflowMenuButtonState extends State<_BucketOverflowMenuButton> {
                   action.onPressed();
                 },
                 child: Row(
-                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Icon(action.icon, size: 17),
-                    const SizedBox(width: 12),
                     Text(action.label),
                   ],
                 ),
