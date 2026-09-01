@@ -274,15 +274,22 @@ class _BucketOverflowMenuButtonState extends State<_BucketOverflowMenuButton> {
                   },
                   child: SizedBox(
                     width: menuWidth,
-                    child: Stack(
-                      alignment: Alignment.center,
-                      fit: StackFit.expand,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: Icon(action.icon, size: 17),
+                        SizedBox(
+                          width: 48,
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Icon(action.icon, size: 17),
+                          ),
                         ),
-                        Text(action.label),
+                        Expanded(
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(action.label),
+                          ),
+                        ),
                       ],
                     ),
                   ),

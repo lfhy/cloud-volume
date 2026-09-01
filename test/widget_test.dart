@@ -701,7 +701,10 @@ void main() {
       final openBucketActionContent = find.descendant(
         of: openBucketAction,
         matching: find.byWidgetPredicate(
-          (widget) => widget is Stack && widget.alignment == Alignment.center,
+          (widget) =>
+              widget is Row &&
+              widget.mainAxisSize == MainAxisSize.max &&
+              widget.crossAxisAlignment == CrossAxisAlignment.center,
         ),
       );
       expect(openBucketActionContent, findsOneWidget);
@@ -739,16 +742,16 @@ void main() {
         closeTo(tester.getRect(configureBucketIcon).left, 0.01),
       );
       expect(
-        tester.getRect(openBucketIcon).left,
-        closeTo(openBucketActionContentRect.left, 0.01),
+        tester.getRect(find.text('打开存储桶')).left,
+        closeTo(tester.getRect(find.text('桶设置')).left, 0.01),
       );
       expect(
-        tester.getRect(find.text('打开存储桶')).center.dx,
-        closeTo(openBucketActionContentRect.center.dx, 0.01),
+        tester.getRect(openBucketIcon).center.dy,
+        closeTo(tester.getRect(find.text('打开存储桶')).center.dy, 0.01),
       );
       expect(
-        tester.getRect(find.text('桶设置')).center.dx,
-        closeTo(openBucketActionContentRect.center.dx, 0.01),
+        tester.getRect(configureBucketIcon).center.dy,
+        closeTo(tester.getRect(find.text('桶设置')).center.dy, 0.01),
       );
       expect(find.text('挂载'), findsNothing);
       expect(find.text('卸载'), findsNothing);
