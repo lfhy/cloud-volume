@@ -247,38 +247,52 @@ class _BucketOverflowMenuButtonState extends State<_BucketOverflowMenuButton> {
     if (!widget.enabled || widget.mobileActions.isEmpty) return;
     await showAppModal<void>(
       context: context,
-      builder: (dialogContext) => AppShadDialog(
-        title: Text(widget.bucketLabel),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            for (final action in widget.mobileActions) ...[
-              ShadButton.ghost(
-                width: double.infinity,
-                onPressed: () {
-                  Navigator.of(dialogContext).pop();
-                  action.onPressed();
-                },
-                child: SizedBox(
-                  width: 200,
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Icon(action.icon, size: 17),
-                      ),
-                      Text(action.label),
-                    ],
+      builder: (dialogContext) {
+        // Shad's shrink-wrapped dialog body leaves button children unbounded.
+        // Reserve its 24px dialog padding plus 6px focus-ring gutter per side.
+        final horizontalSafeArea = MediaQuery.paddingOf(dialogContext).horizontal;
+        final menuWidth =
+            (MediaQuery.sizeOf(dialogContext).width - horizontalSafeArea - 60)
+                .clamp(
+                  1.0,
+                  double.infinity,
+                )
+                .toDouble();
+        return AppShadDialog(
+          title: Text(widget.bucketLabel),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final action in widget.mobileActions) ...[
+                ShadButton.ghost(
+                  width: menuWidth,
+                  padding: EdgeInsets.zero,
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop();
+                    action.onPressed();
+                  },
+                  child: SizedBox(
+                    width: menuWidth,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      fit: StackFit.expand,
+                      children: [
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Icon(action.icon, size: 17),
+                        ),
+                        Text(action.label),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 4),
+                const SizedBox(height: 4),
+              ],
             ],
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 

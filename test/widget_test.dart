@@ -628,6 +628,9 @@ void main() {
     tester,
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    tester.view.padding = const FakeViewPadding(left: 24, right: 20);
+    tester.view.viewPadding = const FakeViewPadding(left: 24, right: 20);
+    addTearDown(tester.view.reset);
     try {
       SharedPreferences.setMockInitialValues({});
       final api = _FakeApi(
@@ -706,7 +709,19 @@ void main() {
       final openBucketActionContentRect = tester.getRect(
         openBucketActionContent,
       );
-      expect(openBucketActionContentRect.width, 200);
+      expect(
+        openBucketActionRect.width,
+        closeTo(
+          MediaQueryData.fromView(tester.view).size.width -
+              MediaQueryData.fromView(tester.view).padding.horizontal -
+              60,
+          0.01,
+        ),
+      );
+      expect(
+        openBucketActionContentRect.width,
+        closeTo(openBucketActionRect.width, 0.01),
+      );
       expect(
         openBucketActionContentRect.center.dx,
         closeTo(openBucketActionRect.center.dx, 0.01),
