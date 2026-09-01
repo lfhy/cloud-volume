@@ -12,9 +12,11 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:remote_storage/widgets/app_tooltip.dart';
+import 'package:remote_storage/services/app_modal.dart';
 
 part 'file_manager_bucket_source_actions.dart';
 part 'file_manager_bucket_browser_actions.dart';
+part 'file_manager_bucket_browser_mobile.dart';
 part 'file_manager_bucket_quota.dart';
 
 const String _bucketContextMenuGroup = 'file_manager_bucket_browser';
@@ -45,6 +47,7 @@ class FileManagerBucketBrowser extends StatelessWidget {
     this.bucketTrashEnabled,
     this.webDavActionLabel = 'WebDAV',
     this.onReorder,
+    this.mobilePresentation = false,
   });
 
   final List<FileManagerBucketEntry> buckets;
@@ -65,9 +68,13 @@ class FileManagerBucketBrowser extends StatelessWidget {
   final bool Function(FileManagerBucketEntry bucket)? bucketTrashEnabled;
   final String webDavActionLabel;
   final void Function(int oldIndex, int newIndex)? onReorder;
+  final bool mobilePresentation;
 
   @override
   Widget build(BuildContext context) {
+    if (mobilePresentation) {
+      return _buildMobileList(context);
+    }
     if (isGrid) {
       return _buildGrid();
     }
@@ -323,6 +330,7 @@ class FileManagerBucketBrowser extends StatelessWidget {
               onUnmountBucket: onUnmountBucket,
               onOpenMountedBucket: onOpenMountedBucket,
               onConfigureBucket: onConfigureBucket,
+              showInlineConfigure: true,
               moreMenuItems: _buildBucketMenuItems(bucket),
             ),
           )
@@ -382,68 +390,69 @@ class FileManagerBucketBrowser extends StatelessWidget {
   }
 
   List<Widget> _buildBucketMenuItems(FileManagerBucketEntry bucket) {
+    return _buildBucketActions(bucket)
+        .map(
+          (action) => ShadContextMenuItem(
+            onPressed: () => _runBucketMenuAction(action.onPressed),
+            child: Text(action.label),
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  List<_BucketMenuAction> _buildBucketActions(FileManagerBucketEntry bucket) {
     final status = mountStatuses[bucket.id];
     final busy = busyBuckets.contains(bucket.id);
     final mounted = status?.mounted ?? false;
-    final showsWebDavAction = onOpenWebDavBucket != null;
     final trashEnabled =
         bucketTrashEnabled?.call(bucket) ?? onOpenTrashBucket != null;
-
-    return <Widget>[
-      ShadContextMenuItem(
-        onPressed: () => _runBucketMenuAction(() => onOpenBucket(bucket)),
-        child: const Text('打开存储桶'),
+    return <_BucketMenuAction>[
+      _BucketMenuAction(
+        label: '打开存储桶',
+        icon: LucideIcons.folderOpen,
+        onPressed: () => onOpenBucket(bucket),
       ),
       if (onConfigureBucket != null)
-        ShadContextMenuItem(
-          onPressed: () =>
-              _runBucketMenuAction(() => onConfigureBucket!(bucket)),
-          child: const Text('桶设置'),
+        _BucketMenuAction(
+          label: '桶设置',
+          icon: LucideIcons.settings2,
+          onPressed: () => onConfigureBucket!(bucket),
         ),
-      if (showsWebDavAction && !busy) ...[
-        if (onOpenTrashBucket != null && trashEnabled)
-          ShadContextMenuItem(
-            onPressed: () =>
-                _runBucketMenuAction(() => onOpenTrashBucket!(bucket)),
-            child: const Text('打开回收站'),
-          ),
-        ShadContextMenuItem(
-          onPressed: () =>
-              _runBucketMenuAction(() => onOpenWebDavBucket!(bucket)),
-          child: Text('查看 $webDavActionLabel 地址'),
+      if (onOpenTrashBucket != null && trashEnabled)
+        _BucketMenuAction(
+          label: '打开回收站',
+          icon: LucideIcons.trash2,
+          onPressed: () => onOpenTrashBucket!(bucket),
         ),
-      ] else if (mounted && !busy) ...[
-        if (onOpenTrashBucket != null && trashEnabled)
-          ShadContextMenuItem(
-            onPressed: () =>
-                _runBucketMenuAction(() => onOpenTrashBucket!(bucket)),
-            child: const Text('打开回收站'),
-          ),
+      if (onOpenWebDavBucket != null && !busy)
+        _BucketMenuAction(
+          label: '查看 $webDavActionLabel 地址',
+          icon: LucideIcons.link,
+          onPressed: () => onOpenWebDavBucket!(bucket),
+        ),
+      if (onOpenWebDavBucket == null && mounted && !busy) ...[
         if (onOpenMountedBucket != null)
-          ShadContextMenuItem(
-            onPressed: () =>
-                _runBucketMenuAction(() => onOpenMountedBucket!(bucket)),
-            child: const Text('打开挂载目录'),
+          _BucketMenuAction(
+            label: '打开挂载目录',
+            icon: LucideIcons.folderOpen,
+            onPressed: () => onOpenMountedBucket!(bucket),
           ),
         if (onUnmountBucket != null)
-          ShadContextMenuItem(
-            onPressed: () =>
-                _runBucketMenuAction(() => onUnmountBucket!(bucket)),
-            child: const Text('卸载'),
-          ),
-      ] else ...[
-        if (onOpenTrashBucket != null && trashEnabled)
-          ShadContextMenuItem(
-            onPressed: () =>
-                _runBucketMenuAction(() => onOpenTrashBucket!(bucket)),
-            child: const Text('打开回收站'),
-          ),
-        if (!busy && onMountBucket != null)
-          ShadContextMenuItem(
-            onPressed: () => _runBucketMenuAction(() => onMountBucket!(bucket)),
-            child: const Text('挂载'),
+          _BucketMenuAction(
+            label: '卸载',
+            icon: LucideIcons.x,
+            onPressed: () => onUnmountBucket!(bucket),
           ),
       ],
+      if (onOpenWebDavBucket == null &&
+          !mounted &&
+          !busy &&
+          onMountBucket != null)
+        _BucketMenuAction(
+          label: '挂载',
+          icon: LucideIcons.link,
+          onPressed: () => onMountBucket!(bucket),
+        ),
     ];
   }
 

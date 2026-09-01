@@ -1,13 +1,14 @@
 part of 'file_manager_page.dart';
 
-// Canonical file-manager chrome shared by desktop and Android.
+// Desktop file-manager chrome; Android has a dedicated mobile presentation.
 extension _FileManagerPagePresentation on _FileManagerPageState {
   Widget _buildWorkspacePresentation(BuildContext context) {
+    if (_usesMobileNavigation) {
+      return _buildMobileWorkspacePresentation(context);
+    }
     final theme = ShadTheme.of(context);
     final content = Padding(
-      padding: _usesMobileNavigation
-          ? const EdgeInsets.fromLTRB(16, 16, 16, 12)
-          : const EdgeInsets.only(top: 56, left: 32, right: 32, bottom: 20),
+      padding: const EdgeInsets.only(top: 56, left: 32, right: 32, bottom: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -17,9 +18,7 @@ extension _FileManagerPagePresentation on _FileManagerPageState {
         ],
       ),
     );
-    return _usesMobileNavigation
-        ? SafeArea(bottom: false, child: content)
-        : content;
+    return content;
   }
 
   // Native desktop drop APIs are only mounted around the desktop presentation.
@@ -61,12 +60,7 @@ extension _FileManagerPagePresentation on _FileManagerPageState {
           theme: theme,
           activeBucket: _presentationBucketLabel,
           breadcrumbs: _presentationBreadcrumbs,
-          onBack:
-              _usesMobileNavigation &&
-                  (_mobileLocationHistory.isNotEmpty ||
-                      _activeMobileSyncRemoteOpen != null)
-              ? () => unawaited(_handleMobileFileManagerBack())
-              : null,
+          onBack: null,
           onOpenBucketList: () => unawaited(_openPresentationBucketList()),
           onOpenBucketRoot: () {
             final bucket = _presentationBucketEntry;

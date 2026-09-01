@@ -28,6 +28,7 @@ extension _FileManagerPageBucketView on _FileManagerPageState {
           child: FileManagerBucketBrowser(
             buckets: buckets,
             isGrid: _usesMobileNavigation ? false : _isGrid,
+            mobilePresentation: _usesMobileNavigation,
             gridIconSize: _FileManagerPageState._bucketGridIconSize,
             listIconSize: _FileManagerPageState._listIconSize,
             onOpenBucket: (bucket) =>

@@ -2,6 +2,18 @@ part of 'file_manager_bucket_browser.dart';
 
 // Bucket browser action cells keep mount/unmount controls separate from list layout code.
 
+class _BucketMenuAction {
+  const _BucketMenuAction({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onPressed;
+}
+
 class _BucketMountActions extends StatelessWidget {
   const _BucketMountActions({
     required this.bucket,
@@ -12,6 +24,7 @@ class _BucketMountActions extends StatelessWidget {
     required this.onOpenMountedBucket,
     required this.onConfigureBucket,
     required this.moreMenuItems,
+    this.showInlineConfigure = true,
   });
 
   final FileManagerBucketEntry bucket;
@@ -22,6 +35,7 @@ class _BucketMountActions extends StatelessWidget {
   final ValueChanged<FileManagerBucketEntry>? onOpenMountedBucket;
   final ValueChanged<FileManagerBucketEntry>? onConfigureBucket;
   final List<Widget> moreMenuItems;
+  final bool showInlineConfigure;
 
   @override
   Widget build(BuildContext context) {
@@ -31,7 +45,11 @@ class _BucketMountActions extends StatelessWidget {
     final primaryAction = mounted ? onOpenMountedBucket : onMountBucket;
     final primaryLabel = mounted ? '打开目录' : '挂载';
     final primaryIcon = mounted ? LucideIcons.folderOpen : LucideIcons.link;
-    final secondaryAction = mounted ? onUnmountBucket : onConfigureBucket;
+    final secondaryAction = mounted
+        ? onUnmountBucket
+        : showInlineConfigure
+        ? onConfigureBucket
+        : null;
     final secondaryLabel = mounted ? '卸载' : '配置';
     final secondaryIcon = mounted ? LucideIcons.x : LucideIcons.settings2;
     final statusError = status?.lastError?.trim() ?? '';
@@ -156,11 +174,17 @@ class _BucketOverflowMenuButton extends StatefulWidget {
     required this.items,
     required this.color,
     required this.enabled,
+    this.mobile = false,
+    this.mobileActions = const <_BucketMenuAction>[],
+    this.bucketLabel = '',
   });
 
   final List<Widget> items;
   final Color color;
   final bool enabled;
+  final bool mobile;
+  final List<_BucketMenuAction> mobileActions;
+  final String bucketLabel;
 
   @override
   State<_BucketOverflowMenuButton> createState() =>
@@ -219,8 +243,58 @@ class _BucketOverflowMenuButtonState extends State<_BucketOverflowMenuButton> {
     _controller.show();
   }
 
+  Future<void> _showMobileMenu() async {
+    if (!widget.enabled || widget.mobileActions.isEmpty) return;
+    await showAppModal<void>(
+      context: context,
+      builder: (dialogContext) => AppShadDialog(
+        title: Text(widget.bucketLabel),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final action in widget.mobileActions) ...[
+              ShadButton.ghost(
+                width: double.infinity,
+                onPressed: () {
+                  Navigator.of(dialogContext).pop();
+                  action.onPressed();
+                },
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(action.icon, size: 17),
+                    const SizedBox(width: 12),
+                    Text(action.label),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 4),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (widget.mobile) {
+      return AppTooltip(
+        message: '更多操作',
+        child: ShadIconButton.ghost(
+          icon: Icon(
+            LucideIcons.ellipsisVertical,
+            size: 18,
+            color: widget.color,
+          ),
+          width: 48,
+          height: 48,
+          iconSize: 18,
+          onPressed: widget.enabled ? _showMobileMenu : null,
+        ),
+      );
+    }
     return ShadContextMenu(
       anchor: _menuAnchorOffset == null
           ? null

@@ -623,7 +623,9 @@ void main() {
     },
   );
 
-  testWidgets('Android reuses the desktop file-manager UX', (tester) async {
+  testWidgets('Android uses independent file-manager presentation', (
+    tester,
+  ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     try {
       SharedPreferences.setMockInitialValues({});
@@ -636,15 +638,36 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(MobileFileManagerPage), findsOneWidget);
-      expect(find.byType(FileManagerActionBar), findsOneWidget);
-      expect(find.byType(FileManagerBreadcrumbBar), findsOneWidget);
+      expect(find.byType(FileManagerActionBar), findsNothing);
+      expect(find.byType(FileManagerBreadcrumbBar), findsNothing);
       expect(find.byType(FileManagerBucketBrowser), findsOneWidget);
       expect(find.text('首页'), findsNothing);
       expect(find.text('设置'), findsOneWidget);
-      expect(find.byIcon(LucideIcons.settings2), findsAtLeastNWidgets(1));
+      expect(find.text('文件'), findsAtLeastNWidgets(1));
+      expect(find.text('所有存储桶'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(FileManagerBucketBrowser),
+          matching: find.byIcon(LucideIcons.settings2),
+        ),
+        findsNothing,
+      );
       expect(find.byType(SafeArea), findsAtLeastNWidgets(1));
-      expect(find.text('文件管理'), findsOneWidget);
-      expect(find.text('浏览和管理远程存储中的文件。'), findsOneWidget);
+      final systemStyles = tester
+          .widgetList<AnnotatedRegion<SystemUiOverlayStyle>>(
+            find.byType(AnnotatedRegion<SystemUiOverlayStyle>),
+          )
+          .map((region) => region.value);
+      expect(
+        systemStyles.any(
+          (style) =>
+              style.statusBarIconBrightness == Brightness.dark &&
+              style.systemNavigationBarIconBrightness == Brightness.dark,
+        ),
+        isTrue,
+      );
+      expect(find.text('文件管理'), findsNothing);
+      expect(find.text('浏览和管理远程存储中的文件。'), findsNothing);
       expect(find.text('手机文件'), findsOneWidget);
       expect(find.byIcon(LucideIcons.layoutGrid), findsNothing);
       expect(find.byIcon(LucideIcons.list), findsNothing);
@@ -659,32 +682,20 @@ void main() {
             .isGrid,
         isFalse,
       );
-      await tester.tap(
-        find
-            .descendant(
-              of: find.byType(FileManagerBucketBrowser),
-              matching: find.byIcon(LucideIcons.ellipsisVertical),
-            )
-            .first,
-      );
+      await tester.tap(find.byIcon(LucideIcons.ellipsisVertical).first);
       await tester.pumpAndSettle();
       expect(find.text('打开存储桶'), findsOneWidget);
+      expect(find.text('桶设置'), findsOneWidget);
       expect(find.text('挂载'), findsNothing);
       expect(find.text('卸载'), findsNothing);
       expect(find.text('打开挂载目录'), findsNothing);
-      await tester.tap(
-        find
-            .descendant(
-              of: find.byType(FileManagerBucketBrowser),
-              matching: find.byIcon(LucideIcons.ellipsisVertical),
-            )
-            .first,
-      );
+      await tester.tap(find.text('桶设置'));
+      await tester.pumpAndSettle();
+      expect(find.text('桶设置'), findsOneWidget);
+      expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(LucideIcons.search));
-      await tester.pumpAndSettle();
-      final search = find.byType(ShadInput).last;
+      final search = find.byType(ShadInput).first;
       await tester.enterText(search, '没有匹配');
       await tester.pump();
       expect(find.text('没有匹配的存储桶'), findsOneWidget);
@@ -693,6 +704,7 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('手机文件'));
       await tester.pumpAndSettle();
+      expect(find.text('手机文件'), findsWidgets);
       expect(find.byIcon(LucideIcons.layoutGrid), findsNothing);
       expect(find.byIcon(LucideIcons.list), findsNothing);
       expect(
@@ -703,13 +715,19 @@ void main() {
             .isGrid,
         isFalse,
       );
-      expect(find.byIcon(LucideIcons.settings2), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(FileManagerBucketBrowser),
+          matching: find.byIcon(LucideIcons.settings2),
+        ),
+        findsNothing,
+      );
       expect(find.text('上传'), findsOneWidget);
       expect(find.text('新建目录'), findsOneWidget);
       expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
       await tester.tap(find.byIcon(LucideIcons.chevronLeft));
       await tester.pumpAndSettle();
-      expect(find.text('文件管理'), findsOneWidget);
+      expect(find.text('文件'), findsAtLeastNWidgets(1));
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
@@ -792,7 +810,7 @@ void main() {
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
-      expect(find.text('文件管理'), findsOneWidget);
+      expect(find.text('文件'), findsAtLeastNWidgets(1));
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
@@ -1272,13 +1290,13 @@ void main() {
             .selectedValue,
         SidebarItem.fileManager,
       );
-      expect(find.text('文件管理'), findsOneWidget);
+      expect(find.text('文件'), findsAtLeastNWidgets(1));
 
       pendingObjects.complete(
         const ObjectListPage(items: <ObjectInfo>[], nextToken: ''),
       );
       await tester.pumpAndSettle();
-      expect(find.text('文件管理'), findsOneWidget);
+      expect(find.text('文件'), findsAtLeastNWidgets(1));
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
@@ -1339,7 +1357,7 @@ void main() {
               .selectedValue,
           SidebarItem.fileManager,
         );
-        expect(find.text('文件管理'), findsOneWidget);
+        expect(find.text('文件'), findsAtLeastNWidgets(1));
 
         pendingBucket.complete(
           const ObjectListPage(
@@ -1355,7 +1373,7 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.text('文件管理'), findsOneWidget);
+        expect(find.text('文件'), findsAtLeastNWidgets(1));
         expect(find.text('迟到桶响应.txt'), findsNothing);
 
         await tester.tap(find.text('手机文件'));
@@ -1432,7 +1450,7 @@ void main() {
 
       await tester.tap(find.byIcon(LucideIcons.chevronLeft));
       await tester.pumpAndSettle();
-      expect(find.text('文件管理'), findsOneWidget);
+      expect(find.text('文件'), findsAtLeastNWidgets(1));
       expect(find.byType(FileManagerErrorView), findsNothing);
     } finally {
       await tester.pumpWidget(const SizedBox.shrink());
@@ -1958,7 +1976,7 @@ void main() {
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
-      expect(find.text('文件管理'), findsOneWidget);
+      expect(find.text('文件'), findsAtLeastNWidgets(1));
       expect(
         tester
             .widget<MobileNavigationBar<SidebarItem>>(
@@ -2058,7 +2076,7 @@ void main() {
 
         expect(await tester.binding.handlePopRoute(), isTrue);
         await tester.pumpAndSettle();
-        expect(find.text('文件管理'), findsOneWidget);
+        expect(find.text('文件'), findsAtLeastNWidgets(1));
 
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump();
@@ -2110,7 +2128,7 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.text('文件管理'), findsOneWidget);
+        expect(find.text('文件'), findsAtLeastNWidgets(1));
         expect(find.text('加载中...'), findsNothing);
         expect(find.byIcon(LucideIcons.chevronLeft), findsNothing);
 
@@ -2128,7 +2146,7 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.text('文件管理'), findsOneWidget);
+        expect(find.text('文件'), findsAtLeastNWidgets(1));
         expect(find.text('迟到响应.txt'), findsNothing);
 
         await tester.pumpWidget(const SizedBox.shrink());
@@ -2172,7 +2190,7 @@ void main() {
       );
       await tester.pump();
       await tester.pump();
-      expect(find.byIcon(LucideIcons.chevronLeft), findsNothing);
+      expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
       expect(api.objectPagePrefixes, isEmpty);
 
       expect(await tester.binding.handlePopRoute(), isTrue);
@@ -2189,7 +2207,7 @@ void main() {
 
       pendingBuckets.complete(const <BucketInfo>[BucketInfo(name: '手机文件')]);
       await tester.pumpAndSettle();
-      expect(find.text('文件管理'), findsOneWidget);
+      expect(find.text('文件'), findsAtLeastNWidgets(1));
       expect(api.objectPagePrefixes, isEmpty);
 
       await tester.pumpWidget(const SizedBox.shrink());
@@ -3080,13 +3098,13 @@ void main() {
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
-      expect(find.text('文件管理'), findsOneWidget);
+      expect(find.text('文件'), findsAtLeastNWidgets(1));
 
       await tester.tap(find.text('账号'));
       await tester.pumpAndSettle();
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
-      expect(find.text('文件管理'), findsOneWidget);
+      expect(find.text('文件'), findsAtLeastNWidgets(1));
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pump();
