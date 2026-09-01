@@ -280,8 +280,11 @@ class _BucketOverflowMenuButtonState extends State<_BucketOverflowMenuButton> {
   @override
   Widget build(BuildContext context) {
     if (widget.mobile) {
-      return AppTooltip(
-        message: '更多操作',
+      // Touch tooltips toggle Shad's hover state on tap, which can outlive
+      // the bottom sheet. The sheet already names every action; keep only an
+      // accessibility label around the 48dp button.
+      return Semantics(
+        label: '更多操作',
         child: ShadIconButton.ghost(
           icon: Icon(
             LucideIcons.ellipsisVertical,

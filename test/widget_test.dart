@@ -690,6 +690,12 @@ void main() {
       expect(find.text('挂载'), findsNothing);
       expect(find.text('卸载'), findsNothing);
       expect(find.text('打开挂载目录'), findsNothing);
+      expect(await tester.binding.handlePopRoute(), isTrue);
+      await tester.pumpAndSettle();
+      expect(find.text('更多操作'), findsNothing);
+
+      await tester.tap(find.byIcon(LucideIcons.ellipsisVertical).first);
+      await tester.pumpAndSettle();
       await tester.tap(find.text('桶设置'));
       await tester.pumpAndSettle();
       expect(find.text('桶设置'), findsOneWidget);
