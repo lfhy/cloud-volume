@@ -50,4 +50,4 @@ Status: implemented
 
 ## Testing
 
-`flutter analyze`、移动导航/偏好/行 hover 测试以及 `widget_test.dart` 覆盖桌面与移动呈现隔离、48px 搜索、FAB 动作收纳和 Android Back 的目录、左上返回（含桶/目录加载中）、加载中桶、对象/回收站分页、回收站恢复、目录 mutation 收尾刷新、删除期间打开回收站、回收站来源目录、桌面与 Android 的同步 A/B latest-wins、慢桶取消、嵌套历史取消、上传 A→B→A、tab 历史与退出顺序；`mobile_file_manager_browser_test.dart` 锁定桶行的 LocalCloudPan 图标。
+`flutter analyze`、移动导航/偏好/行 hover 测试以及 `widget_test.dart` 覆盖桌面与移动呈现隔离、48px 搜索、FAB 动作收纳和 Android Back 的目录、左上返回（含桶/目录加载中）、加载中桶、对象/回收站分页、回收站恢复、目录 mutation 收尾刷新、删除期间打开回收站、回收站来源目录、桌面与 Android 的同步 A/B latest-wins、慢桶取消、嵌套历史取消、上传 A→B→A、tab 历史与退出顺序；`mobile_file_manager_browser_test.dart` 锁定桶行与桌面一致的 WhiteSur 存储服务器图标。

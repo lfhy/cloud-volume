@@ -11,6 +11,7 @@ import 'package:remote_storage/widgets/app_tooltip.dart';
 import 'package:remote_storage/widgets/file_manager_empty_state.dart';
 import 'package:remote_storage/widgets/list_selection_controls.dart';
 import 'package:remote_storage/widgets/local_cloudpan_file_icon.dart';
+import 'package:remote_storage/widgets/whitesur_file_icon.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 /// Which data set is rendered by [MobileFileManagerBrowser].
@@ -77,11 +78,10 @@ class MobileFileManagerBrowser extends StatelessWidget {
         final bucket = buckets[index];
         return MobileFileManagerRow(
           key: ValueKey('mobile-bucket-${bucket.id}'),
-          // Keep the established mobile bucket artwork rather than inheriting
-          // the desktop WhiteSur icon family.
-          leading: LocalCloudPanFileIcon(
-            name: bucket.label,
-            isBucket: true,
+          // Bucket rows use the same storage-server artwork as the desktop list.
+          leading: const WhiteSurFileIcon(
+            assetPath:
+                'assets/icons/whitesur/places/network-server-balanced.svg',
             size: 58,
           ),
           title: bucket.label,
