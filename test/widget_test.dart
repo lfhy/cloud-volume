@@ -691,17 +691,42 @@ void main() {
         of: find.text('打开存储桶'),
         matching: find.byType(ShadButton),
       );
-      expect(
-        find.descendant(
-          of: openBucketAction,
-          matching: find.byWidgetPredicate(
-            (widget) =>
-                widget is Row &&
-                widget.mainAxisSize == MainAxisSize.max &&
-                widget.mainAxisAlignment == MainAxisAlignment.spaceBetween,
-          ),
+      final configureBucketAction = find.ancestor(
+        of: find.text('桶设置'),
+        matching: find.byType(ShadButton),
+      );
+      final openBucketActionRow = find.descendant(
+        of: openBucketAction,
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget is Row &&
+              widget.mainAxisSize == MainAxisSize.max &&
+              widget.mainAxisAlignment == MainAxisAlignment.spaceBetween,
         ),
-        findsOneWidget,
+      );
+      expect(openBucketActionRow, findsOneWidget);
+      final openBucketActionRect = tester.getRect(openBucketAction);
+      final openBucketActionRowRect = tester.getRect(openBucketActionRow);
+      expect(openBucketActionRowRect.width, 200);
+      expect(
+        openBucketActionRowRect.center.dx,
+        closeTo(openBucketActionRect.center.dx, 0.01),
+      );
+      final openBucketIcon = find.descendant(
+        of: openBucketAction,
+        matching: find.byIcon(LucideIcons.folderOpen),
+      );
+      final configureBucketIcon = find.descendant(
+        of: configureBucketAction,
+        matching: find.byIcon(LucideIcons.settings2),
+      );
+      expect(
+        tester.getRect(openBucketIcon).left,
+        closeTo(tester.getRect(configureBucketIcon).left, 0.01),
+      );
+      expect(
+        tester.getRect(find.text('打开存储桶')).right,
+        closeTo(tester.getRect(find.text('桶设置')).right, 0.01),
       );
       expect(find.text('挂载'), findsNothing);
       expect(find.text('卸载'), findsNothing);
