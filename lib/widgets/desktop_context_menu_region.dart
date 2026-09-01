@@ -34,11 +34,14 @@ class DesktopContextMenuRegistry {
 
 class DesktopContextMenuHandle extends ChangeNotifier {
   Offset? _globalPosition;
+  Offset? _menuOffset;
 
   Offset? get globalPosition => _globalPosition;
+  Offset? get menuOffset => _menuOffset;
 
-  void showAt(Offset globalPosition) {
+  void showAt(Offset globalPosition, {Offset? menuOffset}) {
     _globalPosition = globalPosition;
+    _menuOffset = menuOffset;
     notifyListeners();
   }
 }
@@ -108,9 +111,12 @@ class _DesktopContextMenuRegionState extends State<DesktopContextMenuRegion> {
     DesktopContextMenuRegistry.deactivate(widget.groupId, _controller);
   }
 
-  void _showAt(Offset globalPosition) {
+  void _showAt(Offset globalPosition, {Offset? menuOffset}) {
     if (!mounted) return;
-    setState(() => _menuAnchorOffset = globalPosition + widget.menuOffset);
+    setState(
+      () => _menuAnchorOffset =
+          globalPosition + (menuOffset ?? widget.menuOffset),
+    );
     _controller.show();
   }
 
@@ -119,7 +125,7 @@ class _DesktopContextMenuRegionState extends State<DesktopContextMenuRegion> {
     if (globalPosition == null) {
       return;
     }
-    _showAt(globalPosition);
+    _showAt(globalPosition, menuOffset: widget.handle?.menuOffset);
   }
 
   @override
@@ -141,6 +147,12 @@ class _DesktopContextMenuRegionState extends State<DesktopContextMenuRegion> {
                 _showAt(details.globalPosition);
               }
             : null,
+        // The shared file browsers use this desktop context menu for actions.
+        // Long press gives touch devices the same command set without a second
+        // row renderer or a platform-only action sheet.
+        onLongPressStart: widget.items.isEmpty
+            ? null
+            : (details) => _showAt(details.globalPosition),
         onTapDown: (_) {
           DesktopContextMenuRegistry.dismiss(widget.groupId);
         },

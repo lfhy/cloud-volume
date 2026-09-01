@@ -30,10 +30,11 @@ extension _FileManagerPageObjectView on _FileManagerPageState {
       mountBucketName: _activeBucket,
       profileId: _activeConfig.profileId,
       showSyncStatus: true,
-      onOpenDirectory: (prefix) => unawaited(_navToPrefix(prefix)),
+      onOpenDirectory: (prefix) =>
+          unawaited(_openPresentationDirectory(prefix)),
       onOpenFile: (object) => unawaited(_openObject(object)),
       onDownloadFile: (object) => unawaited(_downloadObject(object)),
-      onNavigateUp: () => unawaited(_navUp()),
+      onNavigateUp: () => unawaited(_navigatePresentationUp()),
       onToggleSelection: _toggleObjectSelection,
       onSelectionSetChanged: _replaceSelectedObjects,
       onToggleSelectAll: _toggleSelectAllObjects,

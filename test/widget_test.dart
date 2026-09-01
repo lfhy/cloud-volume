@@ -37,8 +37,9 @@ import 'package:remote_storage/state/object_listing_notifier.dart';
 import 'package:remote_storage/state/sync_profile_notifier.dart';
 import 'package:remote_storage/widgets/file_manager_breadcrumb_bar.dart';
 import 'package:remote_storage/widgets/file_manager_action_bar.dart';
-import 'package:remote_storage/widgets/mobile_file_manager_surface.dart';
-import 'package:remote_storage/widgets/mobile_file_manager_browser.dart';
+import 'package:remote_storage/widgets/file_manager_bucket_browser.dart';
+import 'package:remote_storage/widgets/file_manager_object_browser.dart';
+import 'package:remote_storage/widgets/file_manager_trash_browser.dart';
 import 'package:remote_storage/widgets/mobile_navigation_bar.dart';
 
 void main() {
@@ -105,7 +106,6 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(FileManagerPage), findsOneWidget);
       expect(find.byType(MobileFileManagerPage), findsNothing);
-      expect(find.byType(MobileFileManagerSurface), findsNothing);
       expect(find.byType(FileManagerActionBar), findsOneWidget);
       expect(find.byType(FileManagerBreadcrumbBar), findsOneWidget);
       await tester.pumpWidget(const SizedBox.shrink());
@@ -622,9 +622,7 @@ void main() {
     },
   );
 
-  testWidgets('Android uses the touch-first file page without desktop tools', (
-    tester,
-  ) async {
+  testWidgets('Android reuses the desktop file-manager UX', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     try {
       SharedPreferences.setMockInitialValues({});
@@ -637,60 +635,34 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(MobileFileManagerPage), findsOneWidget);
-      expect(find.byType(MobileFileManagerSurface), findsOneWidget);
-      expect(find.byType(FileManagerActionBar), findsNothing);
-      expect(find.byType(FileManagerBreadcrumbBar), findsNothing);
+      expect(find.byType(FileManagerActionBar), findsOneWidget);
+      expect(find.byType(FileManagerBreadcrumbBar), findsOneWidget);
+      expect(find.byType(FileManagerBucketBrowser), findsOneWidget);
       expect(find.text('首页'), findsNothing);
       expect(find.text('设置'), findsOneWidget);
-      expect(find.byIcon(LucideIcons.settings2), findsOneWidget);
-      expect(
-        find.descendant(
-          of: find.byType(MobileFileManagerSurface),
-          matching: find.byType(SafeArea),
-        ),
-        findsOneWidget,
-      );
+      expect(find.byIcon(LucideIcons.settings2), findsAtLeastNWidgets(1));
+      expect(find.byType(SafeArea), findsAtLeastNWidgets(1));
+      expect(find.text('文件管理'), findsOneWidget);
+      expect(find.text('浏览和管理远程存储中的文件。'), findsOneWidget);
       expect(find.text('手机文件'), findsOneWidget);
 
-      final search = find.descendant(
-        of: find.byType(MobileFileManagerSurface),
-        matching: find.byType(ShadInput),
-      );
-      expect(tester.getSize(search).height, 48);
+      await tester.tap(find.byIcon(LucideIcons.search));
+      await tester.pumpAndSettle();
+      final search = find.byType(ShadInput).last;
       await tester.enterText(search, '没有匹配');
       await tester.pump();
       expect(find.text('没有匹配的存储桶'), findsOneWidget);
 
       await tester.enterText(search, '');
       await tester.pump();
-      final bucketRow = find
-          .ancestor(
-            of: find.text('手机文件'),
-            matching: find.byType(GestureDetector),
-          )
-          .first;
-      await tester.tap(bucketRow);
+      await tester.tap(find.text('手机文件'));
       await tester.pumpAndSettle();
       expect(find.byIcon(LucideIcons.settings2), findsOneWidget);
-      expect(find.byIcon(LucideIcons.plus), findsOneWidget);
-      await tester.tap(find.byIcon(LucideIcons.plus));
-      await tester.pumpAndSettle();
-      expect(find.text('上传文件'), findsOneWidget);
-      expect(find.text('新建文件夹'), findsOneWidget);
+      expect(find.text('上传'), findsOneWidget);
+      expect(find.text('新建目录'), findsOneWidget);
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
-      expect(find.byType(AppShadDialog), findsNothing);
-
-      expect(await tester.binding.handlePopRoute(), isTrue);
-      await tester.pumpAndSettle();
-      expect(find.text('手机文件'), findsOneWidget);
-      final menu = find.descendant(
-        of: bucketRow,
-        matching: find.byIcon(LucideIcons.ellipsisVertical),
-      );
-      await tester.tap(menu);
-      await tester.pumpAndSettle();
-      expect(find.byType(AppShadDialog), findsOneWidget);
+      expect(find.text('文件管理'), findsOneWidget);
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
@@ -752,7 +724,7 @@ void main() {
       await tester.tap(find.text('二级'));
       await tester.pumpAndSettle();
       expect(find.text('说明.txt'), findsOneWidget);
-      expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
+      expect(find.byIcon(LucideIcons.chevronLeft), findsNothing);
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
@@ -767,13 +739,13 @@ void main() {
       expect(find.text('二级'), findsOneWidget);
       expect(find.text('说明.txt'), findsNothing);
 
-      await tester.tap(find.byIcon(LucideIcons.chevronLeft));
+      expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
       expect(find.text('资料'), findsOneWidget);
 
-      await tester.tap(find.byIcon(LucideIcons.chevronLeft));
+      expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
-      expect(find.text('所有存储桶'), findsOneWidget);
+      expect(find.text('文件管理'), findsOneWidget);
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
@@ -850,7 +822,7 @@ void main() {
       tester.widget<MainLayoutPage>(find.byType(MainLayoutPage)).onRefresh();
       await tester.pumpAndSettle();
       expect(find.text('说明.txt'), findsOneWidget);
-      expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
+      expect(find.byIcon(LucideIcons.chevronLeft), findsNothing);
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
@@ -864,7 +836,7 @@ void main() {
       );
       expect(find.text('二级'), findsOneWidget);
 
-      await tester.tap(find.byIcon(LucideIcons.chevronLeft));
+      expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
       expect(find.text('资料'), findsOneWidget);
 
@@ -946,7 +918,7 @@ void main() {
 
       expect(find.text('说明.txt'), findsOneWidget);
       expect(api.objectPageConfigs.last.rootPrefix, 'new-root');
-      expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
+      expect(find.byIcon(LucideIcons.chevronLeft), findsNothing);
       final requestsBeforeBack = api.objectPageConfigs.length;
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
@@ -1017,9 +989,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('手机文件'));
         await tester.pumpAndSettle();
-        await tester.tap(find.byIcon(LucideIcons.plus));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('新建文件夹'));
+        await tester.tap(find.text('新建目录'));
         await tester.pumpAndSettle();
         await tester.enterText(find.byType(ShadInput).last, '不会创建');
 
@@ -1087,9 +1057,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('手机文件'));
         await tester.pumpAndSettle();
-        await tester.tap(find.byIcon(LucideIcons.plus));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('上传文件'));
+        await tester.tap(find.text('上传'));
         await tester.pump();
         await tester.pump();
 
@@ -1175,7 +1143,7 @@ void main() {
         await tester.tap(find.text('手机文件'));
         await tester.pumpAndSettle();
         final objectRow = find.byKey(
-          const ValueKey<String>('mobile-object-待下载目录/'),
+          const ValueKey<String>('file-object-待下载目录/'),
         );
         await tester.tap(
           find.descendant(
@@ -1245,7 +1213,7 @@ void main() {
       api.nextObjectPage = pendingObjects;
       await tester.tap(find.text('手机文件'));
       await tester.pump();
-      expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
+      expect(find.byIcon(LucideIcons.chevronLeft), findsNothing);
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
@@ -1257,13 +1225,13 @@ void main() {
             .selectedValue,
         SidebarItem.fileManager,
       );
-      expect(find.text('所有存储桶'), findsOneWidget);
+      expect(find.text('文件管理'), findsOneWidget);
 
       pendingObjects.complete(
         const ObjectListPage(items: <ObjectInfo>[], nextToken: ''),
       );
       await tester.pumpAndSettle();
-      expect(find.text('所有存储桶'), findsOneWidget);
+      expect(find.text('文件管理'), findsOneWidget);
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
@@ -1312,9 +1280,9 @@ void main() {
         api.nextObjectPagesByPrefix[''] = pendingBucket;
         await tester.tap(find.text('手机文件'));
         await tester.pump();
-        expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
+        expect(find.byIcon(LucideIcons.chevronLeft), findsNothing);
 
-        await tester.tap(find.byIcon(LucideIcons.chevronLeft));
+        expect(await tester.binding.handlePopRoute(), isTrue);
         await tester.pumpAndSettle();
         expect(
           tester
@@ -1324,7 +1292,7 @@ void main() {
               .selectedValue,
           SidebarItem.fileManager,
         );
-        expect(find.text('所有存储桶'), findsOneWidget);
+        expect(find.text('文件管理'), findsOneWidget);
 
         pendingBucket.complete(
           const ObjectListPage(
@@ -1340,7 +1308,7 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.text('所有存储桶'), findsOneWidget);
+        expect(find.text('文件管理'), findsOneWidget);
         expect(find.text('迟到桶响应.txt'), findsNothing);
 
         await tester.tap(find.text('手机文件'));
@@ -1351,9 +1319,9 @@ void main() {
         api.nextObjectPagesByPrefix['资料/'] = pendingDirectory;
         await tester.tap(find.text('资料'));
         await tester.pump();
-        expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
+        expect(find.byIcon(LucideIcons.chevronLeft), findsNothing);
 
-        await tester.tap(find.byIcon(LucideIcons.chevronLeft));
+        expect(await tester.binding.handlePopRoute(), isTrue);
         await tester.pumpAndSettle();
         expect(
           tester
@@ -1388,6 +1356,7 @@ void main() {
         RemoteTaskStore.instance.resetForTest();
         SyncProfileNotifier.instance.stop();
       } finally {
+        await tester.binding.setSurfaceSize(null);
         debugDefaultTargetPlatformOverride = null;
       }
     },
@@ -1438,7 +1407,7 @@ void main() {
       final pendingPage = Completer<ObjectListPage>();
       api.nextObjectPage = pendingPage;
       final list = find.descendant(
-        of: find.byType(MobileFileManagerBrowser),
+        of: find.byType(FileManagerObjectBrowser),
         matching: find.byType(Scrollable),
       );
       await tester.drag(list.first, const Offset(0, -10000));
@@ -1528,28 +1497,24 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('资料'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(LucideIcons.ellipsis));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('打开回收站'));
+      await tester.tap(find.widgetWithText(ShadButton, '回收站'));
       await tester.pumpAndSettle();
       expect(find.text('已删0.txt'), findsOneWidget);
 
       final pendingPage = Completer<TrashListPage>();
       api.nextTrashPage = pendingPage;
       final list = find.descendant(
-        of: find.byType(MobileFileManagerBrowser),
+        of: find.byType(FileManagerTrashBrowser),
         matching: find.byType(Scrollable),
       );
-      await tester.drag(list.first, const Offset(0, -1000));
+      await tester.drag(list.first, const Offset(0, -10000));
       await tester.pump();
       expect(api.nextTrashPage, isNull);
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
       expect(find.text('说明.txt'), findsOneWidget);
-      await tester.tap(find.byIcon(LucideIcons.ellipsis));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('打开回收站'));
+      await tester.tap(find.widgetWithText(ShadButton, '回收站'));
       await tester.pumpAndSettle();
       expect(find.text('已删0.txt'), findsOneWidget);
 
@@ -1637,17 +1602,13 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('资料'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(LucideIcons.ellipsis));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('打开回收站'));
+      await tester.tap(find.widgetWithText(ShadButton, '回收站'));
       await tester.pumpAndSettle();
 
       final pendingRestore = Completer<void>();
       api.nextRestoreTrashItem = pendingRestore;
-      await tester.tap(find.byIcon(LucideIcons.ellipsisVertical));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('恢复'));
-      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(LucideIcons.rotateCcw));
+      await tester.pump();
       expect(api.nextRestoreTrashItem, isNull);
 
       expect(await tester.binding.handlePopRoute(), isTrue);
@@ -1657,7 +1618,7 @@ void main() {
       pendingRestore.complete();
       await tester.pumpAndSettle();
       expect(find.text('说明.txt'), findsOneWidget);
-      expect(find.text('回收站 · 手机文件'), findsNothing);
+      expect(find.text('返回文件'), findsNothing);
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
@@ -1711,9 +1672,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('资料'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(LucideIcons.ellipsis));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('新建文件夹'));
+      await tester.tap(find.text('新建目录'));
       await tester.pumpAndSettle();
 
       final pendingCreate = Completer<void>();
@@ -1792,11 +1751,9 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('资料'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(LucideIcons.ellipsis));
+      await tester.tap(find.widgetWithText(ShadButton, '回收站'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('打开回收站'));
-      await tester.pumpAndSettle();
-      expect(find.text('回收站 · 手机文件'), findsOneWidget);
+      expect(find.text('返回文件'), findsOneWidget);
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
@@ -1846,9 +1803,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('手机文件'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(LucideIcons.ellipsisVertical));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('打开文件夹'));
+      await tester.tap(find.text('资料'));
       await tester.pumpAndSettle();
       expect(find.text('说明.txt'), findsOneWidget);
 
@@ -1906,11 +1861,11 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('同步说明.txt'), findsOneWidget);
-      expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
+      expect(find.byIcon(LucideIcons.chevronLeft), findsNothing);
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
-      expect(find.text('所有存储桶'), findsOneWidget);
+      expect(find.text('文件管理'), findsOneWidget);
       expect(
         tester
             .widget<MobileNavigationBar<SidebarItem>>(
@@ -1989,7 +1944,7 @@ void main() {
         await tester.pump();
         await tester.pump();
         expect(find.text('A-stale.txt'), findsNothing);
-        expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
+        expect(find.byIcon(LucideIcons.chevronLeft), findsNothing);
 
         pendingB.complete(
           const ObjectListPage(
@@ -2010,7 +1965,7 @@ void main() {
 
         expect(await tester.binding.handlePopRoute(), isTrue);
         await tester.pumpAndSettle();
-        expect(find.text('所有存储桶'), findsOneWidget);
+        expect(find.text('文件管理'), findsOneWidget);
 
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump();
@@ -2062,7 +2017,7 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.text('所有存储桶'), findsOneWidget);
+        expect(find.text('文件管理'), findsOneWidget);
         expect(find.text('加载中...'), findsNothing);
         expect(find.byIcon(LucideIcons.chevronLeft), findsNothing);
 
@@ -2080,7 +2035,7 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.text('所有存储桶'), findsOneWidget);
+        expect(find.text('文件管理'), findsOneWidget);
         expect(find.text('迟到响应.txt'), findsNothing);
 
         await tester.pumpWidget(const SizedBox.shrink());
@@ -2124,7 +2079,7 @@ void main() {
       );
       await tester.pump();
       await tester.pump();
-      expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
+      expect(find.byIcon(LucideIcons.chevronLeft), findsNothing);
       expect(api.objectPagePrefixes, isEmpty);
 
       expect(await tester.binding.handlePopRoute(), isTrue);
@@ -2141,7 +2096,7 @@ void main() {
 
       pendingBuckets.complete(const <BucketInfo>[BucketInfo(name: '手机文件')]);
       await tester.pumpAndSettle();
-      expect(find.text('所有存储桶'), findsOneWidget);
+      expect(find.text('文件管理'), findsOneWidget);
       expect(api.objectPagePrefixes, isEmpty);
 
       await tester.pumpWidget(const SizedBox.shrink());
@@ -2316,9 +2271,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('A-old.txt'), findsOneWidget);
 
-        await tester.tap(find.byIcon(LucideIcons.plus));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('上传文件'));
+        await tester.tap(find.text('上传'));
         await tester.pump();
         await tester.pump();
         expect(api.nextUploadFile, isNull);
@@ -2416,7 +2369,7 @@ void main() {
         await tester.tap(find.text('手机文件'));
         await tester.pumpAndSettle();
 
-        final objectRow = find.byKey(const ValueKey('mobile-object-待删除.txt'));
+        final objectRow = find.byKey(const ValueKey('file-object-待删除.txt'));
         await tester.tap(
           find.descendant(
             of: objectRow,
@@ -2440,15 +2393,13 @@ void main() {
         );
         backgroundButton.onPressed!();
         await tester.pumpAndSettle();
-        await tester.tap(find.byIcon(LucideIcons.ellipsis));
+        await tester.tap(find.widgetWithText(ShadButton, '回收站'));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('打开回收站'));
-        await tester.pumpAndSettle();
-        expect(find.text('回收站 · 手机文件'), findsOneWidget);
+        expect(find.text('返回文件'), findsOneWidget);
 
         pendingDelete.complete();
         await tester.pumpAndSettle();
-        expect(find.text('回收站 · 手机文件'), findsOneWidget);
+        expect(find.text('返回文件'), findsOneWidget);
         expect(find.text('待删除.txt'), findsNothing);
 
         await tester.pumpWidget(const SizedBox.shrink());
@@ -2471,7 +2422,7 @@ void main() {
       try {
         SharedPreferences.setMockInitialValues({});
         final initialItems = List<ObjectInfo>.generate(
-          12,
+          32,
           (index) => ObjectInfo(
             key: '资料/原页$index.txt',
             size: 24,
@@ -2480,7 +2431,7 @@ void main() {
           ),
         );
         final refreshedItems = List<ObjectInfo>.generate(
-          12,
+          32,
           (index) => ObjectInfo(
             key: '资料/刷新后$index.txt',
             size: 24,
@@ -2512,10 +2463,10 @@ void main() {
         final pendingPage = Completer<ObjectListPage>();
         api.nextObjectPage = pendingPage;
         final list = find.descendant(
-          of: find.byType(MobileFileManagerBrowser),
+          of: find.byType(FileManagerObjectBrowser),
           matching: find.byType(Scrollable),
         );
-        await tester.drag(list.first, const Offset(0, -1000));
+        await tester.drag(list.first, const Offset(0, -10000));
         await tester.pump();
         expect(api.nextObjectPage, isNull);
 
@@ -2542,7 +2493,15 @@ void main() {
         await tester.pumpAndSettle();
         await tester.drag(list.first, const Offset(0, 1000));
         await tester.pump();
-        expect(find.text('刷新后0.txt'), findsOneWidget);
+        expect(
+          tester
+              .widget<FileManagerObjectBrowser>(
+                find.byType(FileManagerObjectBrowser),
+              )
+              .objects
+              .map((item) => item.key),
+          contains('资料/刷新后0.txt'),
+        );
 
         pendingPage.complete(
           const ObjectListPage(
@@ -2562,7 +2521,7 @@ void main() {
 
         final freshPage = Completer<ObjectListPage>();
         api.nextObjectPage = freshPage;
-        await tester.drag(list.first, const Offset(0, -1000));
+        await tester.drag(list.first, const Offset(0, -10000));
         await tester.pump();
         expect(api.nextObjectPage, isNull);
         freshPage.complete(
@@ -2602,7 +2561,7 @@ void main() {
       try {
         SharedPreferences.setMockInitialValues({});
         final initialItems = List<ObjectInfo>.generate(
-          12,
+          32,
           (index) => ObjectInfo(
             key: '资料/初始$index.txt',
             size: 24,
@@ -2632,11 +2591,11 @@ void main() {
         await tester.pumpAndSettle();
 
         final list = find.descendant(
-          of: find.byType(MobileFileManagerBrowser),
+          of: find.byType(FileManagerObjectBrowser),
           matching: find.byType(Scrollable),
         );
         api.nextObjectPage = stalePageTwo;
-        await tester.drag(list.first, const Offset(0, -1000));
+        await tester.drag(list.first, const Offset(0, -10000));
         await tester.pump();
         expect(api.nextObjectPage, isNull);
 
@@ -2666,7 +2625,7 @@ void main() {
         api.nextObjectPage = freshPageTwo;
         await tester.drag(list.first, const Offset(0, 1000));
         await tester.pump();
-        await tester.drag(list.first, const Offset(0, -1000));
+        await tester.drag(list.first, const Offset(0, -10000));
         await tester.pump();
         expect(api.nextObjectPage, isNull);
 
@@ -2740,7 +2699,7 @@ void main() {
       try {
         SharedPreferences.setMockInitialValues({});
         final initialItems = List<ObjectInfo>.generate(
-          12,
+          32,
           (index) => ObjectInfo(
             key: '初始$index.txt',
             size: 24,
@@ -2762,37 +2721,30 @@ void main() {
         await tester.pumpAndSettle();
 
         final list = find.descendant(
-          of: find.byType(MobileFileManagerBrowser),
+          of: find.byType(FileManagerObjectBrowser),
           matching: find.byType(Scrollable),
         );
         api.nextObjectPage = stalePageTwo;
-        await tester.drag(list.first, const Offset(0, -1000));
+        await tester.drag(list.first, const Offset(0, -10000));
         await tester.pump();
         expect(api.nextObjectPage, isNull);
 
-        final objectRow = find.byKey(const ValueKey('mobile-object-初始11.txt'));
+        await tester.drag(list.first, const Offset(0, 10000));
+        await tester.pump();
+        final objectRow = find.byKey(const ValueKey('file-object-初始11.txt'));
         await tester.ensureVisible(objectRow);
-        final objectMenu = find.descendant(
-          of: objectRow,
-          matching: find.byIcon(LucideIcons.ellipsisVertical),
-        );
-        await tester.tap(objectMenu);
+        await tester.longPress(objectRow);
         // Page two deliberately remains pending, so do not settle its spinner.
         await tester.pump(const Duration(milliseconds: 320));
-        final renameButton = tester.widget<ShadButton>(
-          find.ancestor(
-            of: find.text('重命名'),
-            matching: find.byType(ShadButton),
-          ),
-        );
-        renameButton.onPressed!();
+        await tester.tap(find.text('重命名'));
         await tester.pump(const Duration(milliseconds: 320));
         await tester.enterText(find.byType(ShadInput).last, '失败后重命名.txt');
         api.nextRenameObject = failedRename;
-        final saveButton = tester.widget<ShadButton>(
-          find.ancestor(of: find.text('保存'), matching: find.byType(ShadButton)),
+        final saveButton = find.descendant(
+          of: find.byType(AppShadDialog),
+          matching: find.widgetWithText(ShadButton, '保存'),
         );
-        saveButton.onPressed!();
+        tester.widget<ShadButton>(saveButton).onPressed!();
         await tester.pump();
         expect(api.nextRenameObject, isNull);
 
@@ -2831,7 +2783,7 @@ void main() {
         api.nextObjectPage = freshPageTwo;
         await tester.drag(list.first, const Offset(0, 1000));
         await tester.pump();
-        await tester.drag(list.first, const Offset(0, -1000));
+        await tester.drag(list.first, const Offset(0, -10000));
         await tester.pump();
         expect(api.nextObjectPage, isNull);
         freshPageTwo.complete(
@@ -2915,18 +2867,16 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('手机文件'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(LucideIcons.ellipsis));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('打开回收站'));
+      await tester.tap(find.widgetWithText(ShadButton, '回收站'));
       await tester.pumpAndSettle();
 
       final pendingPage = Completer<TrashListPage>();
       api.nextTrashPage = pendingPage;
       final list = find.descendant(
-        of: find.byType(MobileFileManagerBrowser),
+        of: find.byType(FileManagerTrashBrowser),
         matching: find.byType(Scrollable),
       );
-      await tester.drag(list.first, const Offset(0, -1000));
+      await tester.drag(list.first, const Offset(0, -10000));
       await tester.pump();
       expect(api.nextTrashPage, isNull);
       await tester.binding.setSurfaceSize(const Size(800, 2400));
@@ -2934,12 +2884,7 @@ void main() {
 
       final refreshedPage = Completer<TrashListPage>();
       api.nextTrashPage = refreshedPage;
-      await tester.tap(find.byIcon(LucideIcons.ellipsisVertical).first);
-      await tester.pump(const Duration(milliseconds: 300));
-      final restoreButton = tester.widget<ShadButton>(
-        find.ancestor(of: find.text('恢复'), matching: find.byType(ShadButton)),
-      );
-      restoreButton.onPressed!();
+      await tester.tap(find.byIcon(LucideIcons.rotateCcw).first);
       await tester.pump();
       expect(api.nextTrashPage, isNull);
 
@@ -3031,26 +2976,24 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('手机文件'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(LucideIcons.ellipsis));
+      await tester.tap(find.widgetWithText(ShadButton, '回收站'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('打开回收站'));
-      await tester.pumpAndSettle();
-      expect(find.text('回收站 · 手机文件'), findsOneWidget);
+      expect(find.text('返回文件'), findsOneWidget);
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
       expect(find.text('说明.txt'), findsOneWidget);
-      expect(find.text('回收站 · 手机文件'), findsNothing);
+      expect(find.text('返回文件'), findsNothing);
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
-      expect(find.text('所有存储桶'), findsOneWidget);
+      expect(find.text('文件管理'), findsOneWidget);
 
       await tester.tap(find.text('账号'));
       await tester.pumpAndSettle();
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
-      expect(find.text('所有存储桶'), findsOneWidget);
+      expect(find.text('文件管理'), findsOneWidget);
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pump();

@@ -269,27 +269,13 @@ class FileManagerObjectBrowser extends StatelessWidget {
                   return _buildListLoadingRow(theme);
                 }
                 final object = objects[index];
-                return _selectionTarget(
+                return _buildListObjectRow(
+                  context,
                   object,
-                  _wrapWithContextMenu(
-                    object,
-                    FileListTile(
-                      leading: _leading(object, theme, listIconSize),
-                      title: _title(object),
-                      sizeLabel: _sizeLabel(object),
-                      statusWidget: _syncBadge(object, tasks),
-                      modifiedLabel: _modifiedLabel(object),
-                      onTap: _tapHandler(object),
-                      onDoubleTap: null,
-                      onTitleTap: _titleTapHandler(object),
-                      onSelectionTap: _selectionTapHandler(object),
-                      isSelected: _isSelected(object),
-                      showSelectionControl: _showsSelectionControl(object),
-                      showDivider: index != objects.length - 1 || loadingMore,
-                      deleting: _isDeleting(object),
-                      compact: compact,
-                    ),
-                  ),
+                  theme,
+                  tasks,
+                  index,
+                  compact,
                 );
               },
             ),
@@ -418,7 +404,11 @@ class FileManagerObjectBrowser extends StatelessWidget {
     };
   }
 
-  Widget _wrapWithContextMenu(ObjectInfo object, Widget child) {
+  Widget _wrapWithContextMenu(
+    ObjectInfo object,
+    Widget child, {
+    DesktopContextMenuHandle? handle,
+  }) {
     if (_isParentDirectory(object)) {
       return child;
     }
@@ -428,6 +418,7 @@ class FileManagerObjectBrowser extends StatelessWidget {
     return DesktopContextMenuRegion(
       groupId: _objectContextMenuGroup,
       items: _buildObjectMenuItems(object),
+      handle: handle,
       onSecondaryTapDown: _secondaryTapHandler(object),
       child: child,
     );

@@ -105,7 +105,7 @@ extension _FileManagerPageTrash on _FileManagerPageState {
     int sourceListingViewGeneration,
   ) {
     if (!mounted) return false;
-    if (widget.viewBuilder != null) {
+    if (_usesMobileNavigation) {
       // The logical trash location may keep its ID after a profile refresh,
       // but only the rebound entry is allowed to reload it.
       return !_mobileInputRefreshNeedsRebind &&

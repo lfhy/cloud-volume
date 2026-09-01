@@ -53,7 +53,7 @@ class _FileManagerLoadingSnapshot {
 
 extension _FileManagerPageSyncNav on _FileManagerPageState {
   void _recordDesktopListingResumeTarget(_DesktopListingResumeTarget target) {
-    if (widget.viewBuilder == null) {
+    if (!_usesMobileNavigation) {
       _desktopListingResumeTarget = target;
     }
   }
@@ -63,7 +63,7 @@ extension _FileManagerPageSyncNav on _FileManagerPageState {
     int ticket,
   ) {
     final generation = ++_pendingSyncRemoteOpenGeneration;
-    if (widget.viewBuilder != null) {
+    if (_usesMobileNavigation) {
       _beginPendingMobileSyncRemoteOpen(request, ticket);
     } else {
       _beginPendingDesktopSyncRemoteOpen(generation);
@@ -204,7 +204,7 @@ extension _FileManagerPageSyncNav on _FileManagerPageState {
   ) =>
       mounted &&
       generation == _pendingSyncRemoteOpenGeneration &&
-      (widget.viewBuilder == null
+      (!_usesMobileNavigation
           ? _activeDesktopSyncRemoteOpenGeneration == generation
           : (identical(_activeMobileSyncRemoteOpen, request) &&
                 _activeMobileSyncRemoteOpenTicket == ticket));
@@ -247,7 +247,7 @@ extension _FileManagerPageSyncNav on _FileManagerPageState {
     final accepted =
         widget.onPendingSyncRemoteOpenConsumed?.call(request, ticket) ?? true;
     if (!accepted) return false;
-    if (widget.viewBuilder == null) {
+    if (!_usesMobileNavigation) {
       _finishPendingDesktopSyncRemoteOpen(
         generation,
         restoreSnapshot: restoreDesktopSnapshot,
@@ -271,7 +271,7 @@ extension _FileManagerPageSyncNav on _FileManagerPageState {
     int generation,
   ) async {
     final toastContext = context;
-    if (widget.viewBuilder != null &&
+    if (_usesMobileNavigation &&
         !await _ensureMobileFileManagerInputRebound()) {
       return;
     }
@@ -305,7 +305,7 @@ extension _FileManagerPageSyncNav on _FileManagerPageState {
         toastContext,
         message: '未找到同步配置对应的存储桶（${request.bucket}）',
       );
-      final mobileOrigin = widget.viewBuilder == null
+      final mobileOrigin = !_usesMobileNavigation
           ? null
           : _mobileSyncRemoteOpenOrigin;
       final finished = _finishPendingSyncRemoteOpen(
@@ -324,7 +324,7 @@ extension _FileManagerPageSyncNav on _FileManagerPageState {
       return;
     }
     final prefix = _normalizeSyncRemotePrefix(request.remotePrefix);
-    final ok = widget.viewBuilder == null
+    final ok = !_usesMobileNavigation
         ? await _loadObjects(
             entry,
             prefix,

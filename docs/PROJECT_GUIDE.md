@@ -4,6 +4,12 @@
 
 ---
 
+## 2026-09-01 Android 文件管理回归桌面 UX(app_shell 域)
+
+截图审计确认独立 Android 页面已让标题、搜索、列表、操作入口和视图模式偏离桌面文件管理器。移动页改为无状态入口，直接复用 `FileManagerWorkspace` 的桌面呈现；仅保留安全区、系统 Back 位置栈及共享对象菜单的触摸入口。现行文件集与约束见 [app_shell](features/app_shell.md)，设计取舍见 [Agent Note](notes/implemented/architecture/2026-08-31-mobile-file-manager-presentation.md)。
+
+---
+
 ## 2026-08-31 Android 文件页返回与桶图标回归(app_shell 域)
 
 用户反馈移动桶行未沿用旧图标，且在二级文件页、桶或桶回收站的加载/错误期没有可用的左上返回；这时 Android 系统 Back 落入 `TabNavHistory`，会跳到另一个一级页。审计确认 Android 旧图标是 LocalCloudPan `sidebar/bucket.svg`，而新移动列表误换成 WhiteSur 存储桶图标；普通对象行也沿用 `LocalCloudPanFileIcon`。

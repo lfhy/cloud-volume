@@ -18,7 +18,7 @@
 - `go/config/paths_mobile_test.go` - 钉住 `SetAppDataRoot` 覆盖与空路径拒绝语义。
 - `lib/bridge/remote_storage_bridge.dart` - Android 打开打包的 `libremote_storage_bridge.so` 并在配置调用前初始化该 app-data root。
 - `lib/app/app_entry_io.dart` / `lib/app/remote_storage_app.dart` / `lib/pages/app_bootstrap_page.dart` / `lib/services/remote_storage_api_desktop.dart` / `remote_storage_gateway.dart` - 把 `desktop_multi_window`、`window_manager`、桌面 chrome、挂载、外部文件打开、本地目录同步、WebDAV 启动挡在移动启动外,暴露其余移动能力。
-- `third_party/super_native_extensions` / `third_party/irondash_engine_context` / `lib/services/desktop_file_transfer_service_io.dart` / `lib/widgets/file_transfer_clipboard_region.dart` / `lib/pages/file_manager_page.dart` / `mobile_file_manager_page.dart` - 桌面保留 Git 恢复的原生拖放与 file URI 剪贴板实现,仅移除 Android 插件注册。`FileManagerPage` 的 `_buildFileTransferSurface` 只包裹桌面表面;Android 选择 `MobileFileManagerPage` 的独立 workspace view，不创建 `DropRegion`,继续用选择器上传。
+- `third_party/super_native_extensions` / `third_party/irondash_engine_context` / `lib/services/desktop_file_transfer_service_io.dart` / `lib/widgets/file_transfer_clipboard_region.dart` / `lib/pages/file_manager_page.dart` / `file_manager_page_presentation.dart` / `mobile_file_manager_page.dart` - 桌面保留 Git 恢复的原生拖放与 file URI 剪贴板实现,仅移除 Android 插件注册。Android 通过 `MobileFileManagerPage` 复用 `FileManagerWorkspace` 的桌面文件管理呈现，不创建 `DropRegion`,继续用选择器上传；长按和行尾 `…` 触发同一对象菜单。
 - `lib/services/file_access_service_io.dart` / `file_access_service_downloads_io.dart` - 桌面用 `file_selector` 获得可写、用户可改名的保存路径而不在 Dart 缓冲下载;Android 持续流入应用临时目录,直到单独的 Storage Access Framework 实现落地。
 - `README.md` - 记录引导、移动能力、限制与 APK 构建命令。
 

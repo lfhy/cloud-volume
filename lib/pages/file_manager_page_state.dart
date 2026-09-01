@@ -7,7 +7,7 @@ extension _FileManagerPageDerivedState on _FileManagerPageState {
   /// trash, or pagination response cannot take over a newer view.
   int _beginListingViewRequest() {
     final generation = ++_listingViewGeneration;
-    if (widget.viewBuilder != null) {
+    if (_usesMobileNavigation) {
       // Mutations retain this generation. Unlike navigation, input generation
       // changes only for fresh bootstrap/profile data and rejects old configs.
       _mobileInputGenerationByListingView[generation] = _mobileInputGeneration;
@@ -27,7 +27,7 @@ extension _FileManagerPageDerivedState on _FileManagerPageState {
     _MobileFileManagerLocation location, {
     int? epoch,
   }) {
-    if (widget.viewBuilder == null) return null;
+    if (!_usesMobileNavigation) return null;
     return _MobileFileManagerRequest(
       location: location,
       epoch: epoch ?? _mobileNavigationEpoch,
@@ -72,7 +72,7 @@ extension _FileManagerPageDerivedState on _FileManagerPageState {
     FileManagerBucketEntry bucketEntry,
     int inputGeneration,
   ) {
-    if (widget.viewBuilder == null) return true;
+    if (!_usesMobileNavigation) return true;
     return !_mobileInputRefreshNeedsRebind &&
         inputGeneration == _mobileInputGeneration &&
         (_buckets?.any((entry) => identical(entry, bucketEntry)) ?? false);
@@ -89,7 +89,7 @@ extension _FileManagerPageDerivedState on _FileManagerPageState {
     if (!mounted || !_isCurrentListingViewRequest(sourceListingViewGeneration)) {
       return false;
     }
-    if (widget.viewBuilder != null) {
+    if (_usesMobileNavigation) {
       return _isCurrentMobileBucketEntry(bucketEntry, inputGeneration);
     }
     return identical(_activeBucketEntry, bucketEntry) ||

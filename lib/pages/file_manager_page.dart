@@ -24,6 +24,7 @@ import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:remote_storage/widgets/app_toast.dart';
 import 'package:remote_storage/widgets/bucket_settings_dialog.dart';
 import 'package:remote_storage/state/object_listing_notifier.dart';
+import 'package:remote_storage/state/mobile_file_manager_navigation.dart';
 import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/state/share_records_notifier.dart';
 import 'package:remote_storage/state/transfer_queue.dart';
@@ -59,6 +60,8 @@ part 'file_manager_page_bucket_view.dart';
 part 'file_manager_page_downloads.dart';
 part 'file_manager_page_mount.dart';
 part 'file_manager_page_mobile_rebind.dart';
+part 'file_manager_page_presentation_navigation.dart';
+part 'file_manager_page_presentation.dart';
 part 'file_manager_page_object_loading.dart';
 part 'file_manager_page_object_view.dart';
 part 'file_manager_page_object_deletes.dart';
@@ -203,10 +206,20 @@ class _FileManagerPageState extends State<FileManagerWorkspace> {
       <String, RemoteTaskStatus>{};
   bool _metadataTaskRefreshInFlight = false;
 
+  bool get _usesMobileNavigation => widget.mobileNavigation;
+
+  void _bindMobileNavigation() {
+    if (_usesMobileNavigation) {
+      widget.navigation?.bind(_handleMobileFileManagerBack);
+    }
+  }
+
   // Keep setState inside the State subclass; view extensions only coordinate UI.
   void _replaceBucketsAfterReorder(List<FileManagerBucketEntry> buckets) {
     setState(() => _buckets = buckets);
   }
+
+  void _toggleGridView() => setState(() => _isGrid = !_isGrid);
 
   @override
   void initState() {
@@ -218,6 +231,7 @@ class _FileManagerPageState extends State<FileManagerWorkspace> {
     ObjectListingNotifier.instance.addListener(_handleObjectListingMutation);
     RemoteTaskStore.instance.addListener(_handleUploadTaskRefresh);
     _startMountStatusRefreshTimer();
+    _bindMobileNavigation();
     _loadBuckets();
     if (ClipboardShortcutChannel.instance.isSupported) {
       ClipboardShortcutChannel.instance.start(
@@ -242,15 +256,20 @@ class _FileManagerPageState extends State<FileManagerWorkspace> {
     RemoteTaskStore.instance.removeListener(_handleUploadTaskRefresh);
     _contentScrollController.dispose();
     _searchController.dispose();
+    widget.navigation?.clear();
     super.dispose();
   }
 
   @override
   void didUpdateWidget(covariant FileManagerWorkspace oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.navigation != widget.navigation) {
+      oldWidget.navigation?.clear();
+      _bindMobileNavigation();
+    }
     if (oldWidget.config != widget.config ||
         oldWidget.profiles != widget.profiles) {
-      if (widget.viewBuilder == null) {
+      if (!_usesMobileNavigation) {
         _mobileLocationHistory.clear();
         _mobileLocation = const _MobileFileManagerLocation.bucketList();
         _mobileNavigationEpoch++;
@@ -263,7 +282,7 @@ class _FileManagerPageState extends State<FileManagerWorkspace> {
     }
     final pending = widget.pendingSyncRemoteOpen;
     if (pending == null) {
-      if (widget.viewBuilder == null) {
+      if (!_usesMobileNavigation) {
         _cancelPendingDesktopSyncRemoteOpen();
       } else {
         _cancelPendingMobileSyncRemoteOpen(notifyParent: false);
@@ -318,179 +337,5 @@ class _FileManagerPageState extends State<FileManagerWorkspace> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-    final viewBuilder = widget.viewBuilder;
-    if (viewBuilder != null) {
-      return viewBuilder(context, FileManagerWorkspaceController._(this));
-    }
-    return Padding(
-      padding: const EdgeInsets.only(top: 56, left: 32, right: 32, bottom: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildHeader(theme),
-          const SizedBox(height: 16),
-          Expanded(child: _buildFileTransferSurface(theme)),
-        ],
-      ),
-    );
-  }
-
-  // Native desktop drop APIs are only mounted around the desktop presentation.
-  Widget _buildFileTransferSurface(ShadThemeData theme) {
-    final content = _buildContentWithMountLoading(theme);
-    if (!isDesktopPlatform && !isWebPlatform) {
-      return content;
-    }
-    return FileTransferClipboardRegion(
-      enabled: _acceptsFileTransferInput,
-      acceptsLocalFiles: _currentDirectoryWritable,
-      onPasteLocalFiles: (paths) => unawaited(_uploadLocalPaths(paths)),
-      onCopySelection: () => unawaited(_copySelectedObjectsToClipboard()),
-      child: content,
-    );
-  }
-
-  Widget _buildHeader(ShadThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (_isTrashHome) ...[
-          Text(
-            '回收站',
-            style: theme.textTheme.h3.copyWith(
-              fontWeight: FontWeight.w700,
-              fontSize: 22,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            _showTrash ? '管理当前存储桶中的已删除对象。' : '选择一个存储桶进入它的回收站。',
-            style: TextStyle(
-              color: theme.colorScheme.mutedForeground,
-              fontSize: 13,
-            ),
-          ),
-          const SizedBox(height: 14),
-        ],
-        FileManagerBreadcrumbBar(
-          theme: theme,
-          activeBucket: _activeBucketLabel,
-          breadcrumbs: _breadcrumbs,
-          onOpenBucketList: () => unawaited(_loadBuckets(force: true)),
-          onOpenBucketRoot: () => unawaited(_navToBucket(_activeBucketEntry!)),
-          onOpenCrumb: (index) => unawaited(_navCrumb(index)),
-        ),
-        const SizedBox(height: 12),
-        FileManagerActionBar(
-          theme: theme,
-          isGrid: _isGrid,
-          searchController: _searchController,
-          searchEnabled: !_loading,
-          searchPlaceholder: _showTrash
-              ? '搜索回收站名称或原路径'
-              : _activeBucket == null
-              ? '搜索存储桶'
-              : '搜索文件或目录',
-          selectedCount: _selectedObjectKeys.length,
-          batchDownloadEnabled: _selectedObjects.any((object) => !object.isDir),
-          showingTrash: _showTrash,
-          onToggleView: () => setState(() => _isGrid = !_isGrid),
-          trashCloseLabel: _isTrashHome ? '返回存储桶' : '返回文件',
-          onOpenTrash:
-              _isTrashHome ||
-                  _activeBucket == null ||
-                  _loading ||
-                  _showTrash ||
-                  !_activeBucketTrashEnabled
-              ? null
-              : () => _openBucketTrash(),
-          onCloseTrash: _activeBucket == null || _loading || !_showTrash
-              ? null
-              : _closeBucketTrash,
-          onClearTrash:
-              _activeBucket == null ||
-                  _loading ||
-                  !_showTrash ||
-                  (_trashItems?.isEmpty ?? true)
-              ? null
-              : _clearBucketTrash,
-          onCreateDirectory:
-              _showTrash ||
-                  _activeBucket == null ||
-                  _loading ||
-                  !_currentDirectoryWritable
-              ? null
-              : _createDirectory,
-          onUpload:
-              _showTrash ||
-                  _activeBucket == null ||
-                  _loading ||
-                  !_currentDirectoryWritable
-              ? null
-              : _upload,
-          onBatchDownload: _loading ? null : _downloadSelectedObjects,
-          onBatchDelete: _loading || !_currentBucketWritable
-              ? null
-              : _deleteSelectedObjects,
-          onClearSelection: _clearSelection,
-        ),
-      ],
-    );
-  }
-
-  Widget _buildContent(ShadThemeData theme) {
-    if (_loading) {
-      return _buildLoadingView(theme);
-    }
-    if (_error != null) {
-      return FileManagerErrorView(
-        theme: theme,
-        message: _error!,
-        onRetry: _activeBucket == null
-            ? () => unawaited(_loadBuckets(force: true))
-            : () => unawaited(
-                _loadObjects(_activeBucketEntry!, _prefix, forceRefresh: true),
-              ),
-        secondaryActionLabel: _activeBucket == null ? '账号管理' : null,
-        onSecondaryAction: _activeBucket == null
-            ? () => widget.onOpenAccountManagement?.call()
-            : null,
-      );
-    }
-    if (_activeBucket == null) return _buildBucketView(theme);
-    if (_showTrash) return _buildTrashView(theme);
-    return _buildObjectView(theme);
-  }
-
-  Widget _buildLoadingView(ShadThemeData theme) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const AppLoadingIndicator(size: 22, strokeWidth: 2.4),
-          const SizedBox(height: 12),
-          Text(
-            _loadingMessage,
-            style: theme.textTheme.p.copyWith(fontWeight: FontWeight.w600),
-          ),
-          if (_loadingDetail != null) ...[
-            const SizedBox(height: 6),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 360),
-              child: Text(
-                _loadingDetail!,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: theme.colorScheme.mutedForeground,
-                  fontSize: 13,
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => _buildWorkspacePresentation(context);
 }

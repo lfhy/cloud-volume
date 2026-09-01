@@ -2,13 +2,6 @@
 
 part of 'file_manager_page.dart';
 
-/// Lets a platform page render the shared file-browser state with its own UI.
-typedef FileManagerWorkspaceViewBuilder =
-    Widget Function(
-      BuildContext context,
-      FileManagerWorkspaceController workspace,
-    );
-
 /// A logical Android file location. It is committed before a remote request
 /// completes so Back can return from loading and error states as well.
 enum _MobileFileManagerLocationKind { bucketList, objects, trash }
@@ -75,9 +68,8 @@ class _ReboundMobileFileManagerLocations {
   final List<_MobileFileManagerLocation> history;
 }
 
-/// Shared file-browser runtime. It owns loading and mutations, but not a
-/// platform's chrome: desktop uses the default renderer and Android supplies
-/// [viewBuilder] from its dedicated page.
+/// Shared file-browser runtime. Desktop UX is the canonical renderer; Android
+/// enables its navigation semantics without introducing a second page surface.
 class FileManagerWorkspace extends StatefulWidget {
   const FileManagerWorkspace({
     super.key,
@@ -90,7 +82,8 @@ class FileManagerWorkspace extends StatefulWidget {
     this.pendingSyncRemoteOpenGeneration = 0,
     this.onPendingSyncRemoteOpenConsumed,
     this.onOpenAccountManagement,
-    this.viewBuilder,
+    this.mobileNavigation = false,
+    this.navigation,
   });
 
   final RemoteStorageGateway api;
@@ -102,254 +95,16 @@ class FileManagerWorkspace extends StatefulWidget {
   final int pendingSyncRemoteOpenGeneration;
   final SyncRemoteOpenConsumer? onPendingSyncRemoteOpenConsumed;
   final VoidCallback? onOpenAccountManagement;
-  final FileManagerWorkspaceViewBuilder? viewBuilder;
+  final bool mobileNavigation;
+  final MobileFileManagerNavigation? navigation;
 
   @override
   State<FileManagerWorkspace> createState() => _FileManagerPageState();
 }
 
-/// Public, read-only view of the shared workspace plus its user actions.
-///
-/// It deliberately exposes no desktop widgets. A mobile page can choose its
-/// own hierarchy while uploads, destructive operations, and navigation retain
-/// the one established implementation.
-class FileManagerWorkspaceController {
-  const FileManagerWorkspaceController._(this._state);
-
-  final _FileManagerPageState _state;
-
-  TextEditingController get searchController => _state._searchController;
-  ScrollController get contentScrollController =>
-      _state._contentScrollController;
-  bool get isLoading => _state._loading;
-  String get loadingMessage => _state._loadingMessage;
-  String? get loadingDetail => _state._loadingDetail;
-  String? get error => _state._error;
-  bool get isShowingTrash => _state._showTrash;
-  bool get isTrashHome => _state._isTrashHome;
-  bool get hasActiveBucket => _state._activeBucketEntry != null;
-  bool get isAtBucketRoot => _state._prefix.isEmpty;
-  bool get hasSearchQuery => _state._hasSearchQuery;
-  bool get currentDirectoryWritable => _state._currentDirectoryWritable;
-  bool get currentBucketWritable => _state._currentBucketWritable;
-  bool get activeBucketTrashEnabled => _state._activeBucketTrashEnabled;
-  bool get activeBucketReadOnly => _state._activeBucketReadOnly;
-  bool get supportsDirectoryDownload =>
-      _state.widget.api.capabilities.supportsDownloadDirectory;
-  bool get supportsShareLinks => _state._activeConfig.supportsShareLinks;
-  bool get canOpenAccountManagement =>
-      _state.widget.onOpenAccountManagement != null;
-  bool get hasTrashItems => _state._trashItems?.isNotEmpty ?? false;
-  bool get hasSelectedObjects => _state._selectedObjectKeys.isNotEmpty;
-  bool get hasPendingSyncRemoteOpen =>
-      _state._activeMobileSyncRemoteOpen != null;
-  bool get canNavigateBack => _state._canHandleMobileFileManagerBack;
-  bool get isInputRebindPending =>
-      _state._mobileInputRefreshNeedsRebind ||
-      _state._mobileInputRebind != null;
-  bool get objectsHasMore => _state._objectsHasMore;
-  bool get pagingObjects => _state._pagingObjects;
-  bool get trashHasMore => _state._trashHasMore;
-  bool get pagingTrash => _state._pagingTrash;
-  int get unavailableSourceCount => _state._unavailableBucketSources.length;
-
-  List<FileManagerBucketEntry> get buckets => _state._filteredBuckets;
-  List<TrashItem> get trashItems => _state._filteredTrashItems;
-  FileManagerBucketEntry? get activeBucketEntry => _state._activeBucketEntry;
-  List<String> get breadcrumbs =>
-      List<String>.unmodifiable(_state._breadcrumbs);
-  List<ObjectInfo> get visibleObjects => _state._filteredVisibleObjects;
-  Set<String> get selectedObjectKeys =>
-      Set<String>.unmodifiable(_state._selectedObjectKeys);
-  List<ObjectInfo> get selectedObjects => _state._selectedObjects;
-
-  Future<bool> handleSystemBack() => _state._handleMobileFileManagerBack();
-
-  Future<void> navigateBack() async => await handleSystemBack();
-
-  Future<void> refresh() async {
-    if (_state._mobileInputRefreshNeedsRebind &&
-        _state._mobileInputRebind == null) {
-      _state._scheduleMobileFileManagerInputRebind();
-    }
-    if (!await _state._ensureMobileFileManagerInputRebound()) return;
-    await _state._loadMobileFileManagerLocation(
-      _state._mobileLocation,
-      forceRefresh: true,
-    );
-  }
-
-  Future<void> openBucket(FileManagerBucketEntry bucket) async {
-    final inputGeneration = _state._mobileInputGeneration;
-    if (!await _hasCurrentMobileInput(inputGeneration)) return;
-    final currentBucket = _bucketById(bucket.id);
-    if (currentBucket == null) return;
-    await _pushAndLoad(_MobileFileManagerLocation.objects(currentBucket, ''));
-  }
-
-  Future<void> openDirectory(String prefix) async {
-    final bucket = _state._activeBucketEntry;
-    if (bucket == null ||
-        !await _canUseMobileLocation(
-          _MobileFileManagerLocation.objects(bucket, _state._prefix),
-        )) {
-      return;
-    }
-    await _pushAndLoad(_MobileFileManagerLocation.objects(bucket, prefix));
-  }
-
-  Future<void> openFile(ObjectInfo object) async {
-    final bucket = _state._activeBucketEntry;
-    if (bucket == null ||
-        !await _canUseMobileLocation(
-          _MobileFileManagerLocation.objects(bucket, _state._prefix),
-        )) {
-      return;
-    }
-    await _state._openObject(object);
-  }
-
-  Future<void> openTrash([FileManagerBucketEntry? bucket]) async {
-    final target = bucket ?? _state._activeBucketEntry;
-    if (target == null) return;
-    final inputGeneration = _state._mobileInputGeneration;
-    if (!await _hasCurrentMobileInput(inputGeneration)) return;
-    final currentBucket = _bucketById(target.id);
-    if (currentBucket == null) return;
-    await _pushAndLoad(_MobileFileManagerLocation.trash(currentBucket));
-  }
-
-  Future<void> closeTrash() async {
-    final location = _state._mobileLocation;
-    if (!await _canUseMobileLocation(location)) return;
-    if (_state._mobileLocationHistory.isNotEmpty) {
-      await navigateBack();
-      return;
-    }
-    await _state._closeBucketTrash();
-  }
-
-  Future<void> clearTrash() async {
-    final bucket = _state._activeBucketEntry;
-    if (bucket == null ||
-        !await _canUseMobileLocation(
-          _MobileFileManagerLocation.trash(bucket),
-        )) {
-      return;
-    }
-    await _state._clearBucketTrash();
-  }
-
-  Future<void> configureBucket(FileManagerBucketEntry bucket) async {
-    final inputGeneration = _state._mobileInputGeneration;
-    if (!await _hasCurrentMobileInput(inputGeneration)) return;
-    final currentBucket = _bucketById(bucket.id);
-    if (currentBucket == null) return;
-    await _state._configureBucket(currentBucket);
-  }
-
-  bool bucketTrashEnabled(FileManagerBucketEntry bucket) =>
-      _state._bucketTrashEnabled(bucket);
-  Future<void> upload() async {
-    if (!await _canUseActiveObjectLocation()) return;
-    await _state._upload();
-  }
-
-  Future<void> createDirectory() async {
-    if (!await _canUseActiveObjectLocation()) return;
-    await _state._createDirectory();
-  }
-
-  Future<void> downloadSelected() async {
-    if (!await _canUseActiveObjectLocation()) return;
-    await _state._downloadSelectedObjects();
-  }
-
-  Future<void> deleteSelected() async {
-    if (!await _canUseActiveObjectLocation()) return;
-    await _state._deleteSelectedObjects();
-  }
-
-  void clearSelection() => _state._clearSelection();
-  void toggleSelection(ObjectInfo object) =>
-      _state._toggleObjectSelection(object);
-  Future<void> performObjectAction(
-    ObjectInfo object,
-    FileObjectAction action,
-  ) async {
-    if (!await _canUseActiveObjectLocation()) return;
-    if (action == FileObjectAction.open && object.isDir) {
-      await openDirectory(object.key);
-      return;
-    }
-    await _state._handleObjectAction(object, action);
-  }
-
-  Future<void> restoreTrashItem(TrashItem item) async {
-    final bucket = _state._activeBucketEntry;
-    if (bucket == null ||
-        !await _canUseMobileLocation(
-          _MobileFileManagerLocation.trash(bucket),
-        )) {
-      return;
-    }
-    await _state._restoreTrashItem(item);
-  }
-
-  Future<void> deleteTrashItemPermanently(TrashItem item) async {
-    final bucket = _state._activeBucketEntry;
-    if (bucket == null ||
-        !await _canUseMobileLocation(
-          _MobileFileManagerLocation.trash(bucket),
-        )) {
-      return;
-    }
-    await _state._deleteTrashItemPermanently(item);
-  }
-
-  void openAccountManagement() => _state.widget.onOpenAccountManagement?.call();
-
-  Future<void> _pushAndLoad(_MobileFileManagerLocation target) async {
-    await _state._pushAndLoadMobileFileManagerLocation(target);
-  }
-
-  FileManagerBucketEntry? _bucketById(String id) {
-    for (final bucket in _state._buckets ?? const <FileManagerBucketEntry>[]) {
-      if (bucket.id == id) return bucket;
-    }
-    return null;
-  }
-
-  Future<bool> _canUseActiveObjectLocation() {
-    final bucket = _state._activeBucketEntry;
-    if (bucket == null) return Future<bool>.value(false);
-    return _canUseMobileLocation(
-      _MobileFileManagerLocation.objects(bucket, _state._prefix),
-    );
-  }
-
-  Future<bool> _canUseMobileLocation(
-    _MobileFileManagerLocation expected,
-  ) async {
-    final inputGeneration = _state._mobileInputGeneration;
-    if (!await _hasCurrentMobileInput(inputGeneration)) return false;
-    return _state._mobileLocation.matches(expected) &&
-        (expected.bucket == null ||
-            identical(_state._mobileLocation.bucket, expected.bucket));
-  }
-
-  Future<bool> _hasCurrentMobileInput(int inputGeneration) async {
-    return await _state._ensureMobileFileManagerInputRebound() &&
-        inputGeneration == _state._mobileInputGeneration;
-  }
-}
-
 /// Owns Android's logical file-location transitions independently of either
 /// presentation. It is also used by external navigation such as sync tasks.
 extension _FileManagerPageMobileNavigation on _FileManagerPageState {
-  bool get _canHandleMobileFileManagerBack =>
-      _activeMobileSyncRemoteOpen != null || _mobileLocationHistory.isNotEmpty;
-
   Future<bool> _handleMobileFileManagerBack() async {
     if (_cancelPendingMobileSyncRemoteOpen()) return true;
     return await _navigateBackMobileFileManagerLocation();
@@ -392,13 +147,13 @@ extension _FileManagerPageMobileNavigation on _FileManagerPageState {
     bool forceRefresh = false,
     int? inputGeneration,
   }) async {
-    if (widget.viewBuilder != null && inputGeneration == null) {
+    if (_usesMobileNavigation && inputGeneration == null) {
       if (!await _ensureMobileFileManagerInputRebound()) return false;
     }
     if (inputGeneration != null && inputGeneration != _mobileInputGeneration) {
       return false;
     }
-    if (widget.viewBuilder != null) {
+    if (_usesMobileNavigation) {
       final rebound = _rebindMobileFileManagerLocation(
         location,
         <String, FileManagerBucketEntry>{

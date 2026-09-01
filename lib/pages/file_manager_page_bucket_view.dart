@@ -30,7 +30,8 @@ extension _FileManagerPageBucketView on _FileManagerPageState {
             isGrid: _isGrid,
             gridIconSize: _FileManagerPageState._bucketGridIconSize,
             listIconSize: _FileManagerPageState._listIconSize,
-            onOpenBucket: (bucket) => unawaited(_navToBucket(bucket)),
+            onOpenBucket: (bucket) =>
+                unawaited(_openPresentationBucket(bucket)),
             mountStatuses: _isTrashHome
                 ? const <String, BucketMountStatus>{}
                 : _bucketMountStatuses,
@@ -38,7 +39,7 @@ extension _FileManagerPageBucketView on _FileManagerPageState {
             showActionColumn: !_isTrashHome,
             onOpenTrashBucket: _isTrashHome
                 ? null
-                : (bucket) => unawaited(_openBucketTrash(bucket: bucket)),
+                : (bucket) => unawaited(_openPresentationTrash(bucket)),
             onConfigureBucket: _isTrashHome
                 ? null
                 : (bucket) => unawaited(_configureBucket(bucket)),

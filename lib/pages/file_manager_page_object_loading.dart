@@ -345,7 +345,7 @@ extension _FileManagerPageObjectLoading on _FileManagerPageState {
     int sourceListingViewGeneration,
   ) {
     if (!mounted) return false;
-    if (widget.viewBuilder != null) {
+    if (_usesMobileNavigation) {
       // Rebinding retains bucket IDs for Back history but replaces their config
       // entries. A mutation captured before that replacement may only expire
       // cache; it must never reload through its old endpoint/root prefix.
