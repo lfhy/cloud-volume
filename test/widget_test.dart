@@ -27,6 +27,7 @@ import 'package:remote_storage/models/system_proxy_info.dart';
 import 'package:remote_storage/models/trash_item.dart';
 import 'package:remote_storage/models/transfer_job.dart';
 import 'package:remote_storage/models/sync_profile.dart';
+import 'package:remote_storage/pages/app_bootstrap_page.dart';
 import 'package:remote_storage/pages/file_manager_page.dart';
 import 'package:remote_storage/pages/main_layout_page.dart';
 import 'package:remote_storage/pages/mobile_file_manager_page.dart';
@@ -653,18 +654,18 @@ void main() {
         findsNothing,
       );
       expect(find.byType(SafeArea), findsAtLeastNWidgets(1));
-      final systemStyles = tester
-          .widgetList<AnnotatedRegion<SystemUiOverlayStyle>>(
-            find.byType(AnnotatedRegion<SystemUiOverlayStyle>),
-          )
-          .map((region) => region.value);
+      final homeSystemUiRegion = find.ancestor(
+        of: find.byType(AppBootstrapPage),
+        matching: find.byType(AnnotatedRegion<SystemUiOverlayStyle>),
+      );
+      expect(homeSystemUiRegion, findsOneWidget);
+      final homeSystemUiStyle = tester
+          .widget<AnnotatedRegion<SystemUiOverlayStyle>>(homeSystemUiRegion)
+          .value;
+      expect(homeSystemUiStyle.statusBarIconBrightness, Brightness.dark);
       expect(
-        systemStyles.any(
-          (style) =>
-              style.statusBarIconBrightness == Brightness.dark &&
-              style.systemNavigationBarIconBrightness == Brightness.dark,
-        ),
-        isTrue,
+        homeSystemUiStyle.systemNavigationBarIconBrightness,
+        Brightness.dark,
       );
       expect(find.text('文件管理'), findsNothing);
       expect(find.text('浏览和管理远程存储中的文件。'), findsNothing);

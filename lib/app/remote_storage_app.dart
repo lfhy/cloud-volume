@@ -38,38 +38,39 @@ class _ThemeAwareShell extends StatelessWidget {
   Widget build(BuildContext context) {
     final accent = ThemeController.of(context).accent;
     final appTheme = buildAppTheme(accent);
+    final home = Stack(
+      children: isDesktopPlatform
+          ? <Widget>[
+              AppBootstrapPage(apiFactory: apiFactory),
+              const DesktopModalScrim(),
+              const DesktopWindowControls(),
+            ]
+          : <Widget>[AppBootstrapPage(apiFactory: apiFactory)],
+    );
     final content = ShadApp(
       title: appBrandName,
       debugShowCheckedModeBanner: false,
       themeMode: ThemeMode.light,
       theme: appTheme,
-      home: Stack(
-        children: isDesktopPlatform
-            ? <Widget>[
-                AppBootstrapPage(apiFactory: apiFactory),
-                const DesktopModalScrim(),
-                const DesktopWindowControls(),
-              ]
-            : <Widget>[AppBootstrapPage(apiFactory: apiFactory)],
-      ),
+      // The navigator's route must own this annotation. An ancestor outside
+      // ShadApp loses the status-bar hit test to the route's overlay layer.
+      home: defaultTargetPlatform == TargetPlatform.android
+          ? AnnotatedRegion<SystemUiOverlayStyle>(
+              value: SystemUiOverlayStyle(
+                statusBarColor: appTheme.colorScheme.background,
+                statusBarIconBrightness: Brightness.dark,
+                statusBarBrightness: Brightness.light,
+                systemNavigationBarColor: appTheme.colorScheme.background,
+                systemNavigationBarIconBrightness: Brightness.dark,
+                systemStatusBarContrastEnforced: false,
+                systemNavigationBarContrastEnforced: false,
+              ),
+              child: home,
+            )
+          : home,
     );
-    final shell = isDesktopPlatform
+    return isDesktopPlatform
         ? DesktopModalParentFocusRelay(child: content)
         : content;
-    if (defaultTargetPlatform != TargetPlatform.android) {
-      return shell;
-    }
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle(
-        statusBarColor: appTheme.colorScheme.background,
-        statusBarIconBrightness: Brightness.dark,
-        statusBarBrightness: Brightness.light,
-        systemNavigationBarColor: appTheme.colorScheme.background,
-        systemNavigationBarIconBrightness: Brightness.dark,
-        systemStatusBarContrastEnforced: false,
-        systemNavigationBarContrastEnforced: false,
-      ),
-      child: shell,
-    );
   }
 }

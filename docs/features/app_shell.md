@@ -33,7 +33,7 @@
 - `lib/pages/mobile_file_manager_page.dart` / `mobile_file_manager_presentation.dart` — Android 无状态入口把 `mobileNavigation` 与 `MobileFileManagerNavigation` 交给 `FileManagerWorkspace`；独立呈现层渲染「文件 + 当前位置」页头、常驻搜索和移动操作行。二级位置的 48dp 顶栏 Back 与系统 Back 共用位置栈，且在加载、错误状态也可用。
 - `lib/widgets/file_manager_bucket_browser.dart` / `file_manager_bucket_browser_actions.dart` — 桌面继续使用表格、行内 mount action 和上下文菜单；Android 走独立紧凑桶行，移除行内桶设置图标，48dp 行尾 `…` 经 `showAppModal` 打开底部抽屉。抽屉复用同一 action model，只显示打开存储桶、桶设置、回收站和 WebDAV 等 Android 可用能力，绝不渲染挂载/卸载/打开挂载目录。
 - `lib/pages/file_manager_workspace.dart` / `file_manager_page_presentation_navigation.dart` — 共享文件浏览运行时和呈现导航桥:持有桶/对象/回收站状态、加载和所有 mutation；桌面面包屑与 Android 移动页头均读取已提交的 bucket+prefix 位置。目标在请求前提交，顶栏返回按钮与系统 Back 都可从加载或错误态恢复前一位置。同步解析期也作为可取消的文件返回层，取消只截去该同步新增的历史后缀。首屏、分页和操作收尾刷新均以位置+递增 epoch 校验，丢弃 Back 后迟到的结果；桶回收站关闭时恢复其来源目录。
-- `lib/app/remote_storage_app.dart` — 根 `AnnotatedRegion<SystemUiOverlayStyle>` 把 Android 浅色背景对应为深色状态栏/导航栏图标；底部抽屉的嵌套 region 负责在遮罩层期间覆盖这个样式，不能用命令式 `SystemChrome` 留下跨 route 状态。
+- `lib/app/remote_storage_app.dart` — Android 首页 route 内的根 `AnnotatedRegion<SystemUiOverlayStyle>` 把浅色背景对应为深色状态栏/导航栏图标。它必须在 `ShadApp` 的 `home` 内，才能赢得系统栏位置的命中；底部抽屉的嵌套 region 负责在遮罩层期间覆盖这个样式，不能用命令式 `SystemChrome` 留下跨 route 状态。
 - `lib/widgets/desktop_context_menu_region.dart` / `file_manager_object_browser_menus.dart` — 对象菜单在 Android 以长按和紧凑行尾 `…` 打开；对象动作仍与桌面右键入口一致。桶级动作由 `file_manager_bucket_browser_mobile.dart` 进入 Android 底部抽屉，桌面继续使用上下文菜单。
 - `lib/state/mobile_file_manager_navigation.dart` — Android 文件页 Back 桥由 `FileManagerWorkspace` 直接 bind，销毁或导航实例替换时 `clear()`；避免以 Dart method tear-off 相等性作解绑判断。
 - `lib/widgets/desktop_sidebar.dart` — 桌面侧栏(品牌标识 + SidebarPalette 渐变 + 装饰圆 + 导航项 + 传输状态入口);`_SidebarNavItem` 是 hover 正典(见 [ui_rules](ui_rules.md))。

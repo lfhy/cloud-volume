@@ -7,7 +7,7 @@
 ## 2026-09-01 Android 文件管理呈现复核(app_shell 域)
 
 - Android 不再共享桌面文件 chrome：`mobile_file_manager_presentation.dart` 只持有布局，`FileManagerWorkspace` 继续是数据、异步请求、mutation 与位置 Back 栈的唯一事实来源。桶行的 `…` 用 `showAppModal` 底部抽屉展示可用动作，不能恢复挂载入口或行内设置图标。
-- Flutter/Android 未发现主动 fullscreen 调用；状态栏信息不可见是 edge-to-edge 透明系统栏缺少根 overlay style。根 `AnnotatedRegion<SystemUiOverlayStyle>` 必须保留深色图标，模态可用已有嵌套 region 覆盖。
+- Flutter/Android 未发现主动 fullscreen 调用；状态栏信息不可见是 edge-to-edge 透明系统栏上的浅色图标。`AnnotatedRegion<SystemUiOverlayStyle>` 若包在 `ShadApp` 外，会被导航器 route 的 overlay 命中结果覆盖；必须位于 Android 首页 route 内并保留深色图标，模态可用已有嵌套 region 覆盖。
 
 ## 2026-09-01 Android 文件管理回归桌面 UX(app_shell 域)
 
