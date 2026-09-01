@@ -40,6 +40,7 @@ import 'package:remote_storage/widgets/file_manager_action_bar.dart';
 import 'package:remote_storage/widgets/file_manager_bucket_browser.dart';
 import 'package:remote_storage/widgets/file_manager_object_browser.dart';
 import 'package:remote_storage/widgets/file_manager_trash_browser.dart';
+import 'package:remote_storage/widgets/file_manager_error_view.dart';
 import 'package:remote_storage/widgets/mobile_navigation_bar.dart';
 
 void main() {
@@ -645,6 +646,41 @@ void main() {
       expect(find.text('文件管理'), findsOneWidget);
       expect(find.text('浏览和管理远程存储中的文件。'), findsOneWidget);
       expect(find.text('手机文件'), findsOneWidget);
+      expect(find.byIcon(LucideIcons.layoutGrid), findsNothing);
+      expect(find.byIcon(LucideIcons.list), findsNothing);
+      expect(find.text('挂载'), findsNothing);
+      expect(find.text('卸载'), findsNothing);
+      expect(find.text('打开挂载目录'), findsNothing);
+      expect(
+        tester
+            .widget<FileManagerBucketBrowser>(
+              find.byType(FileManagerBucketBrowser),
+            )
+            .isGrid,
+        isFalse,
+      );
+      await tester.tap(
+        find
+            .descendant(
+              of: find.byType(FileManagerBucketBrowser),
+              matching: find.byIcon(LucideIcons.ellipsisVertical),
+            )
+            .first,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('打开存储桶'), findsOneWidget);
+      expect(find.text('挂载'), findsNothing);
+      expect(find.text('卸载'), findsNothing);
+      expect(find.text('打开挂载目录'), findsNothing);
+      await tester.tap(
+        find
+            .descendant(
+              of: find.byType(FileManagerBucketBrowser),
+              matching: find.byIcon(LucideIcons.ellipsisVertical),
+            )
+            .first,
+      );
+      await tester.pumpAndSettle();
 
       await tester.tap(find.byIcon(LucideIcons.search));
       await tester.pumpAndSettle();
@@ -657,10 +693,21 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('手机文件'));
       await tester.pumpAndSettle();
+      expect(find.byIcon(LucideIcons.layoutGrid), findsNothing);
+      expect(find.byIcon(LucideIcons.list), findsNothing);
+      expect(
+        tester
+            .widget<FileManagerObjectBrowser>(
+              find.byType(FileManagerObjectBrowser),
+            )
+            .isGrid,
+        isFalse,
+      );
       expect(find.byIcon(LucideIcons.settings2), findsOneWidget);
       expect(find.text('上传'), findsOneWidget);
       expect(find.text('新建目录'), findsOneWidget);
-      expect(await tester.binding.handlePopRoute(), isTrue);
+      expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
+      await tester.tap(find.byIcon(LucideIcons.chevronLeft));
       await tester.pumpAndSettle();
       expect(find.text('文件管理'), findsOneWidget);
 
@@ -724,7 +771,7 @@ void main() {
       await tester.tap(find.text('二级'));
       await tester.pumpAndSettle();
       expect(find.text('说明.txt'), findsOneWidget);
-      expect(find.byIcon(LucideIcons.chevronLeft), findsNothing);
+      expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
@@ -822,7 +869,7 @@ void main() {
       tester.widget<MainLayoutPage>(find.byType(MainLayoutPage)).onRefresh();
       await tester.pumpAndSettle();
       expect(find.text('说明.txt'), findsOneWidget);
-      expect(find.byIcon(LucideIcons.chevronLeft), findsNothing);
+      expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
@@ -918,7 +965,7 @@ void main() {
 
       expect(find.text('说明.txt'), findsOneWidget);
       expect(api.objectPageConfigs.last.rootPrefix, 'new-root');
-      expect(find.byIcon(LucideIcons.chevronLeft), findsNothing);
+      expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
       final requestsBeforeBack = api.objectPageConfigs.length;
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
@@ -1213,9 +1260,9 @@ void main() {
       api.nextObjectPage = pendingObjects;
       await tester.tap(find.text('手机文件'));
       await tester.pump();
-      expect(find.byIcon(LucideIcons.chevronLeft), findsNothing);
+      expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
 
-      expect(await tester.binding.handlePopRoute(), isTrue);
+      await tester.tap(find.byIcon(LucideIcons.chevronLeft));
       await tester.pumpAndSettle();
       expect(
         tester
@@ -1280,7 +1327,7 @@ void main() {
         api.nextObjectPagesByPrefix[''] = pendingBucket;
         await tester.tap(find.text('手机文件'));
         await tester.pump();
-        expect(find.byIcon(LucideIcons.chevronLeft), findsNothing);
+        expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
 
         expect(await tester.binding.handlePopRoute(), isTrue);
         await tester.pumpAndSettle();
@@ -1319,7 +1366,7 @@ void main() {
         api.nextObjectPagesByPrefix['资料/'] = pendingDirectory;
         await tester.tap(find.text('资料'));
         await tester.pump();
-        expect(find.byIcon(LucideIcons.chevronLeft), findsNothing);
+        expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
 
         expect(await tester.binding.handlePopRoute(), isTrue);
         await tester.pumpAndSettle();
@@ -1361,6 +1408,41 @@ void main() {
       }
     },
   );
+
+  testWidgets('Android top Back remains visible on a bucket error', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      SharedPreferences.setMockInitialValues({});
+      final api = _FakeApi(
+        configured: true,
+        buckets: const <BucketInfo>[BucketInfo(name: '手机文件')],
+        failingObjectStorageType: StorageType.s3,
+      );
+
+      await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('手机文件'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(FileManagerErrorView), findsOneWidget);
+      expect(find.text('手机文件'), findsOneWidget);
+      expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
+
+      await tester.tap(find.byIcon(LucideIcons.chevronLeft));
+      await tester.pumpAndSettle();
+      expect(find.text('文件管理'), findsOneWidget);
+      expect(find.byType(FileManagerErrorView), findsNothing);
+    } finally {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      TransferQueue.instance.resetForTest();
+      RemoteTaskStore.instance.resetForTest();
+      SyncProfileNotifier.instance.stop();
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
 
   testWidgets('Android ignores a late object page after Back', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
@@ -1500,6 +1582,17 @@ void main() {
       await tester.tap(find.widgetWithText(ShadButton, '回收站'));
       await tester.pumpAndSettle();
       expect(find.text('已删0.txt'), findsOneWidget);
+      expect(find.byIcon(LucideIcons.layoutGrid), findsNothing);
+      expect(find.byIcon(LucideIcons.list), findsNothing);
+      expect(
+        tester
+            .widget<FileManagerTrashBrowser>(
+              find.byType(FileManagerTrashBrowser),
+            )
+            .isGrid,
+        isFalse,
+      );
+      expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
 
       final pendingPage = Completer<TrashListPage>();
       api.nextTrashPage = pendingPage;
@@ -1861,7 +1954,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('同步说明.txt'), findsOneWidget);
-      expect(find.byIcon(LucideIcons.chevronLeft), findsNothing);
+      expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
@@ -1944,7 +2037,7 @@ void main() {
         await tester.pump();
         await tester.pump();
         expect(find.text('A-stale.txt'), findsNothing);
-        expect(find.byIcon(LucideIcons.chevronLeft), findsNothing);
+        expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
 
         pendingB.complete(
           const ObjectListPage(

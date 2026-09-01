@@ -26,7 +26,7 @@ extension _FileManagerPagePresentationNavigation on _FileManagerPageState {
   }
 
   Future<void> _openPresentationDirectory(String prefix) {
-    final bucket = _activeBucketEntry;
+    final bucket = _presentationBucketEntry;
     if (bucket == null) return Future<void>.value();
     if (!_usesMobileNavigation) return _navToPrefix(prefix);
     return _pushAndLoadMobileFileManagerLocation(
@@ -35,11 +35,11 @@ extension _FileManagerPagePresentationNavigation on _FileManagerPageState {
   }
 
   Future<void> _openPresentationCrumb(int index) {
-    final bucket = _activeBucketEntry;
+    final bucket = _presentationBucketEntry;
     if (bucket == null) return Future<void>.value();
     if (!_usesMobileNavigation) return _navCrumb(index);
     if (index < 0) return _openPresentationBucketList();
-    final prefix = _breadcrumbs
+    final prefix = _presentationBreadcrumbs
         .take(index + 1)
         .map((segment) => '$segment/')
         .join();

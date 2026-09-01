@@ -13,6 +13,7 @@ class FileManagerBreadcrumbBar extends StatelessWidget {
     required this.onOpenBucketList,
     required this.onOpenBucketRoot,
     required this.onOpenCrumb,
+    this.onBack,
   });
 
   final ShadThemeData theme;
@@ -21,6 +22,7 @@ class FileManagerBreadcrumbBar extends StatelessWidget {
   final VoidCallback onOpenBucketList;
   final VoidCallback onOpenBucketRoot;
   final ValueChanged<int> onOpenCrumb;
+  final VoidCallback? onBack;
 
   @override
   Widget build(BuildContext context) {
@@ -53,7 +55,7 @@ class FileManagerBreadcrumbBar extends StatelessWidget {
           const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         );
         final layout = _resolveLayout(
-          constraints.maxWidth,
+          constraints.maxWidth - (onBack == null ? 0 : 36),
           entries,
           labelStyle,
           Directionality.of(context),
@@ -65,6 +67,17 @@ class FileManagerBreadcrumbBar extends StatelessWidget {
             height: 32,
             child: Row(
               children: [
+                if (onBack != null)
+                  ShadIconButton.ghost(
+                    width: 32,
+                    height: 32,
+                    iconSize: 16,
+                    icon: Icon(
+                      LucideIcons.chevronLeft,
+                      color: theme.colorScheme.primary,
+                    ),
+                    onPressed: onBack,
+                  ),
                 GestureDetector(
                   onTap: onOpenBucketList,
                   child: Icon(

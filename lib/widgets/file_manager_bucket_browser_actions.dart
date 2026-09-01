@@ -86,28 +86,28 @@ class _BucketMountActions extends StatelessWidget {
             ),
             const SizedBox(width: 4),
           ],
-          _iconOnlySlot(
-            _iconButton(
-              tooltip: primaryLabel,
-              icon: primaryIcon,
-              color: foreground,
-              onPressed: primaryAction == null
-                  ? null
-                  : () => primaryAction(bucket),
+          if (primaryAction != null) ...[
+            _iconOnlySlot(
+              _iconButton(
+                tooltip: primaryLabel,
+                icon: primaryIcon,
+                color: foreground,
+                onPressed: () => primaryAction(bucket),
+              ),
             ),
-          ),
-          const SizedBox(width: 4),
-          _iconOnlySlot(
-            _iconButton(
-              tooltip: secondaryLabel,
-              icon: secondaryIcon,
-              color: foreground,
-              onPressed: secondaryAction == null
-                  ? null
-                  : () => secondaryAction(bucket),
+            const SizedBox(width: 4),
+          ],
+          if (secondaryAction != null) ...[
+            _iconOnlySlot(
+              _iconButton(
+                tooltip: secondaryLabel,
+                icon: secondaryIcon,
+                color: foreground,
+                onPressed: () => secondaryAction(bucket),
+              ),
             ),
-          ),
-          const SizedBox(width: 4),
+            const SizedBox(width: 4),
+          ],
           _BucketOverflowMenuButton(
             items: moreMenuItems,
             color: foreground,

@@ -9,6 +9,7 @@ class FileManagerActionBar extends StatelessWidget {
     required this.theme,
     required this.isGrid,
     required this.onToggleView,
+    this.showViewToggle = true,
     this.searchController,
     this.searchPlaceholder = '搜索',
     this.searchEnabled = true,
@@ -30,6 +31,7 @@ class FileManagerActionBar extends StatelessWidget {
   final ShadThemeData theme;
   final bool isGrid;
   final VoidCallback onToggleView;
+  final bool showViewToggle;
   final TextEditingController? searchController;
   final String searchPlaceholder;
   final bool searchEnabled;
@@ -71,6 +73,7 @@ class FileManagerActionBar extends StatelessWidget {
                 theme: theme,
                 isGrid: isGrid,
                 onToggleView: onToggleView,
+                showViewToggle: showViewToggle,
                 selectedCount: selectedCount,
                 batchDownloadEnabled: batchDownloadEnabled,
                 showingTrash: showingTrash,
@@ -98,6 +101,7 @@ class _ActionButtons extends StatelessWidget {
     required this.theme,
     required this.isGrid,
     required this.onToggleView,
+    required this.showViewToggle,
     required this.selectedCount,
     required this.batchDownloadEnabled,
     required this.showingTrash,
@@ -116,6 +120,7 @@ class _ActionButtons extends StatelessWidget {
   final ShadThemeData theme;
   final bool isGrid;
   final VoidCallback onToggleView;
+  final bool showViewToggle;
   final int selectedCount;
   final bool batchDownloadEnabled;
   final bool showingTrash;
@@ -162,11 +167,12 @@ class _ActionButtons extends StatelessWidget {
             onPressed: onClearSelection,
           ),
         ] else ...[
-          _iconButton(
-            icon: isGrid ? LucideIcons.list : LucideIcons.layoutGrid,
-            color: primary,
-            onPressed: onToggleView,
-          ),
+          if (showViewToggle)
+            _iconButton(
+              icon: isGrid ? LucideIcons.list : LucideIcons.layoutGrid,
+              color: primary,
+              onPressed: onToggleView,
+            ),
           if (onOpenTrash != null || onCloseTrash != null) ...[
             const SizedBox(width: 6),
             _actionButton(

@@ -27,15 +27,17 @@ extension _FileManagerPageBucketView on _FileManagerPageState {
         Expanded(
           child: FileManagerBucketBrowser(
             buckets: buckets,
-            isGrid: _isGrid,
+            isGrid: _usesMobileNavigation ? false : _isGrid,
             gridIconSize: _FileManagerPageState._bucketGridIconSize,
             listIconSize: _FileManagerPageState._listIconSize,
             onOpenBucket: (bucket) =>
                 unawaited(_openPresentationBucket(bucket)),
-            mountStatuses: _isTrashHome
+            mountStatuses: _usesMobileNavigation || _isTrashHome
                 ? const <String, BucketMountStatus>{}
                 : _bucketMountStatuses,
-            busyBuckets: _isTrashHome ? const <String>{} : _mountBusyBuckets,
+            busyBuckets: _usesMobileNavigation || _isTrashHome
+                ? const <String>{}
+                : _mountBusyBuckets,
             showActionColumn: !_isTrashHome,
             onOpenTrashBucket: _isTrashHome
                 ? null
@@ -43,17 +45,17 @@ extension _FileManagerPageBucketView on _FileManagerPageState {
             onConfigureBucket: _isTrashHome
                 ? null
                 : (bucket) => unawaited(_configureBucket(bucket)),
-            onMountBucket: _isTrashHome
+            onMountBucket: _usesMobileNavigation || _isTrashHome
                 ? null
                 : widget.api.capabilities.supportsMounts
                 ? (bucket) => unawaited(_mountBucket(bucket))
                 : (bucket) => _showMountUnavailableMessage(bucket),
-            onUnmountBucket: _isTrashHome
+            onUnmountBucket: _usesMobileNavigation || _isTrashHome
                 ? null
                 : widget.api.capabilities.supportsMounts
                 ? (bucket) => unawaited(_unmountBucket(bucket))
                 : null,
-            onOpenMountedBucket: _isTrashHome
+            onOpenMountedBucket: _usesMobileNavigation || _isTrashHome
                 ? null
                 : widget.api.capabilities.supportsMounts
                 ? (bucket) => unawaited(_openMountedBucket(bucket))

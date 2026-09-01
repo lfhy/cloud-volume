@@ -1,6 +1,6 @@
 # Android Dev — 开发环境、模拟器调测与 APK 构建(macOS 与 Windows)
 
-仓库有 macOS 与 Windows 两套用户级 Android 工具链引导。macOS 侧提供模拟器调测回路(`make android-setup` → `make android-run`);Windows 侧出 ARM64 release APK。移动端通过打包的 c-shared FFI 库复用 Go 对象存储后端,同时隐藏桌面专属工作流。
+仓库有 macOS 与 Windows 两套用户级 Android 工具链引导。macOS 侧提供模拟器调测回路(`make android-setup` → `make android-run`);Windows 侧出 ARM64 release APK。移动端通过打包的 c-shared FFI 库复用 Go 对象存储后端,同时隐藏桌面专属工作流。文件管理继续复用桌面组件树,但 Android 固定列表模式、隐藏网格/列表切换与挂载/卸载/打开挂载目录入口,进入桶/目录/回收站后二级顶栏提供返回按钮(加载和错误状态同样有效)。
 
 ## 关键文件
 

@@ -59,17 +59,28 @@ extension _FileManagerPagePresentation on _FileManagerPageState {
         ],
         FileManagerBreadcrumbBar(
           theme: theme,
-          activeBucket: _activeBucketLabel,
-          breadcrumbs: _breadcrumbs,
+          activeBucket: _presentationBucketLabel,
+          breadcrumbs: _presentationBreadcrumbs,
+          onBack:
+              _usesMobileNavigation &&
+                  (_mobileLocationHistory.isNotEmpty ||
+                      _activeMobileSyncRemoteOpen != null)
+              ? () => unawaited(_handleMobileFileManagerBack())
+              : null,
           onOpenBucketList: () => unawaited(_openPresentationBucketList()),
-          onOpenBucketRoot: () =>
-              unawaited(_openPresentationBucketRoot(_activeBucketEntry!)),
+          onOpenBucketRoot: () {
+            final bucket = _presentationBucketEntry;
+            if (bucket != null) {
+              unawaited(_openPresentationBucketRoot(bucket));
+            }
+          },
           onOpenCrumb: (index) => unawaited(_openPresentationCrumb(index)),
         ),
         const SizedBox(height: 12),
         FileManagerActionBar(
           theme: theme,
           isGrid: _isGrid,
+          showViewToggle: !_usesMobileNavigation,
           searchController: _searchController,
           searchEnabled: !_loading,
           searchPlaceholder: _showTrash

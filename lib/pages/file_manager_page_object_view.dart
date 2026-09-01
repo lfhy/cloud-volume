@@ -15,7 +15,7 @@ extension _FileManagerPageObjectView on _FileManagerPageState {
     return FileManagerObjectBrowser(
       objects: visibleObjects,
       prefix: _prefix,
-      isGrid: _isGrid,
+      isGrid: _usesMobileNavigation ? false : _isGrid,
       scrollController: _contentScrollController,
       hasMore: _objectsHasMore,
       loadingMore: _pagingObjects,

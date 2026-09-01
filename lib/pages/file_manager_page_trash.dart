@@ -235,12 +235,11 @@ extension _FileManagerPageTrash on _FileManagerPageState {
       }
       await _reloadBucketTrashAfterMutation(bucketEntry);
     } catch (error) {
-      final shouldReport =
-          _isCurrentTrashMutationCommand(
-            bucketEntry,
-            sourceListingViewGeneration,
-            request,
-          );
+      final shouldReport = _isCurrentTrashMutationCommand(
+        bucketEntry,
+        sourceListingViewGeneration,
+        request,
+      );
       if (shouldReport) {
         _showPageError(error);
       }
@@ -303,12 +302,11 @@ extension _FileManagerPageTrash on _FileManagerPageState {
       if (!_isCurrentMobileFileManagerRequest(currentRequest)) return;
       _showPageSnack('已清空 ${bucketEntry.bucket.name} 的回收站');
     } catch (error) {
-      final shouldReport =
-          _isCurrentTrashMutationCommand(
-            bucketEntry,
-            sourceListingViewGeneration,
-            request,
-          );
+      final shouldReport = _isCurrentTrashMutationCommand(
+        bucketEntry,
+        sourceListingViewGeneration,
+        request,
+      );
       if (shouldReport) {
         setState(() => _loading = false);
         _showPageError(error);
@@ -333,7 +331,7 @@ extension _FileManagerPageTrash on _FileManagerPageState {
     }
     return FileManagerTrashBrowser(
       items: items,
-      isGrid: _isGrid,
+      isGrid: _usesMobileNavigation ? false : _isGrid,
       scrollController: _contentScrollController,
       hasMore: _trashHasMore,
       loadingMore: _pagingTrash,

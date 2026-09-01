@@ -86,7 +86,8 @@ extension _FileManagerPageDerivedState on _FileManagerPageState {
     int sourceListingViewGeneration,
     int inputGeneration,
   ) {
-    if (!mounted || !_isCurrentListingViewRequest(sourceListingViewGeneration)) {
+    if (!mounted ||
+        !_isCurrentListingViewRequest(sourceListingViewGeneration)) {
       return false;
     }
     if (_usesMobileNavigation) {
@@ -103,7 +104,23 @@ extension _FileManagerPageDerivedState on _FileManagerPageState {
 
   String? get _activeBucket => _activeBucketEntry?.bucket.name;
 
-  String? get _activeBucketLabel => _activeBucketEntry?.label;
+  /// Mobile chrome follows the committed logical location even while its
+  /// listing request is still loading or has failed.
+  FileManagerBucketEntry? get _presentationBucketEntry =>
+      _usesMobileNavigation ? _mobileLocation.bucket : _activeBucketEntry;
+
+  String? get _presentationBucketLabel => _presentationBucketEntry?.label;
+
+  List<String> get _presentationBreadcrumbs {
+    if (!_usesMobileNavigation ||
+        _mobileLocation.kind != _MobileFileManagerLocationKind.objects) {
+      return _breadcrumbs;
+    }
+    return _mobileLocation.prefix
+        .split('/')
+        .where((segment) => segment.isNotEmpty)
+        .toList(growable: false);
+  }
 
   String? get _activeBucketId => _activeBucketEntry?.id;
 
