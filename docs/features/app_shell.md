@@ -30,7 +30,7 @@
 - `lib/models/sidebar_item.dart` — `SidebarItem` 枚举是桌面侧栏与移动底栏的单一事实来源;没有移动端 `home` 项,`SidebarItemInfo` 提供 icon / `desktopLabel` / `mobileLabel`。
 - `lib/pages/main_layout_page.dart` — 根装配:桌面 `Row(DesktopSidebar + 内容)`;Android `PopScope + Scaffold(内容 + 底栏)`。内容为 `IndexedStack`,文件页固定在索引 0。`_selectItem` 是统一导航入口,移动端把访问记入 `TabNavHistory`。系统 Back 先交给活动文件页处理文件位置，再回退可见 tab，历史耗尽才调用 `SystemNavigator.pop`。同步目录打开使用 parent 递增 ticket，只有仍匹配的请求可消费或 post-frame 切到文件页；该 ticket 与文件页递增的 listing view generation 共同保护桶、对象、回收站的首屏和分页 state commit、finally 标记。mutation 的可见刷新则以逻辑源位置门控(Android `_mobileLocation`、桌面 `_desktopListingResumeTarget`)，使 A→B→A 能刷新新的 A，却不在 B 加载/错误时劫持它；桌面同步 discovery 仍以原始 generation 作额外 fence。对象页缓存另以 mutation invalidation epoch 门控，因此写操作超时而远端结果未知时，在途旧页也不能回填缓存。桌面取消同步跳转会恢复此前的加载/错误表面；快照保存桶列表、对象目录或回收站这一真实 primary target，若此前正在加载则重新开始该目标请求。Android 替换中的同步目标不存在时会重新加载保存的文件位置，解除被替换请求留下的 loading 状态。用户切 tab 或 Android Back 会先取消最新 ticket。
 - `lib/pages/file_manager_page.dart` — 桌面文件管理入口与桌面表面,默认装配 `FileManagerWorkspace` 的桌面渲染。
-- `lib/pages/mobile_file_manager_page.dart` / `mobile_file_manager_actions.dart` — Android 专属文件页、全宽搜索、触控列表、行尾操作、FAB 与操作抽屉;页面持有 `MobileFileManagerNavigation` 的 bind/clear 生命周期,不依赖桌面布局。目录行的「打开文件夹」进入目标目录，顶部左上返回与系统 Back 共享同一文件位置栈；同步目标尚在解析时左上返回会取消 shell 的最新 ticket。
+- `lib/pages/mobile_file_manager_page.dart` / `mobile_file_manager_actions.dart` — Android 专属文件页、全宽搜索、触控列表、行尾操作、FAB 与操作抽屉;页面持有 `MobileFileManagerNavigation` 的 bind/clear 生命周期,不依赖桌面布局。目录行的「打开文件夹」进入目标目录，顶部左上返回与系统 Back 共享同一文件位置栈；同步目标尚在解析时左上返回会取消 shell 的最新 ticket。全局设置只从必留的底部导航进入，文件页顶栏不重复提供入口。
 - `lib/pages/file_manager_workspace.dart` — 共享文件浏览运行时和公开 controller:持有桶/对象/回收站状态、加载和所有 mutation;controller 只暴露数据与命令,不返回桌面 Widget。移动与桌面复用它而不复用页面结构。移动 controller 以 bucket 列表、桶+prefix、桶回收站的逻辑位置栈记录每次导航；目标在请求前提交，Back 可从加载或错误态恢复前一位置。同步解析期也作为可取消的文件返回层，取消只截去该同步新增的历史后缀。首屏、分页和操作收尾刷新均以位置+递增 epoch 校验，丢弃 Back 后迟到的结果；桶回收站关闭时恢复其来源目录。
 - `lib/widgets/mobile_file_manager_surface.dart` / `mobile_file_manager_browser.dart` — Android chrome 与单列浏览器:状态栏 `SafeArea`、48px 搜索、大触控行、行尾 `…`、无列表/网格切换。桶行与桌面复用 WhiteSur `network-server-balanced.svg`，对象行保留 `LocalCloudPanFileIcon`。可点击行 idle 使用 `basic` cursor,hover 才切 `click`(见 [ui_rules](ui_rules.md))。
 - `lib/state/mobile_file_manager_navigation.dart` — Android 文件页 Back 桥:当前页 bind 回调,销毁或替换时 `clear()`；避免以 Dart method tear-off 相等性作解绑判断。
@@ -43,6 +43,8 @@
 **Known P2/P3 (review 2026-08-29):** 底栏视觉两轮评审的 P2(分割线未铺满物理底部、去胶囊后触控目标回落 42dp)与 P3(圆角不一致、Semantics label 连读)已随定稿重设计解决(无渐变、无胶囊;全量 border 分割线;GestureDetector 内 `minHeight: 48`)。移动导航重构评审发现并同批修复:P0 返回键死锁(栈底项被移出底栏后 `back()` 永不弹空且 `canPop` 不重算——`back` 增加整条历史不可见时 reset(current) 语义,PopScope null 分支补 setState)、P1 设置节第 6 项静默截断(save 超限显式报错 + 设置节监听偏好异步 load 同步本地副本)、P2 ui_rules 正典指针未随 `_SidebarNavItem` 迁移更新。有意行为(不改):底栏 `selectedValue` 无匹配项时全部项不高亮;测试的无渐变断言扫描整棵 pumped 树,shadcn 内部若引入装饰渐变需收窄 finder。
 
 **Known P2/P3 (review 2026-08-31):** P2 `FileManagerWorkspace` 仍是 `file_manager_page.dart` library 的 part，移动页因此暂时经该入口 import 共享工作区；controller 已避免布局泄漏，待公开契约明显扩张时再整体提升为独立 library。P2 尚未直接按 icon finder 断言 Android 页面不存在 `layoutGrid/list`，当前以无 `FileManagerActionBar`、独立 `MobileFileManagerBrowser` 和 widget 回归保护；若移动页加入新的工具栏，补上显式断言。桌面 `_mountBucket` 在挂载设置弹窗期间若发生配置刷新，仍可能带着旧完整配置进入 `saveConfig/saveProfile`；Android 专属页面不暴露挂载入口，后续应让挂载动作同样捕获并校验 input/listing generation。
+
+**Known P2/P3 (review 2026-09-01, resolved):** P2 文件页根目录与桶根目录此前分别渲染设置按钮，初始回归只覆盖无返回按钮的根目录。删除重复入口后，`test/widget_test.dart` 在两个状态都断言仅保留底栏的一个 `settings2` 图标，防止目录页重新引入顶栏设置入口。
 
 ## 应用图标(桌面 + Android)
 

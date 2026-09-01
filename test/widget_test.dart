@@ -642,6 +642,7 @@ void main() {
       expect(find.byType(FileManagerBreadcrumbBar), findsNothing);
       expect(find.text('首页'), findsNothing);
       expect(find.text('设置'), findsOneWidget);
+      expect(find.byIcon(LucideIcons.settings2), findsOneWidget);
       expect(
         find.descendant(
           of: find.byType(MobileFileManagerSurface),
@@ -670,6 +671,7 @@ void main() {
           .first;
       await tester.tap(bucketRow);
       await tester.pumpAndSettle();
+      expect(find.byIcon(LucideIcons.settings2), findsOneWidget);
       expect(find.byIcon(LucideIcons.plus), findsOneWidget);
       await tester.tap(find.byIcon(LucideIcons.plus));
       await tester.pumpAndSettle();

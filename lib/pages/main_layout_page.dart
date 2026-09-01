@@ -271,7 +271,6 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
             onPendingSyncRemoteOpenConsumed: _consumePendingSyncRemoteOpen,
             onCancelPendingSyncRemoteOpen: _cancelPendingSyncRemoteOpen,
             onOpenAccountManagement: () => _selectItem(SidebarItem.storage),
-            onOpenSettings: () => _selectItem(SidebarItem.settings),
             navigation: _mobileFileNavigation,
           )
         else

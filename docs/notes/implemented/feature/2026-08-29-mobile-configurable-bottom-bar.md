@@ -9,7 +9,7 @@ Status: implemented
 ## Decision
 
 - **配置驱动底栏:** `lib/state/mobile_nav_preferences.dart` 把可见项与顺序持久化到 SharedPreferences(`mobile.bottom_bar_items`),默认 `文件·账号·任务·回收站·设置`。可选池为 fileManager/storage/transfers/trash/settings;约束为 2–5 项且必须保留 settings。解析损坏或非法数据回退默认；历史数据中的 `home` 迁移为 settings。
-- **文件首屏:** Android 没有 `SidebarItem.home` 或 `MobileHomePage`;`MainLayoutPage` 的首个 IndexedStack 子项是 `MobileFileManagerPage`。设置仍在底栏并可由文件页顶部按钮打开。
+- **文件首屏:** Android 没有 `SidebarItem.home` 或 `MobileHomePage`;`MainLayoutPage` 的首个 IndexedStack 子项是 `MobileFileManagerPage`。设置只从底栏进入，避免在文件页顶栏重复设置入口。
 - **设置节(移动端专属):** `SettingsMobileNavSection` 挂在设置页常规组,只在 Android 渲染。它使用开关、上移/下移按钮和恢复默认管理底栏,在保存层与 UI 层共同拦截违反约束的修改。
 - **返回优先级:** `MobileFileManagerNavigation` 让活动文件页先消费 Android Back;桶回收站关闭到文件、子目录返回上级、桶根返回桶列表。文件页未消费时，`TabNavHistory` 才回退仍可见的底栏项目，历史耗尽后退出应用。
 

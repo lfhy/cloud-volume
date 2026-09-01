@@ -17,7 +17,6 @@ class MobileFileManagerSurface extends StatelessWidget {
     required this.searchEnabled,
     required this.body,
     this.onBack,
-    this.onSettings,
     this.onMore,
     this.onFab,
     this.showFab = true,
@@ -30,7 +29,6 @@ class MobileFileManagerSurface extends StatelessWidget {
   final bool searchEnabled;
   final Widget body;
   final VoidCallback? onBack;
-  final VoidCallback? onSettings;
   final VoidCallback? onMore;
   final VoidCallback? onFab;
   final bool showFab;
@@ -50,7 +48,6 @@ class MobileFileManagerSurface extends StatelessWidget {
                   title: title,
                   subtitle: subtitle,
                   onBack: onBack,
-                  onSettings: onSettings,
                   onMore: onMore,
                 ),
                 const SizedBox(height: 14),
@@ -81,14 +78,12 @@ class _MobileFileManagerTopBar extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.onBack,
-    required this.onSettings,
     required this.onMore,
   });
 
   final String title;
   final String subtitle;
   final VoidCallback? onBack;
-  final VoidCallback? onSettings;
   final VoidCallback? onMore;
 
   @override
@@ -104,13 +99,6 @@ class _MobileFileManagerTopBar extends StatelessWidget {
             onPressed: onBack,
           ),
           const SizedBox(width: 2),
-        ] else if (onSettings != null) ...[
-          _MobileIconButton(
-            tooltip: '设置',
-            icon: LucideIcons.settings2,
-            onPressed: onSettings,
-          ),
-          const SizedBox(width: 8),
         ],
         Expanded(
           child: Column(
@@ -141,14 +129,6 @@ class _MobileFileManagerTopBar extends StatelessWidget {
             ],
           ),
         ),
-        if (onBack != null && onSettings != null) ...[
-          const SizedBox(width: 4),
-          _MobileIconButton(
-            tooltip: '设置',
-            icon: LucideIcons.settings2,
-            onPressed: onSettings,
-          ),
-        ],
         if (onMore != null) ...[
           const SizedBox(width: 2),
           _MobileIconButton(

@@ -109,7 +109,7 @@ class MobileNavPreferences extends ChangeNotifier {
       }
     }
     if (!_satisfiesConstraints(normalized)) {
-      throw ArgumentError('底部导航至少保留 2 项,且必须保留「设置」(文件页也可从顶部进入设置)');
+      throw ArgumentError('底部导航至少保留 2 项,且必须保留「设置」');
     }
     return normalized;
   }

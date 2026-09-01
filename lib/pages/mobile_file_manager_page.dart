@@ -35,7 +35,6 @@ class MobileFileManagerPage extends StatefulWidget {
     this.onPendingSyncRemoteOpenConsumed,
     this.onCancelPendingSyncRemoteOpen,
     this.onOpenAccountManagement,
-    this.onOpenSettings,
     this.navigation,
   });
 
@@ -49,7 +48,6 @@ class MobileFileManagerPage extends StatefulWidget {
   final SyncRemoteOpenConsumer? onPendingSyncRemoteOpenConsumed;
   final VoidCallback? onCancelPendingSyncRemoteOpen;
   final VoidCallback? onOpenAccountManagement;
-  final VoidCallback? onOpenSettings;
   final MobileFileManagerNavigation? navigation;
 
   @override
@@ -112,7 +110,6 @@ class _MobileFileManagerPageState extends State<MobileFileManagerPage> {
       searchPlaceholder: _searchPlaceholderFor(workspace),
       body: _buildContent(context, workspace, theme),
       onBack: workspace.canNavigateBack ? () => _handleBack(workspace) : null,
-      onSettings: widget.onOpenSettings,
       // A previous bucket entry may carry a stale profile while inputs are
       // rebinding, so no action sheet is exposed until the fresh list lands.
       onMore: workspace.isLoading || workspace.isInputRebindPending
