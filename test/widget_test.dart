@@ -799,8 +799,36 @@ void main() {
         ),
         findsNothing,
       );
-      expect(find.text('上传'), findsOneWidget);
-      expect(find.text('新建目录'), findsOneWidget);
+      expect(find.text('上传'), findsNothing);
+      expect(find.text('新建目录'), findsNothing);
+      expect(find.byIcon(LucideIcons.plus), findsOneWidget);
+      expect(find.bySemanticsLabel('文件操作'), findsOneWidget);
+      final mobileActionButton = find.ancestor(
+        of: find.byIcon(LucideIcons.plus),
+        matching: find.byType(ShadIconButton),
+      );
+      expect(mobileActionButton, findsOneWidget);
+      expect(tester.getSize(mobileActionButton), const Size(48, 48));
+      expect(
+        find.ancestor(
+          of: find.byIcon(LucideIcons.plus),
+          matching: find.byType(ShadTooltip),
+        ),
+        findsNothing,
+      );
+      await _openMobileFileActions(tester);
+      expect(find.byType(AppShadDialog), findsOneWidget);
+      expect(find.text('文件操作'), findsOneWidget);
+      expect(find.widgetWithText(ShadButton, '回收站'), findsOneWidget);
+      expect(find.widgetWithText(ShadButton, '新建目录'), findsOneWidget);
+      expect(find.widgetWithText(ShadButton, '上传'), findsOneWidget);
+      expect(
+        tester.getSize(find.widgetWithText(ShadButton, '上传')).height,
+        greaterThanOrEqualTo(48),
+      );
+      expect(await tester.binding.handlePopRoute(), isTrue);
+      await tester.pumpAndSettle();
+      expect(find.text('文件操作'), findsNothing);
       expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
       expect(
         find.ancestor(
@@ -821,6 +849,67 @@ void main() {
       SyncProfileNotifier.instance.stop();
     } finally {
       semantics.dispose();
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('Android file action drawer opens clear-trash confirmation', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      SharedPreferences.setMockInitialValues({});
+      final api = _FakeApi(
+        configured: true,
+        buckets: const <BucketInfo>[BucketInfo(name: '手机文件')],
+        objectPagesByPrefix: const <String, ObjectListPage>{
+          '': ObjectListPage(items: <ObjectInfo>[], nextToken: ''),
+        },
+        trashPagesByToken: const <String, TrashListPage>{
+          '': TrashListPage(
+            items: <TrashItem>[
+              TrashItem(
+                id: 'clear-action-item',
+                name: '已删文件.txt',
+                originalKey: '已删文件.txt',
+                trashKey: '.trash/clear-action-item',
+                deletedAt: '2026-09-02',
+                isDir: false,
+                size: 24,
+                objectCount: 0,
+              ),
+            ],
+            nextToken: '',
+          ),
+        },
+      );
+
+      await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('手机文件'));
+      await tester.pumpAndSettle();
+      await _openMobileFileActions(tester);
+      await tester.tap(find.widgetWithText(ShadButton, '回收站'));
+      await tester.pumpAndSettle();
+      expect(find.text('已删文件.txt'), findsOneWidget);
+
+      await _openMobileFileActions(tester);
+      expect(find.widgetWithText(ShadButton, '清空回收站'), findsOneWidget);
+      await tester.tap(find.widgetWithText(ShadButton, '清空回收站'));
+      await tester.pumpAndSettle();
+      expect(find.text('将彻底删除「手机文件」回收站中的所有项目，之后无法恢复。'), findsOneWidget);
+      expect(find.widgetWithText(ShadButton, '取消'), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(ShadButton, '取消'));
+      await tester.pumpAndSettle();
+      expect(find.text('已删文件.txt'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      TransferQueue.instance.resetForTest();
+      RemoteTaskStore.instance.resetForTest();
+      SyncProfileNotifier.instance.stop();
+    } finally {
       debugDefaultTargetPlatformOverride = null;
     }
   });
@@ -1140,6 +1229,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('手机文件'));
         await tester.pumpAndSettle();
+        await _openMobileFileActions(tester);
         await tester.tap(find.text('新建目录'));
         await tester.pumpAndSettle();
         await tester.enterText(find.byType(ShadInput).last, '不会创建');
@@ -1208,6 +1298,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('手机文件'));
         await tester.pumpAndSettle();
+        await _openMobileFileActions(tester);
         await tester.tap(find.text('上传'));
         await tester.pump();
         await tester.pump();
@@ -1683,6 +1774,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('资料'));
       await tester.pumpAndSettle();
+      await _openMobileFileActions(tester);
       await tester.tap(find.widgetWithText(ShadButton, '回收站'));
       await tester.pumpAndSettle();
       expect(find.text('已删0.txt'), findsOneWidget);
@@ -1711,6 +1803,7 @@ void main() {
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
       expect(find.text('说明.txt'), findsOneWidget);
+      await _openMobileFileActions(tester);
       await tester.tap(find.widgetWithText(ShadButton, '回收站'));
       await tester.pumpAndSettle();
       expect(find.text('已删0.txt'), findsOneWidget);
@@ -1799,6 +1892,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('资料'));
       await tester.pumpAndSettle();
+      await _openMobileFileActions(tester);
       await tester.tap(find.widgetWithText(ShadButton, '回收站'));
       await tester.pumpAndSettle();
 
@@ -1869,6 +1963,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('资料'));
       await tester.pumpAndSettle();
+      await _openMobileFileActions(tester);
       await tester.tap(find.text('新建目录'));
       await tester.pumpAndSettle();
 
@@ -1948,9 +2043,16 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('资料'));
       await tester.pumpAndSettle();
+      await _openMobileFileActions(tester);
       await tester.tap(find.widgetWithText(ShadButton, '回收站'));
       await tester.pumpAndSettle();
-      expect(find.text('返回文件'), findsOneWidget);
+      expect(find.text('返回文件'), findsNothing);
+      expect(find.byIcon(LucideIcons.plus), findsOneWidget);
+      await _openMobileFileActions(tester);
+      expect(find.widgetWithText(ShadButton, '返回文件'), findsOneWidget);
+
+      expect(await tester.binding.handlePopRoute(), isTrue);
+      await tester.pumpAndSettle();
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
@@ -2468,6 +2570,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('A-old.txt'), findsOneWidget);
 
+        await _openMobileFileActions(tester);
         await tester.tap(find.text('上传'));
         await tester.pump();
         await tester.pump();
@@ -2590,13 +2693,16 @@ void main() {
         );
         backgroundButton.onPressed!();
         await tester.pumpAndSettle();
+        await _openMobileFileActions(tester);
         await tester.tap(find.widgetWithText(ShadButton, '回收站'));
         await tester.pumpAndSettle();
-        expect(find.text('返回文件'), findsOneWidget);
+        expect(find.text('返回文件'), findsNothing);
+        expect(find.byIcon(LucideIcons.plus), findsOneWidget);
 
         pendingDelete.complete();
         await tester.pumpAndSettle();
-        expect(find.text('返回文件'), findsOneWidget);
+        expect(find.text('返回文件'), findsNothing);
+        expect(find.byIcon(LucideIcons.plus), findsOneWidget);
         expect(find.text('待删除.txt'), findsNothing);
 
         await tester.pumpWidget(const SizedBox.shrink());
@@ -3152,6 +3258,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('手机文件'));
       await tester.pumpAndSettle();
+      await _openMobileFileActions(tester);
       await tester.tap(find.widgetWithText(ShadButton, '回收站'));
       await tester.pumpAndSettle();
 
@@ -3261,9 +3368,15 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('手机文件'));
       await tester.pumpAndSettle();
+      await _openMobileFileActions(tester);
       await tester.tap(find.widgetWithText(ShadButton, '回收站'));
       await tester.pumpAndSettle();
-      expect(find.text('返回文件'), findsOneWidget);
+      expect(find.text('返回文件'), findsNothing);
+      await _openMobileFileActions(tester);
+      expect(find.widgetWithText(ShadButton, '返回文件'), findsOneWidget);
+
+      expect(await tester.binding.handlePopRoute(), isTrue);
+      await tester.pumpAndSettle();
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
@@ -3523,6 +3636,11 @@ final class _TestPlatformFile extends PlatformFile {
 
   @override
   Stream<Uint8List> readAsByteStream() => const Stream<Uint8List>.empty();
+}
+
+Future<void> _openMobileFileActions(WidgetTester tester) async {
+  await tester.tap(find.byIcon(LucideIcons.plus));
+  await tester.pumpAndSettle();
 }
 
 /// Minimal fake API that does not need the Go bridge.

@@ -4,6 +4,10 @@
 
 ---
 
+## 2026-09-02 Android 文件页 + 操作抽屉(app_shell / app_modal 域)
+
+文件页的回收站、新建目录和上传原先占用搜索框下方的横向操作行；在手机首屏上既压缩内容区域，也会让长标签落入横向滚动。呈现层保留同一批 workspace 回调，但只在桶、目录或桶回收站存在可用操作时显示右上 48dp `+`，点击经 `showAppModal` 打开全宽动作抽屉。普通桶/目录列出回收站、新建目录、上传；桶回收站列出返回文件和可用时的清空操作。`test/widget_test.dart` 锁定无内联操作行、`+` 的语义和 48dp 命中区、抽屉项目及系统 Back 关闭，原有创建、上传、回收站导航和异步刷新回归改从该入口进入。P0/P1 评审未发现阻断项；建议的 P2 已同批补成非空桶回收站经 `+` 打开「清空回收站」并进入原确认框的回归，未遗留 P2/P3。
+
 ## 2026-09-02 Android 返回 tooltip 残留防回归(mobile_ui / app_shell 域)
 
 用户第二次观察到文件管理二级页的「返回」提示及淡色 hover 背景在触摸后残留。审计确认顶栏返回仍通过 `AppTooltip` 创建 `ShadTooltip`；Shad 会把 Android tap 解释为 hover toggle，而系统 Back 或 route 切换不会向原按钮补发 leave。修复把平台分支收敛到 `app_tooltip.dart`：Android 只包 `Semantics(label: message, child: child)`，桌面/Web 继续创建可见提示；因而其它未来使用 `AppTooltip` 的 Android 图标也不会重现该状态。P0/P1 复审未发现阻断项；复审建议的 P2（实际二级页也直接断言「返回」语义）已同批补上，未遗留 P2/P3。现行强制规则与测试清单见 [mobile_ui](features/mobile_ui.md)，文件管理呈现归属见 [app_shell](features/app_shell.md)。

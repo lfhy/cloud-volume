@@ -30,7 +30,7 @@
 - `lib/models/sidebar_item.dart` — `SidebarItem` 枚举是桌面侧栏与移动底栏的单一事实来源;没有移动端 `home` 项,`SidebarItemInfo` 提供 icon / `desktopLabel` / `mobileLabel`。
 - `lib/pages/main_layout_page.dart` — 根装配:桌面 `Row(DesktopSidebar + 内容)`;Android `PopScope + Scaffold(内容 + 底栏)`。内容为 `IndexedStack`,文件页固定在索引 0。`_selectItem` 是统一导航入口,移动端把访问记入 `TabNavHistory`。系统 Back 先交给活动文件页处理文件位置，再回退可见 tab，历史耗尽才调用 `SystemNavigator.pop`。同步目录打开使用 parent 递增 ticket，只有仍匹配的请求可消费或 post-frame 切到文件页；该 ticket 与文件页递增的 listing view generation 共同保护桶、对象、回收站的首屏和分页 state commit、finally 标记。对象紧凑行在触底续载时保持末尾锚定，让新增页在移除 loading 行后仍可见。mutation 的可见刷新则以逻辑源位置门控(Android `_mobileLocation`、桌面 `_desktopListingResumeTarget`)，使 A→B→A 能刷新新的 A，却不在 B 加载/错误时劫持它；桌面同步 discovery 仍以原始 generation 作额外 fence。对象页缓存另以 mutation invalidation epoch 门控，因此写操作超时而远端结果未知时，在途旧页也不能回填缓存。桌面取消同步跳转会恢复此前的加载/错误表面；快照保存桶列表、对象目录或回收站这一真实 primary target，若此前正在加载则重新开始该目标请求。Android 替换中的同步目标不存在时会重新加载保存的文件位置，解除被替换请求留下的 loading 状态。用户切 tab 或 Android Back 会先取消最新 ticket。
 - `lib/pages/file_manager_page.dart` / `file_manager_page_presentation.dart` — 文件管理入口、状态和桌面呈现：标题、面包屑、搜索、操作栏及 bucket / 对象 / 回收站浏览器。桌面文件传输包装器只在桌面/Web 启用。
-- `lib/pages/mobile_file_manager_page.dart` / `mobile_file_manager_presentation.dart` — Android 无状态入口把 `mobileNavigation` 与 `MobileFileManagerNavigation` 交给 `FileManagerWorkspace`；独立呈现层渲染与桌面导航同名的「文件管理 + 桌面同款首页说明/进入后的当前位置」页头、常驻搜索和移动操作行。二级位置的 48dp 顶栏 Back 与系统 Back 共用位置栈，且在加载、错误状态也可用。
+- `lib/pages/mobile_file_manager_page.dart` / `mobile_file_manager_presentation.dart` — Android 无状态入口把 `mobileNavigation` 与 `MobileFileManagerNavigation` 交给 `FileManagerWorkspace`；独立呈现层渲染与桌面导航同名的「文件管理 + 桌面同款首页说明/进入后的当前位置」页头、常驻搜索和右上 48dp `+` 操作入口。桶/目录位置的入口经 `showAppModal` 底部抽屉列出回收站、新建目录和上传；桶回收站位置列出返回文件和可用时的清空操作，操作不可用时入口隐藏。二级位置的 48dp 顶栏 Back 与系统 Back 共用位置栈，且在加载、错误状态也可用。
 - `lib/widgets/file_manager_bucket_browser.dart` / `file_manager_bucket_browser_actions.dart` / `app_tooltip.dart` — 桌面继续使用表格、行内 mount action 和上下文菜单；Android 走独立紧凑桶行，移除行内桶设置图标，48dp 行尾 `…` 经 `showAppModal` 打开底部抽屉。`AppTooltip` 在 Android 仅提供语义标签、不构造触摸 hover tooltip；桶 `…` 显式提供同等语义标签，二级页顶栏返回经该公共边界提供名称。抽屉复用同一 action model，只显示打开存储桶、桶设置、回收站和 WebDAV 等 Android 可用能力，绝不渲染挂载/卸载/打开挂载目录；每个全宽菜单行使用固定图标列和左对齐标签列，图标与标签在各自行内垂直居中，按下态保留整行宽度并在图标前留 16dp 内边距，宽度扣除横屏侧边安全区与内层留白。
 - `lib/pages/file_manager_workspace.dart` / `file_manager_page_presentation_navigation.dart` — 共享文件浏览运行时和呈现导航桥:持有桶/对象/回收站状态、加载和所有 mutation；桌面面包屑与 Android 移动页头均读取已提交的 bucket+prefix 位置。目标在请求前提交，顶栏返回按钮与系统 Back 都可从加载或错误态恢复前一位置。同步解析期也作为可取消的文件返回层，取消只截去该同步新增的历史后缀。首屏、分页和操作收尾刷新均以位置+递增 epoch 校验，丢弃 Back 后迟到的结果；桶回收站关闭时恢复其来源目录。
 - `lib/app/remote_storage_app.dart` — Android 首页 route 内的根 `AnnotatedRegion<SystemUiOverlayStyle>` 把浅色背景对应为深色状态栏/导航栏图标。它必须在 `ShadApp` 的 `home` 内，才能赢得系统栏位置的命中；底部抽屉的嵌套 region 负责在遮罩层期间覆盖这个样式，不能用命令式 `SystemChrome` 留下跨 route 状态。
@@ -49,6 +49,8 @@
 **Known P2/P3 (review 2026-09-01, resolved):** P2 文件页根目录与桶根目录此前分别渲染设置按钮，初始回归只覆盖无返回按钮的根目录。删除重复入口后，`test/widget_test.dart` 在两个状态都断言仅保留底栏的一个 `settings2` 图标，防止目录页重新引入顶栏设置入口。
 
 **Known P2/P3 (review 2026-09-01, resolved):** Android 独立呈现初版的快捷操作沿用 `ShadButtonSize.sm`，实际触控高度低于 48dp。快捷操作行现在由 48dp `SizedBox` 约束，和页头返回、桶更多操作保持同一触控基线。
+
+**Known P2/P3 (review 2026-09-02, resolved):** P2 页面级 `+` 抽屉的非空桶回收站清空入口起初只由条件等价性审计覆盖；`test/widget_test.dart` 现经该抽屉打开「清空回收站」并断言进入既有确认框。
 
 ## 应用图标(桌面 + Android)
 
