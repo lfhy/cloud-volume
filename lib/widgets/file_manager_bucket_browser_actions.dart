@@ -250,14 +250,15 @@ class _BucketOverflowMenuButtonState extends State<_BucketOverflowMenuButton> {
       builder: (dialogContext) {
         // Shad's shrink-wrapped dialog body leaves button children unbounded.
         // Reserve its 24px dialog padding plus 6px focus-ring gutter per side.
-        final horizontalSafeArea = MediaQuery.paddingOf(dialogContext).horizontal;
+        final horizontalSafeArea = MediaQuery.paddingOf(
+          dialogContext,
+        ).horizontal;
+        const actionHorizontalPadding = 16.0;
         final menuWidth =
             (MediaQuery.sizeOf(dialogContext).width - horizontalSafeArea - 60)
-                .clamp(
-                  1.0,
-                  double.infinity,
-                )
+                .clamp(1.0, double.infinity)
                 .toDouble();
+        final actionContentWidth = menuWidth - actionHorizontalPadding * 2;
         return AppShadDialog(
           title: Text(widget.bucketLabel),
           child: Column(
@@ -267,13 +268,17 @@ class _BucketOverflowMenuButtonState extends State<_BucketOverflowMenuButton> {
               for (final action in widget.mobileActions) ...[
                 ShadButton.ghost(
                   width: menuWidth,
-                  padding: EdgeInsets.zero,
+                  // Keep the pressed surface full-width while giving the icon
+                  // column the same 16dp breathing room as a touch list row.
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: actionHorizontalPadding,
+                  ),
                   onPressed: () {
                     Navigator.of(dialogContext).pop();
                     action.onPressed();
                   },
                   child: SizedBox(
-                    width: menuWidth,
+                    width: actionContentWidth,
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [

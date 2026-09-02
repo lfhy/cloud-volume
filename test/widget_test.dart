@@ -723,7 +723,7 @@ void main() {
       );
       expect(
         openBucketActionContentRect.width,
-        closeTo(openBucketActionRect.width, 0.01),
+        closeTo(openBucketActionRect.width - 32, 0.01),
       );
       expect(
         openBucketActionContentRect.center.dx,
@@ -740,6 +740,10 @@ void main() {
       expect(
         tester.getRect(openBucketIcon).left,
         closeTo(tester.getRect(configureBucketIcon).left, 0.01),
+      );
+      expect(
+        tester.getRect(openBucketIcon).left - openBucketActionRect.left,
+        closeTo(16, 0.01),
       );
       expect(
         tester.getRect(find.text('打开存储桶')).left,
