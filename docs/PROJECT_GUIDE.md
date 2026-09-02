@@ -4,6 +4,10 @@
 
 ---
 
+## 2026-09-02 Android 返回 tooltip 残留防回归(mobile_ui / app_shell 域)
+
+用户第二次观察到文件管理二级页的「返回」提示及淡色 hover 背景在触摸后残留。审计确认顶栏返回仍通过 `AppTooltip` 创建 `ShadTooltip`；Shad 会把 Android tap 解释为 hover toggle，而系统 Back 或 route 切换不会向原按钮补发 leave。修复把平台分支收敛到 `app_tooltip.dart`：Android 只包 `Semantics(label: message, child: child)`，桌面/Web 继续创建可见提示；因而其它未来使用 `AppTooltip` 的 Android 图标也不会重现该状态。P0/P1 复审未发现阻断项；复审建议的 P2（实际二级页也直接断言「返回」语义）已同批补上，未遗留 P2/P3。现行强制规则与测试清单见 [mobile_ui](features/mobile_ui.md)，文件管理呈现归属见 [app_shell](features/app_shell.md)。
+
 ## 2026-09-02 Android 桶内对象紧凑列表评审(app_shell / file_actions 域)
 
 Android 对象浏览已采用与桶列表一致的紧凑行和底部动作抽屉，桌面表格、网格及右键菜单保持原路径。提交前首轮 P0/P1 评审发现并同批修复：触底分页在紧凑行追加后未保持尾部可见、选择控件命中区小于 48dp、WebDAV 当前目录不可写时仍会显示/执行写操作，以及不支持递归目录下载时目录多选仍暴露无效下载入口。最终复审又在 280×480、1.5 倍字体、12 个追加项场景确认，不能以新内容高度差判断是否锚定；分页改为记录请求开始时的 `maxScrollExtent`，仅当用户之后已到达该旧尾部才跳到新尾部。移动端也不再渲染无本地镜像语义的“已同步”徽标，紧凑名称提升到 14sp。

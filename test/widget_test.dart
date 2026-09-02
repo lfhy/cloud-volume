@@ -628,6 +628,7 @@ void main() {
     tester,
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    final semantics = tester.ensureSemantics();
     tester.view.padding = const FakeViewPadding(left: 24, right: 20);
     tester.view.viewPadding = const FakeViewPadding(left: 24, right: 20);
     addTearDown(tester.view.reset);
@@ -801,6 +802,14 @@ void main() {
       expect(find.text('上传'), findsOneWidget);
       expect(find.text('新建目录'), findsOneWidget);
       expect(find.byIcon(LucideIcons.chevronLeft), findsOneWidget);
+      expect(
+        find.ancestor(
+          of: find.byIcon(LucideIcons.chevronLeft),
+          matching: find.byType(ShadTooltip),
+        ),
+        findsNothing,
+      );
+      expect(find.bySemanticsLabel('返回'), findsOneWidget);
       await tester.tap(find.byIcon(LucideIcons.chevronLeft));
       await tester.pumpAndSettle();
       expect(find.text('文件'), findsAtLeastNWidgets(1));
@@ -811,6 +820,7 @@ void main() {
       RemoteTaskStore.instance.resetForTest();
       SyncProfileNotifier.instance.stop();
     } finally {
+      semantics.dispose();
       debugDefaultTargetPlatformOverride = null;
     }
   });
