@@ -78,6 +78,20 @@ class FileAccessService {
 
   Future<void> openLocalPath(String localPath) async {}
 
+  Future<FileAccessTransferRequest> prepareObjectForCacheDownload({
+    required RemoteStorageGateway api,
+    required RemoteStorageConfig config,
+    required String bucket,
+    required ObjectInfo object,
+  }) {
+    return prepareObjectForExternalOpen(
+      api: api,
+      config: config,
+      bucket: bucket,
+      object: object,
+    );
+  }
+
   // Web 端没有本地缓存目录，上传后无需（也无法）seed 本地预览缓存。
   Future<void> seedCacheFromUpload({
     required RemoteStorageGateway api,

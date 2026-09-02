@@ -448,7 +448,7 @@ void main() {
     },
   );
 
-  testWidgets('file preview fills Android height and wraps four actions', (
+  testWidgets('file preview fills Android height and wraps actions', (
     tester,
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
@@ -481,9 +481,15 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      for (final label in const ['取消', '外部应用打开', '另存为', '下载']) {
-        expect(find.text(label), findsOneWidget);
+      for (final label in const ['取消', '外部应用打开', '下载']) {
+        final action = find.ancestor(
+          of: find.text(label),
+          matching: find.byType(ShadButton),
+        );
+        expect(action, findsOneWidget);
+        expect(tester.getSize(action).height, greaterThanOrEqualTo(48));
       }
+      expect(find.text('另存为'), findsNothing);
       final initialSurface = tester.getRect(_androidSheetSurfaceFinder());
       expect(initialSurface.bottom, 640);
       expect(initialSurface.top, greaterThan(0));
@@ -502,6 +508,97 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     }
   });
+
+  testWidgets('file preview keeps save-as on desktop', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    try {
+      _configureView(tester, size: const Size(800, 640));
+      await tester.pumpWidget(
+        ShadApp(
+          home: FilePreviewDialog(
+            object: const ObjectInfo(
+              key: 'documents/report.md',
+              size: 42,
+              isDir: false,
+            ),
+            kind: FilePreviewKind.markdown,
+            source: null,
+            loading: false,
+            errorText: null,
+            onOpenWithSystem: () {},
+            onSaveAs: () {},
+            onDownload: () {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('另存为'), findsOneWidget);
+      expect(find.text('下载'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets(
+    'file preview stays scrollable in Android landscape with the keyboard',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      try {
+        _configureView(
+          tester,
+          size: const Size(800, 360),
+          padding: const FakeViewPadding(top: 24, bottom: 20),
+          viewInsets: const FakeViewPadding(bottom: 220),
+        );
+        await tester.pumpWidget(
+          ShadApp(
+            home: Builder(
+              builder: (context) => MediaQuery(
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: const TextScaler.linear(1.5)),
+                child: FilePreviewDialog(
+                  object: const ObjectInfo(
+                    key: 'documents/a-very-long-report-name.md',
+                    size: 42,
+                    isDir: false,
+                  ),
+                  kind: FilePreviewKind.unsupported,
+                  source: null,
+                  loading: false,
+                  errorText: null,
+                  onOpenWithSystem: () {},
+                  onSaveAs: () {},
+                  onDownload: () {},
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          tester.getSize(find.byType(FilePreviewPane)).height,
+          closeTo(160, 2),
+        );
+        final download = find.widgetWithText(ShadButton, '下载');
+        await tester.ensureVisible(download);
+        await tester.pumpAndSettle();
+
+        final surfaceRect = tester.getRect(_androidSheetSurfaceFinder());
+        final downloadRect = tester.getRect(download);
+        expect(surfaceRect.bottom, closeTo(140, .5));
+        expect(surfaceRect.top, greaterThanOrEqualTo(24));
+        expect(downloadRect.top, greaterThanOrEqualTo(surfaceRect.top));
+        expect(downloadRect.bottom, lessThanOrEqualTo(surfaceRect.bottom - 20));
+        expect(tester.takeException(), isNull);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    },
+  );
 }
 
 void _configureView(

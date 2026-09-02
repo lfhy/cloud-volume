@@ -17,7 +17,7 @@
 | 域 | 职责摘要 |
 |---|---|
 | [account_management](features/account_management.md) | 账号管理页/三步向导(字段与 OAuth 职责拆分)、账号禁用、首启配置(页面/保存职责分层)、桶可见性与别名、每桶配额与远端配额发现、自定义排序、多账号桶加载韧性(并发/超时/singleflight/负缓存/3s 拨号超时)。 |
-| [file_actions](features/file_actions.md) | 复制/移动目录选择、本地粘贴/拖拽上传(macOS Cmd+V channel)、预览缓存索引(bbolt)与上传播种、S3 软删除回收站与 item 阶段进度。 |
+| [file_actions](features/file_actions.md) | 复制/移动目录选择、本地粘贴/拖拽上传(macOS Cmd+V channel)、预览缓存索引(bbolt)与上传播种、8 MiB 限制的 Android Markdown 预览/缓存下载/系统打开、S3 软删除回收站与 item 阶段进度。 |
 | [file_sync_p2p](features/file_sync_p2p.md) | 本地↔远端目录同步(三视图对账、删除推断、重命名检测)与 LAN P2P(mDNS 多账号发现、QUIC 传输、事件/内容安全,默认关闭)。 |
 
 ## 桌面应用壳与 UI
@@ -36,7 +36,7 @@
 |---|---|
 | [windows_platform](features/windows_platform.md) | 崩溃监视器/启动报告、自绘窗口与 DWM 圆角、Cloud Files/WinFsp/WebDAV 挂载呈现与盘符、Cloud Files 外部删除投影与持久 mutation journal、WinFsp 虚拟卷引擎(构建/安装/容量)。 |
 | [windows_dev](features/windows_dev.md) | Windows 新机依赖引导与运行/构建脚本(ARM64 CLANGARM64 工具链、CargoKit/Rustup、CPATH、Developer Mode)。 |
-| [android_dev](features/android_dev.md) | macOS/Windows Android 工具链引导、c-shared 桥构建、macOS 模拟器调测回路(`make android-run`)与 ARM64 APK 打包、应用 ID/私有数据边界、移动端桌面能力裁剪。 |
+| [android_dev](features/android_dev.md) | macOS/Windows Android 工具链引导、c-shared 桥构建、macOS 模拟器调测回路(`make android-run`)与 ARM64 APK 打包、应用 ID/私有数据边界、文件交接宿主、移动端桌面能力裁剪。 |
 
 ## 后端
 

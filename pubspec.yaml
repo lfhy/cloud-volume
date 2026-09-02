@@ -15,6 +15,7 @@ dependencies:
   shared_preferences: ^2.5.5
   file_picker: ^12.0.0
   file_selector: ^1.0.3
+  flutter_markdown_plus: ^1.0.12
   flutter_svg: ^2.2.1
   http: ^1.2.2
   path_provider: ^2.1.4

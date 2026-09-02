@@ -2,7 +2,7 @@
 
 import 'dart:typed_data';
 
-enum FilePreviewKind { image, video, pdf, word, unsupported }
+enum FilePreviewKind { image, markdown, video, pdf, word, unsupported }
 
 class FilePreviewSource {
   const FilePreviewSource({this.bytes, this.uri});

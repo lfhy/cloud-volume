@@ -43,6 +43,8 @@ class FilePreviewDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final androidSheet = usesAndroidAppModalSheet;
+    final compactAndroidSheet =
+        androidSheet && usesCompactAndroidAppModalSheet(context);
     final hasTransfer = transfer != null;
     final previewPane = Container(
       clipBehavior: Clip.antiAlias,
@@ -69,13 +71,20 @@ class FilePreviewDialog extends StatelessWidget {
       onDownload: onDownload,
     );
     final body = Column(
-      mainAxisSize: androidSheet ? MainAxisSize.max : MainAxisSize.min,
+      mainAxisSize: androidSheet && !compactAndroidSheet
+          ? MainAxisSize.max
+          : MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (androidSheet)
+        if (androidSheet && !compactAndroidSheet)
           Expanded(child: previewPane)
         else
-          SizedBox(height: 420, child: previewPane),
+          SizedBox(
+            // A bounded inner preview avoids nesting an unbounded Markdown
+            // scroll view inside the compact sheet's outer scroll view.
+            height: compactAndroidSheet ? 160 : 420,
+            child: previewPane,
+          ),
         const SizedBox(height: 16),
         actionBar,
       ],
@@ -84,7 +93,7 @@ class FilePreviewDialog extends StatelessWidget {
       title: Text(object.displayName),
       description: Text(previewKindLabel(kind)),
       androidFillHeight: androidSheet,
-      scrollable: !androidSheet,
+      scrollable: !androidSheet || compactAndroidSheet,
       child: androidSheet
           ? body
           : ConstrainedBox(
@@ -160,10 +169,11 @@ class _ActionBar extends StatelessWidget {
             child: const Text('外部应用打开'),
           ),
         ],
-        ShadButton.outline(
-          onPressed: loading ? null : onSaveAs,
-          child: const Text('另存为'),
-        ),
+        if (!usesAndroidAppModalSheet)
+          ShadButton.outline(
+            onPressed: loading ? null : onSaveAs,
+            child: const Text('另存为'),
+          ),
         ShadButton(
           onPressed: loading ? null : onDownload,
           child: const Text('下载'),
@@ -172,12 +182,28 @@ class _ActionBar extends StatelessWidget {
     ]);
   }
 
-  Widget _actionWrap(List<Widget> actions) => Wrap(
-    alignment: WrapAlignment.end,
-    spacing: 10,
-    runSpacing: 10,
-    children: actions,
-  );
+  Widget _actionWrap(List<Widget> actions) {
+    if (usesAndroidAppModalSheet) {
+      return Wrap(
+        alignment: WrapAlignment.end,
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final action in actions)
+            ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+              child: SizedBox(height: 48, child: action),
+            ),
+        ],
+      );
+    }
+    return Wrap(
+      alignment: WrapAlignment.end,
+      spacing: 10,
+      runSpacing: 10,
+      children: actions,
+    );
+  }
 }
 
 class FilePreviewTransferState {
@@ -203,8 +229,11 @@ class FilePreviewTransferState {
     final id = taskId;
     if (id == null) return null;
     return RemoteTaskStore.instance.tasks
-        .where((candidate) => candidate.id == id)
-        .firstOrNull;
+            .where((candidate) => candidate.id == id)
+            .firstOrNull ??
+        // Terminal legacy-transfer snapshots intentionally stay out of the
+        // task-list source of truth, but preview dialogs still need them.
+        RemoteTaskStore.instance.executionTask(id);
   }
 }
 

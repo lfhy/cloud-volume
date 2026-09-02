@@ -20,7 +20,8 @@ extension _FileManagerPagePreview on _FileManagerPageState {
       ),
     );
     if (!mounted) return;
-    var loading = kind == FilePreviewKind.image;
+    var loading =
+        kind == FilePreviewKind.image || kind == FilePreviewKind.markdown;
     FilePreviewTransferState? transfer;
     FilePreviewSource? source;
     String? errorText;
@@ -125,13 +126,14 @@ extension _FileManagerPagePreview on _FileManagerPageState {
               },
               onDownload: () {
                 if (transfer != null) return;
-                transfer = _runningTransferState(
-                  _PreviewTransferAction.download,
-                );
+                final action = usesAndroidAppModalSheet
+                    ? _PreviewTransferAction.cacheDownload
+                    : _PreviewTransferAction.download;
+                transfer = _runningTransferState(action);
                 setDialogState(() {});
                 unawaited(
                   _runPreviewTransfer(
-                    action: _PreviewTransferAction.download,
+                    action: action,
                     object: object,
                     dialogContext: dialogContext,
                     setDialogState: setDialogState,
@@ -201,6 +203,13 @@ extension _FileManagerPagePreview on _FileManagerPageState {
                 bucket: bucket,
                 object: object,
               ),
+        _PreviewTransferAction.cacheDownload =>
+          await FileAccessService.instance.prepareObjectForCacheDownload(
+            api: widget.api,
+            config: _activeConfig,
+            bucket: bucket,
+            object: object,
+          ),
       };
       if (request == null) {
         if (!dialogContext.mounted) return;
@@ -300,6 +309,12 @@ enum _PreviewTransferAction {
     waitingText: '文件正在保存到默认下载目录。',
     doneTitle: '下载完成',
     doneText: '文件已保存到默认下载目录。',
+  ),
+  cacheDownload(
+    runningTitle: '正在下载',
+    waitingText: '文件正在保存到本地缓存。',
+    doneTitle: '下载完成',
+    doneText: '文件已保存到本地缓存。',
   );
 
   const _PreviewTransferAction({

@@ -24,10 +24,15 @@ const Set<String> _videoExtensions = {
 
 const Set<String> _wordExtensions = {'.doc', '.docx', '.rtf'};
 
+const Set<String> _markdownExtensions = {'.md', '.markdown', '.mdown', '.mkdn'};
+
 FilePreviewKind previewKindForName(String name) {
   final extension = path.extension(name).toLowerCase();
   if (_imageExtensions.contains(extension)) {
     return FilePreviewKind.image;
+  }
+  if (_markdownExtensions.contains(extension)) {
+    return FilePreviewKind.markdown;
   }
   if (_videoExtensions.contains(extension)) {
     return FilePreviewKind.video;
@@ -44,6 +49,7 @@ FilePreviewKind previewKindForName(String name) {
 String previewKindLabel(FilePreviewKind kind) {
   return switch (kind) {
     FilePreviewKind.image => '图片预览',
+    FilePreviewKind.markdown => 'Markdown 预览',
     FilePreviewKind.video => '视频预览',
     FilePreviewKind.pdf => 'PDF 预览',
     FilePreviewKind.word => 'Word 预览',

@@ -2,12 +2,21 @@
 
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:remote_storage/platform/platform_info.dart';
 
 class LocalFileOpener {
   const LocalFileOpener._();
 
+  static const MethodChannel _androidChannel = MethodChannel(
+    'cloud_volume/external_file_opener',
+  );
+
   static Future<void> openPath(String filePath) async {
+    if (isAndroidPlatform) {
+      await _androidChannel.invokeMethod<void>('openFile', {'path': filePath});
+      return;
+    }
     final command = _commandFor(filePath);
     final result = await Process.run(command.executable, command.arguments);
     if (result.exitCode != 0) {

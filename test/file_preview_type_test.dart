@@ -10,6 +10,8 @@ void main() {
     expect(previewKindForName('movie.mp4'), FilePreviewKind.video);
     expect(previewKindForName('paper.pdf'), FilePreviewKind.pdf);
     expect(previewKindForName('doc.docx'), FilePreviewKind.word);
+    expect(previewKindForName('README.md'), FilePreviewKind.markdown);
+    expect(previewKindForName('guide.MARKDOWN'), FilePreviewKind.markdown);
     expect(previewKindForName('archive.zip'), FilePreviewKind.unsupported);
   });
 }

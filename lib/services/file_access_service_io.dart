@@ -18,8 +18,10 @@ import 'package:remote_storage/services/remote_storage_api.dart';
 import 'package:remote_storage/state/transfer_queue.dart';
 import 'package:remote_storage/utils/app_log.dart';
 import 'package:remote_storage/utils/default_download_directory.dart';
+import 'package:remote_storage/utils/file_preview_type.dart';
 
 part 'file_access_service_downloads_io.dart';
+part 'file_access_service_preview_io.dart';
 
 class FileAccessService {
   FileAccessService._();
@@ -27,83 +29,6 @@ class FileAccessService {
   static final FileAccessService instance = FileAccessService._();
 
   final FileCacheStore _cacheStore = FileCacheStore.instance;
-
-  Future<FilePreviewSource> preparePreviewSource({
-    required RemoteStorageGateway api,
-    required RemoteStorageConfig config,
-    required String bucket,
-    required ObjectInfo object,
-  }) async {
-    final watch = Stopwatch()..start();
-    final cachePath = await _ensureCachedObject(
-      api: api,
-      config: config,
-      bucket: bucket,
-      object: object,
-    );
-    unawaited(
-      AppLog.debug(
-        'prepare source cache ready bucket=$bucket key=${object.key} elapsedMs=${watch.elapsedMilliseconds} path=$cachePath',
-        tag: 'preview',
-      ),
-    );
-    final readWatch = Stopwatch()..start();
-    final bytes = await File(cachePath).readAsBytes();
-    unawaited(
-      AppLog.debug(
-        'prepare source read bytes bucket=$bucket key=${object.key} readMs=${readWatch.elapsedMilliseconds} totalMs=${watch.elapsedMilliseconds} bytes=${bytes.length}',
-        tag: 'preview',
-      ),
-    );
-    return FilePreviewSource(bytes: bytes);
-  }
-
-  Future<String> preparePreviewFilePath({
-    required RemoteStorageGateway api,
-    required RemoteStorageConfig config,
-    required String bucket,
-    required ObjectInfo object,
-  }) {
-    return _ensureCachedObject(
-      api: api,
-      config: config,
-      bucket: bucket,
-      object: object,
-    );
-  }
-
-  Future<void> openObject({
-    required RemoteStorageGateway api,
-    required RemoteStorageConfig config,
-    required String bucket,
-    required ObjectInfo object,
-  }) async {
-    final cachePath = await _ensureCachedObject(
-      api: api,
-      config: config,
-      bucket: bucket,
-      object: object,
-    );
-    await LocalFileOpener.openPath(cachePath);
-  }
-
-  Future<FileAccessTransferRequest> prepareObjectForExternalOpen({
-    required RemoteStorageGateway api,
-    required RemoteStorageConfig config,
-    required String bucket,
-    required ObjectInfo object,
-  }) {
-    return _ensureCachedObjectRequest(
-      api: api,
-      config: config,
-      bucket: bucket,
-      object: object,
-    );
-  }
-
-  Future<void> openLocalPath(String localPath) {
-    return LocalFileOpener.openPath(localPath);
-  }
 
   /// 上传成功后把本地副本登记进预览缓存，让"双击打开"命中缓存而无需重下。
   ///
@@ -157,12 +82,14 @@ class FileAccessService {
     required RemoteStorageConfig config,
     required String bucket,
     required ObjectInfo object,
+    int? maximumInlineBytes,
   }) async {
     final request = await _ensureCachedObjectRequest(
       api: api,
       config: config,
       bucket: bucket,
       object: object,
+      maximumInlineBytes: maximumInlineBytes,
     );
     return request.completion;
   }
@@ -172,6 +99,7 @@ class FileAccessService {
     required RemoteStorageConfig config,
     required String bucket,
     required ObjectInfo object,
+    int? maximumInlineBytes,
   }) async {
     final watch = Stopwatch()..start();
     unawaited(
@@ -188,6 +116,11 @@ class FileAccessService {
         tag: 'preview',
       ),
     );
+    if (maximumInlineBytes != null && remoteObject.size > maximumInlineBytes) {
+      throw StateError(
+        'Markdown 文件超过 ${maximumInlineBytes ~/ (1024 * 1024)} MB 的内嵌预览上限，请下载后查看。',
+      );
+    }
     final cacheFindWatch = Stopwatch()..start();
     final cachedPath = await _cacheStore.findUsableCachePath(
       api,

@@ -20,6 +20,8 @@ Android 对象动作抽屉与执行层共用当前目录可写性：`file_manage
 
 **Known P2/P3 (review 2026-08-31):** P2 `file_manager_page_preview.dart` 的预览关闭/404 后刷新仍只按 active bucket+prefix 识别桌面源目录；若 A 的预览结束恰逢 B 首屏加载，字段尚未切换时可能发起 A 刷新。后续让 preview 请求校验与 mutation 相同的逻辑源位置（桌面 resume target / Android 位置栈）。
 
+**Known P2/P3 (review 2026-09-02):** P2 Android 原生文件交接目前由 Kotlin 编译与 Dart 状态/布局回归覆盖，尚无 Robolectric 或设备级回归验证 `FileProvider` URI grant、`ACTION_VIEW` chooser 和无可用应用的错误分支；后续在 Android 测试依赖稳定后补原生宿主 fixture，不能以 Dart widget 测试替代该边界。
+
 **Gotchas:** Cloud Files 刷新代码只在 `windows && cgo` 构建;macOS/Linux Go 测试验证共享行为但不能执行 Windows CFAPI 调用。改动水合文件、同大小仅 ETag 覆盖、远端删除、占用缓存重挂后,经 Windows 主机的 `scripts/run_windows.ps1` 验证。
 
 ## 本地文件粘贴 / 拖拽上传
@@ -43,6 +45,8 @@ Android 对象动作抽屉与执行层共用当前目录可写性：`file_manage
 
 点击/双击文件打开走 `FileAccessService._ensureCachedObjectRequest`:`headObject` 拿远端 size/mtime → `FileCacheStore.findUsableCachePath` 经 `RemoteStorageGateway.findCacheIndexRecord` 查 bbolt 缓存索引 → 命中直接用缓存文件,未命中建 `download` 任务拉到 `<cacheDir>/files/<bucket>/<key>` 并写缓存记录。缓存命中硬约束:记录 `localPath` 必须 `_isInsideRoot` 缓存目录内,size/mtime 与远端匹配(`_matchesRemoteObject`)。
 
+`FilePreviewKind.markdown` 将 `.md`、`.markdown`、`.mdown` 与 `.mkdn` 归入内嵌预览；它和图片一样请求已校验的缓存 bytes，但 Markdown 在 `headObject` 后限制为 8 MiB，避免移动端同步解码/解析超大文本。`FilePreviewPane` 用 `flutter_markdown_plus` 渲染可选择的 GitHub Flavored Markdown，并只在用户点击 HTTP(S)、`mailto` 或 `tel` 链接时交给系统处理；不受信任 Markdown 的图片一律显示「图片未加载」占位，绝不自动读取 `http(s)`、`file:` 或 `data:` URI。Android 预览动作保持 48dp 命中区并按可用宽度换行，紧凑横屏/IME sheet 让预览、标题和动作整体滚动；「下载到缓存」复用同一份 `<cacheDir>/files/<bucket>/<key>` 已校验缓存，Android 不提供系统另存为。Android 的「外部应用打开」绝不传 `file://` 或整个私有缓存目录：原生宿主只复制目标文件到 `cache/external-open/`，`FileProvider` 为该副本签发只读 `content://` URI，再启动 `ACTION_VIEW` chooser。
+
 **缓存索引持久化在 Go(无前端 SQLite):** 缓存索引经桥接方法 `cache_index_find` / `cache_index_upsert` / `cache_index_remove` / `cache_index_remove_prefix` 存进 Go config bbolt DB 的 `preview_cache` bucket。bbolt key = `bucket + "\x00" + objectKey`,record 字段:`bucket`、`objectKey`、`localPath`、`fileSize`、`lastModified`、`updatedAtEpochMs`。Windows 前端启动不依赖 `sqlite3.dll`,缓存索引 I/O 留在 Go bridge 后台 isolate 调用链。
 
 **预览延迟日志:** 排查点击预览卡顿用 `AppLog.debug` 的 `preview` tag。`lib/pages/file_manager_page_preview.dart` 记录 open/source-load/dialog-close;`lib/services/file_access_service_io.dart` 记录 `ensure start`、`head done`、`cache find done`、`cache path done`、download task create/reuse、cache upsert、download complete、read bytes;`lib/services/file_cache_store.dart` 记录 `cache index find` 与 `cache validate`。日志写入桥接日志(`~/.cloud-volume/runtime/logs/bridge.log`),看 `phaseMs`/`totalMs` 判断卡在远端 head、bridge/bbolt 索引、本地 stat/read 还是下载链路。未手动设置时 Debug 构建默认 `Debug`、Release 默认 `Silent`;release 复现需在 设置→通用→日志设置 切「调试」。
@@ -50,8 +54,7 @@ Android 对象动作抽屉与执行层共用当前目录可写性：`file_manage
 **上传后播种缓存(binding):** 上传走传输队列,成功后只 `markTaskDone` + 刷新列表,从不动缓存表——上传与预览是两套独立记账,不播种就会出现「刚上传完的文件双击还要重下」。修复:上传成功后调 `FileAccessService.seedCacheFromUpload`(io 实现 / Web 空操作):`headObject` 拿远端元数据 → 本地源(`localSourcePath` 或 `bytes`)copy/写入缓存目录 → `upsertCacheRecord`。以远端 size/mtime 为准(不能用本地 stat,否则比对失败)。seed 全程 try/catch 吞异常:只是缓存优化,绝不阻断「上传已成功」;`unawaited` 后台执行不阻塞列表回显。
 
 **关键文件:**
-- `lib/services/file_access_service_io.dart` — `seedCacheFromUpload`(桌面)、`_ensureCachedObjectRequest`(预览/打开缓存命中)。
-- `lib/services/file_access_service_downloads_io.dart` — part 扩展:下载另存为/默认目录选择,保持主文件行数规则内。
+- `lib/services/file_access_service_io.dart` / `file_access_service_preview_io.dart` / `file_access_service_downloads_io.dart` / `file_access_paths_io.dart` / `local_file_opener_io.dart` — `seedCacheFromUpload`、8 MiB Markdown 限制、预览/打开/缓存下载共用的缓存命中，以及 Android `FileProvider` 文件交接 channel；下载 part 保持桌面 picker 与通用下载目标选择的分层。
 - `lib/services/file_access_service_web.dart` — Web 空操作(浏览器无本地缓存目录)。
 - `lib/pages/file_manager_page_uploads.dart` — `_runUploadTask`(本地路径上传,传 `localSourcePath`)、`_runBrowserUploadTask`(bytes 上传)成功分支调 seed，并以捕获的源 bucket+prefix 决定可见刷新。
 - `lib/services/file_cache_store.dart` — 缓存路径生成、安全校验、size/mtime 比对、本地缓存文件删除;索引持久化全部委托 gateway 桥接方法。缓存文件本体在 `<cacheDir>/files/<bucket>/<key>`。
@@ -59,12 +62,14 @@ Android 对象动作抽屉与执行层共用当前目录可写性：`file_manage
 - `lib/services/remote_storage_gateway.dart` / `remote_storage_api_desktop_cache.dart` / `remote_storage_api_web.dart` — gateway 缓存索引 API;Web 本地缓存索引方法为 no-op/null。
 - `go/config/cache_index.go` — Go bbolt 缓存索引 store(复用 `config.db`,bucket `preview_cache`,find/upsert/remove/remove-prefix);`cache_index_test.go` 覆盖读写与前缀删除。
 - `bridge/dispatch_cache_index.go` / `dispatch.go` — 桥接 JSON 方法路由。
-- `lib/pages/file_manager_page_preview.dart` — 双击预览入口 `_showObjectPreview`。
+- `lib/pages/file_manager_page_preview.dart` / `lib/widgets/file_preview_dialog.dart` / `file_preview_pane.dart` / `utils/file_preview_type.dart` — 双击预览入口、Android 48dp 动作布局、Markdown 类型识别与内嵌渲染。
+- `android/app/src/main/kotlin/com/cloud/volume/MainActivity.kt` / `AndroidExternalFileOpener.kt` / `android/app/src/main/res/xml/external_open_paths.xml` / `AndroidManifest.xml` — Android `ACTION_VIEW` channel、受限 `FileProvider` 路径与 URI 授权。
 
 **数据流:**
 1. 预览/打开:`_ensureCachedObjectRequest` → `api.headObject` → `findUsableCachePath` → desktop `cache_index_find` → Go `FindCacheIndexRecord` → Dart 校验路径在缓存根内、文件存在、size/mtime 匹配。
 2. 下载或上传 seed 成功:文件写入 `<cacheDir>/files/<bucket>/<objectKey>` → `upsertCacheRecord` → `cache_index_upsert` → Go bbolt `preview_cache`。
-3. 删除/移动/重命名对象:`evictCacheForObject` → 文件对象走 `cache_index_remove`;目录对象走 `cache_index_remove_prefix`,Go 返回被删记录,Dart 再清理对应本地缓存文件。
+3. Android Markdown:已校验且不超过 8 MiB 的缓存 bytes → `FilePreviewPane` → `MarkdownBody`；Android 下载到缓存复用该缓存请求；Android 外部打开:缓存文件 → 受限 `cache/external-open/` 副本 → `FileProvider` 只读 URI → 系统 chooser。
+4. 删除/移动/重命名对象:`evictCacheForObject` → 文件对象走 `cache_index_remove`;目录对象走 `cache_index_remove_prefix`,Go 返回被删记录,Dart 再清理对应本地缓存文件。
 
 ## 对象软删除与应用回收站
 
