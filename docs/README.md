@@ -17,7 +17,7 @@
 
 账号与文件管理:[account_management](features/account_management.md) · [file_actions](features/file_actions.md) · [file_sync_p2p](features/file_sync_p2p.md)
 
-桌面应用壳与 UI:[app_shell](features/app_shell.md) · [ui_rules](features/ui_rules.md) · [app_modal](features/app_modal.md) · [settings](features/settings.md)
+桌面应用壳与 UI:[app_shell](features/app_shell.md) · [mobile_ui](features/mobile_ui.md) · [ui_rules](features/ui_rules.md) · [app_modal](features/app_modal.md) · [settings](features/settings.md)
 
 平台:[windows_platform](features/windows_platform.md) · [windows_dev](features/windows_dev.md) · [android_dev](features/android_dev.md)
 

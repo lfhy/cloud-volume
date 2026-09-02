@@ -15,6 +15,7 @@
 - **Hover(binding):** 可点击行/tile/卡/侧栏项的 hover 必须是持有 `_hovered` 的独立 `StatefulWidget`,视觉仅中性背景洗色;完整规则与正典实现见 [docs/features/ui_rules.md](docs/features/ui_rules.md)。
 - **Loading(binding):** 所有 spinner 用 `AppLoadingIndicator`,`lib/` 下禁止原生 `CircularProgressIndicator`;分档规格见 [docs/features/ui_rules.md](docs/features/ui_rules.md)。
 - **模态框(binding):** 业务代码只经 `showAppModal*` 打开模态,不直接调 `showShadDialog`;见 [docs/features/app_modal.md](docs/features/app_modal.md)。
+- **移动 UI(binding):** 改动 Android/移动端页面、导航、列表、触控或抽屉前，必须先读 [docs/features/mobile_ui.md](docs/features/mobile_ui.md)；它是移动端设计检查清单，细节再跳转至对应 feature 正典。
 
 ## Go Bridge Organization
 
