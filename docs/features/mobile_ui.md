@@ -7,7 +7,7 @@
 - 移动呈现以 `!kIsWeb && defaultTargetPlatform == TargetPlatform.android` 判断；不要用 `dart:io Platform.isAndroid`，否则 widget 测试不能用 `debugDefaultTargetPlatformOverride` 覆盖平台分支。
 - 移动端可以有独立 chrome、信息密度和触控容器，但复用已有 workspace/controller 的数据、mutation 和导航状态；不得为适配小屏复制业务状态或异步请求逻辑。
 - 先确认能力是否在 Android 有完整工作流。桌面专属的窗口、挂载、拖放、鼠标右键和网格开关不因“看起来一致”而出现在移动端。
-- 页面标题使用完整的产品功能名（例如「文件管理」）；底栏可使用较短标签（例如「文件」）。副标题只表达当前位置、范围或状态，不重复标题。
+- 页面标题使用完整的产品功能名（例如「文件管理」）；底栏可使用较短标签（例如「文件」）。首页副标题沿用该功能在桌面端批准的说明，进入后的副标题只表达当前位置、范围或状态，不重复标题。
 
 ## 信息层级、触控与列表
 

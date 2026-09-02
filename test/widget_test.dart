@@ -648,7 +648,7 @@ void main() {
       expect(find.text('首页'), findsNothing);
       expect(find.text('设置'), findsOneWidget);
       expect(find.text('文件'), findsAtLeastNWidgets(1));
-      expect(find.text('所有存储桶'), findsOneWidget);
+      expect(find.text('浏览和管理远程存储中的文件。'), findsOneWidget);
       expect(
         find.descendant(
           of: find.byType(FileManagerBucketBrowser),
@@ -671,7 +671,6 @@ void main() {
         Brightness.dark,
       );
       expect(find.text('文件管理'), findsOneWidget);
-      expect(find.text('浏览和管理远程存储中的文件。'), findsNothing);
       expect(find.text('手机文件'), findsOneWidget);
       expect(find.byIcon(LucideIcons.layoutGrid), findsNothing);
       expect(find.byIcon(LucideIcons.list), findsNothing);

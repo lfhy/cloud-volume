@@ -26,7 +26,7 @@ extension _MobileFileManagerPresentation on _FileManagerPageState {
   Widget _buildMobileHeader(ShadThemeData theme) {
     final bucket = _presentationBucketEntry;
     final subtitle = bucket == null
-        ? (_isTrashHome ? '选择一个存储桶' : '所有存储桶')
+        ? (_isTrashHome ? '选择一个存储桶' : '浏览和管理远程存储中的文件。')
         : _showTrash
         ? '${bucket.label} · 回收站'
         : _presentationBreadcrumbs.isEmpty
