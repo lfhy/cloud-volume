@@ -59,7 +59,7 @@ extension _MobileFileManagerPresentation on _FileManagerPageState {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                _isTrashHome ? '回收站' : '文件',
+                _isTrashHome ? '回收站' : '文件管理',
                 style: theme.textTheme.h3.copyWith(
                   fontWeight: FontWeight.w700,
                   fontSize: 23,

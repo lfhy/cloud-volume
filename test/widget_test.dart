@@ -670,7 +670,7 @@ void main() {
         homeSystemUiStyle.systemNavigationBarIconBrightness,
         Brightness.dark,
       );
-      expect(find.text('文件管理'), findsNothing);
+      expect(find.text('文件管理'), findsOneWidget);
       expect(find.text('浏览和管理远程存储中的文件。'), findsNothing);
       expect(find.text('手机文件'), findsOneWidget);
       expect(find.byIcon(LucideIcons.layoutGrid), findsNothing);
