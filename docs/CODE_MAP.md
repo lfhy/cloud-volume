@@ -24,7 +24,7 @@
 
 | 域 | 职责摘要 |
 |---|---|
-| [app_shell](features/app_shell.md) | 窗口关闭/托盘退出确认、macOS 窗口生命周期与常量、导航结构(桌面侧栏、Android 文件首屏 + 可配置底栏 + 返回栈)、桌面/Android 分离的文件管理呈现层与共享运行时、应用图标生成链、响应式页面头部操作区。 |
+| [app_shell](features/app_shell.md) | 窗口关闭/托盘退出确认、macOS 窗口生命周期与常量、导航结构(桌面侧栏、Android 文件首屏 + 可配置底栏 + 返回栈)、桌面/Android 分离的桶与对象紧凑列表呈现层及共享运行时、应用图标生成链、响应式页面头部操作区。 |
 | [mobile_ui](features/mobile_ui.md) | Android/移动端 UI 的跨特性设计检查清单：信息层级、48dp 触控、列表状态反馈、安全区/系统栏、底栏/Back、抽屉与无障碍；移动 UI 改动前必读。 |
 | [ui_rules](features/ui_rules.md) | Flutter 组织规范、hover 可点击行 binding(StatefulWidget + `_hovered` + 中性洗色)、`AppLoadingIndicator` 分档、设置卡视觉一致性。 |
 | [app_modal](features/app_modal.md) | 统一拟态框(`showAppModal*` 唯一入口、`AppShadDialog` Android 底部抽屉/桌面有限宽)与全量模态清单;远端目录选择器的精确初始目标及 fill-height/窄屏布局;debug 桌面子窗口壳(`DesktopModalSubWindowApp`、内容自适应缩放)。 |

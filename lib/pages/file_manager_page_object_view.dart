@@ -21,15 +21,22 @@ extension _FileManagerPageObjectView on _FileManagerPageState {
       loadingMore: _pagingObjects,
       selectedKeys: _selectedObjectKeys,
       deletingKeys: _deletingObjectKeys,
-      readOnly: _activeBucketReadOnly,
+      // WebDAV permissions can differ per directory; hide and reject writes
+      // until the current directory probe confirms this location is writable.
+      readOnly: !_currentDirectoryWritable,
       supportsDirectoryDownload:
           widget.api.capabilities.supportsDownloadDirectory,
+      supportsBrowserTransfers:
+          widget.api.capabilities.supportsBrowserTransfers,
       gridIconSize: _FileManagerPageState._gridIconSize,
       listIconSize: _FileManagerPageState._listIconSize,
       mountedToDesktop: _activeMountStatus?.mounted ?? false,
       mountBucketName: _activeBucket,
       profileId: _activeConfig.profileId,
-      showSyncStatus: true,
+      // Android has no mounted local mirror; a green "synced" badge would be
+      // misleading and crowds the compact metadata row.
+      showSyncStatus: !_usesMobileNavigation,
+      mobilePresentation: _usesMobileNavigation,
       onOpenDirectory: (prefix) =>
           unawaited(_openPresentationDirectory(prefix)),
       onOpenFile: (object) => unawaited(_openObject(object)),

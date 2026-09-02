@@ -19,6 +19,7 @@ class FileListTile extends StatefulWidget {
     this.modifiedLabel = '',
     required this.onTap,
     this.onDoubleTap,
+    this.onLongPress,
     this.onTitleTap,
     this.onSelectionTap,
     this.isSelected = false,
@@ -44,6 +45,10 @@ class FileListTile extends StatefulWidget {
   final String modifiedLabel;
   final VoidCallback onTap;
   final VoidCallback? onDoubleTap;
+
+  /// Optional touch affordance for row-level actions (for example Android
+  /// long-press menus). Desktop context-menu wrappers remain the default.
+  final VoidCallback? onLongPress;
   final VoidCallback? onTitleTap;
   final VoidCallback? onSelectionTap;
   final bool isSelected;
@@ -108,6 +113,7 @@ class _FileListTileState extends State<FileListTile> {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: interactive ? widget.onTap : null,
+        onLongPress: interactive ? widget.onLongPress : null,
         onTapDown: interactive ? (_) => setState(() => _pressed = true) : null,
         onTapUp: interactive ? (_) => setState(() => _pressed = false) : null,
         onTapCancel: interactive
@@ -130,6 +136,9 @@ class _FileListTileState extends State<FileListTile> {
                 ListSelectionControl(
                   selected: widget.isSelected,
                   onTap: widget.onSelectionTap,
+                  touchTargetSize: widget.compact
+                      ? 48
+                      : ListSelectionControl.visualSize,
                 ),
                 const SizedBox(width: 10),
               ],
@@ -152,7 +161,9 @@ class _FileListTileState extends State<FileListTile> {
                               ? compactDisplayName(widget.title)
                               : widget.title,
                           style: TextStyle(
-                            fontSize: 13,
+                            // 14sp remains legible in compact touch rows;
+                            // desktop keeps its denser 13sp list rhythm.
+                            fontSize: widget.compact ? 14 : 13,
                             fontWeight: FontWeight.w500,
                             color: titleColor,
                           ),
@@ -164,7 +175,9 @@ class _FileListTileState extends State<FileListTile> {
                           Text(
                             widget.subtitleLabel,
                             style: TextStyle(
-                              fontSize: 11,
+                              // Compact rows still need a readable secondary
+                              // label at Android's smallest supported scale.
+                              fontSize: widget.compact ? 12 : 11,
                               color: theme.colorScheme.mutedForeground,
                             ),
                             maxLines: 1,
@@ -184,18 +197,25 @@ class _FileListTileState extends State<FileListTile> {
                               if (widget.sizeLabel.isNotEmpty)
                                 Text(
                                   widget.sizeLabel,
-                                  style: TextStyle(fontSize: 10.5, color: metaColor),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: metaColor,
+                                  ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               if (widget.modifiedLabel.isNotEmpty)
                                 Text(
                                   widget.modifiedLabel,
-                                  style: TextStyle(fontSize: 10.5, color: metaColor),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: metaColor,
+                                  ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
-                              if (widget.statusWidget != null) widget.statusWidget!,
+                              if (widget.statusWidget != null)
+                                widget.statusWidget!,
                             ],
                           ),
                         ],

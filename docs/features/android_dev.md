@@ -1,6 +1,6 @@
 # Android Dev — 开发环境、模拟器调测与 APK 构建(macOS 与 Windows)
 
-仓库有 macOS 与 Windows 两套用户级 Android 工具链引导。macOS 侧提供模拟器调测回路(`make android-setup` → `make android-run`);Windows 侧出 ARM64 release APK。移动端通过打包的 c-shared FFI 库复用 Go 对象存储后端,同时隐藏桌面专属工作流。文件管理共享桌面运行时但独立维护 Android 呈现：固定列表、常驻搜索、桶行尾 `…` 底部抽屉，隐藏网格/列表切换与挂载/卸载/打开挂载目录；进入桶/目录/回收站后二级顶栏提供返回按钮(加载和错误状态同样有效)。`ShadApp` 首页 route 内的根 `AnnotatedRegion<SystemUiOverlayStyle>` 在浅色主题下强制状态栏和导航栏使用深色图标，避免透明 edge-to-edge 系统栏吞掉时间、信号和电量；放在应用外层会被 route overlay 命中结果覆盖。
+仓库有 macOS 与 Windows 两套用户级 Android 工具链引导。macOS 侧提供模拟器调测回路(`make android-setup` → `make android-run`);Windows 侧出 ARM64 release APK。移动端通过打包的 c-shared FFI 库复用 Go 对象存储后端,同时隐藏桌面专属工作流。文件管理共享桌面运行时但独立维护 Android 呈现：固定紧凑列表、常驻搜索，以及桶和桶内对象行尾 `…` 底部抽屉；对象也可长按打开动作抽屉，隐藏网格/列表切换与挂载/卸载/打开挂载目录；进入桶/目录/回收站后二级顶栏提供返回按钮(加载和错误状态同样有效)。`ShadApp` 首页 route 内的根 `AnnotatedRegion<SystemUiOverlayStyle>` 在浅色主题下强制状态栏和导航栏使用深色图标，避免透明 edge-to-edge 系统栏吞掉时间、信号和电量；放在应用外层会被 route overlay 命中结果覆盖。
 
 ## 关键文件
 
@@ -18,7 +18,7 @@
 - `go/config/paths_mobile_test.go` - 钉住 `SetAppDataRoot` 覆盖与空路径拒绝语义。
 - `lib/bridge/remote_storage_bridge.dart` - Android 打开打包的 `libremote_storage_bridge.so` 并在配置调用前初始化该 app-data root。
 - `lib/app/app_entry_io.dart` / `lib/app/remote_storage_app.dart` / `lib/pages/app_bootstrap_page.dart` / `lib/services/remote_storage_api_desktop.dart` / `remote_storage_gateway.dart` - 把 `desktop_multi_window`、`window_manager`、桌面 chrome、挂载、外部文件打开、本地目录同步、WebDAV 启动挡在移动启动外,暴露其余移动能力。`remote_storage_app.dart` 在首页 route 内声明浅色 Android 系统栏样式；Android 模态会以嵌套 region 临时覆盖它。
-- `third_party/super_native_extensions` / `third_party/irondash_engine_context` / `lib/services/desktop_file_transfer_service_io.dart` / `lib/widgets/file_transfer_clipboard_region.dart` / `lib/pages/file_manager_page.dart` / `file_manager_page_presentation.dart` / `mobile_file_manager_presentation.dart` / `mobile_file_manager_page.dart` - 桌面保留 Git 恢复的原生拖放与 file URI 剪贴板实现,仅移除 Android 插件注册。Android 通过 `MobileFileManagerPage` 复用 `FileManagerWorkspace` 的数据、加载、mutation 与 Back 栈，但由 `mobile_file_manager_presentation.dart` 维护移动页头/搜索/操作行；桶浏览器以底部抽屉展示适用操作，不创建 `DropRegion`,继续用选择器上传。
+- `third_party/super_native_extensions` / `third_party/irondash_engine_context` / `lib/services/desktop_file_transfer_service_io.dart` / `lib/widgets/file_transfer_clipboard_region.dart` / `lib/pages/file_manager_page.dart` / `file_manager_page_presentation.dart` / `mobile_file_manager_presentation.dart` / `mobile_file_manager_page.dart` / `lib/widgets/file_manager_object_browser_mobile.dart` - 桌面保留 Git 恢复的原生拖放与 file URI 剪贴板实现,仅移除 Android 插件注册。Android 通过 `MobileFileManagerPage` 复用 `FileManagerWorkspace` 的数据、加载、mutation 与 Back 栈，但由 `mobile_file_manager_presentation.dart` 维护移动页头/搜索/操作行；桶和对象浏览器以底部抽屉展示适用操作，不创建 `DropRegion`,继续用选择器上传。
 - `lib/services/file_access_service_io.dart` / `file_access_service_downloads_io.dart` - 桌面用 `file_selector` 获得可写、用户可改名的保存路径而不在 Dart 缓冲下载;Android 持续流入应用临时目录,直到单独的 Storage Access Framework 实现落地。
 - `README.md` - 记录引导、移动能力、限制与 APK 构建命令。
 

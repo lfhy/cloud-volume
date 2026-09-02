@@ -36,7 +36,7 @@ extension _FileManagerPageSelectedActions on _FileManagerPageState {
         action == FileSelectionAction.copy ||
         action == FileSelectionAction.move ||
         action == FileSelectionAction.delete;
-    if (isWriteAction && !_currentBucketWritable) {
+    if (isWriteAction && !_currentDirectoryWritable) {
       _ensureCurrentDirectoryWritable();
       return;
     }

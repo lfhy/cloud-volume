@@ -102,11 +102,23 @@ extension _FileManagerPageSelection on _FileManagerPageState {
     if (selected.isEmpty) {
       return;
     }
+    // Browser transfers and mobile clients without recursive directory
+    // support must not enqueue a directory after a mixed selection. Keeping
+    // the eligible set here makes the action-sheet affordance and executor
+    // agree instead of silently attempting an unsupported transfer.
+    final downloadable = widget.api.capabilities.supportsBrowserTransfers
+        ? selected.where((object) => !object.isDir).toList(growable: false)
+        : selected
+              .where(
+                (object) =>
+                    !object.isDir ||
+                    widget.api.capabilities.supportsDownloadDirectory,
+              )
+              .toList(growable: false);
+    if (downloadable.isEmpty) {
+      return;
+    }
     if (widget.api.capabilities.supportsBrowserTransfers) {
-      final files = selected.where((object) => !object.isDir).toList();
-      if (files.isEmpty) {
-        return;
-      }
       try {
         final requests = <FileAccessTransferRequest>[];
         final directoryLister = _downloadDirectoryLister(
@@ -115,7 +127,7 @@ extension _FileManagerPageSelection on _FileManagerPageState {
           listingViewGeneration: sourceListingViewGeneration,
           requestStillCurrent: isCurrentDownloadCommand,
         );
-        for (final object in files) {
+        for (final object in downloadable) {
           if (!isCurrentDownloadCommand()) return;
           final request = await FileAccessService.instance
               .prepareDownloadObjectToPath(
@@ -165,7 +177,7 @@ extension _FileManagerPageSelection on _FileManagerPageState {
         listingViewGeneration: sourceListingViewGeneration,
         requestStillCurrent: isCurrentDownloadCommand,
       );
-      for (final object in selected) {
+      for (final object in downloadable) {
         if (!isCurrentDownloadCommand()) return;
         final request = await FileAccessService.instance
             .prepareDownloadObjectToPath(
@@ -196,7 +208,7 @@ extension _FileManagerPageSelection on _FileManagerPageState {
     if (!mounted || _activeBucket == null || _selectedObjectKeys.isEmpty) {
       return;
     }
-    if (!_currentBucketWritable) {
+    if (!_currentDirectoryWritable) {
       _ensureCurrentDirectoryWritable();
       return;
     }

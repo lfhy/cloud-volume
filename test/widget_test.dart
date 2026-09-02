@@ -2875,6 +2875,94 @@ void main() {
   );
 
   testWidgets(
+    'Android object pager keeps the tail visible at a large text scale',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      tester.view.physicalSize = const Size(280, 480);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = 1.5;
+      final pageTwo = Completer<ObjectListPage>();
+      try {
+        SharedPreferences.setMockInitialValues({});
+        final initialItems = List<ObjectInfo>.generate(
+          32,
+          (index) => ObjectInfo(
+            key: '资料/初始$index.txt',
+            size: 24,
+            lastModified: '2026-08-31',
+            isDir: false,
+          ),
+        );
+        final api = _FakeApi(
+          configured: true,
+          buckets: const <BucketInfo>[BucketInfo(name: '手机文件')],
+          objectPagesByPrefix: <String, ObjectListPage>{
+            '': const ObjectListPage(
+              items: <ObjectInfo>[
+                ObjectInfo(key: '资料/', size: 0, lastModified: '', isDir: true),
+              ],
+              nextToken: '',
+            ),
+            '资料/': ObjectListPage(items: initialItems, nextToken: 'p2'),
+          },
+        );
+
+        await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('手机文件'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('资料'));
+        await tester.pumpAndSettle();
+
+        final list = find.descendant(
+          of: find.byType(FileManagerObjectBrowser),
+          matching: find.byType(Scrollable),
+        );
+        api.nextObjectPage = pageTwo;
+        await tester.drag(list.first, const Offset(0, -10000));
+        await tester.pump();
+        expect(api.nextObjectPage, isNull);
+
+        final appendedItems = List<ObjectInfo>.generate(
+          12,
+          (index) => ObjectInfo(
+            key: '资料/窄屏大字号分页文件$index.txt',
+            size: 24,
+            lastModified: '2026-08-31 12:34',
+            isDir: false,
+          ),
+        );
+        pageTwo.complete(ObjectListPage(items: appendedItems, nextToken: ''));
+        await tester.pumpAndSettle();
+
+        final tailRow = find.byKey(
+          const ValueKey('file-object-资料/窄屏大字号分页文件11.txt'),
+        );
+        expect(tailRow, findsOneWidget);
+        expect(
+          tester.getRect(tailRow).bottom,
+          lessThanOrEqualTo(tester.view.physicalSize.height),
+        );
+      } finally {
+        if (!pageTwo.isCompleted) {
+          pageTwo.complete(
+            const ObjectListPage(items: <ObjectInfo>[], nextToken: ''),
+          );
+        }
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+        TransferQueue.instance.resetForTest();
+        RemoteTaskStore.instance.resetForTest();
+        SyncProfileNotifier.instance.stop();
+        tester.platformDispatcher.clearTextScaleFactorTestValue();
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        debugDefaultTargetPlatformOverride = null;
+      }
+    },
+  );
+
+  testWidgets(
     'Android failed rename invalidates an in-flight object page and cache',
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;

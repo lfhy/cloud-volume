@@ -36,6 +36,12 @@ extension _FileManagerPagePaging on _FileManagerPageState {
     final bucketEntry = _activeBucketEntry!;
     final prefix = _prefix;
     final nextToken = _objectsNextToken;
+    // Keep a user who reaches the pre-request tail anchored to the appended
+    // page. The scroll listener starts loading within its 520dp lead-in, so
+    // record this extent and check it after the drag has settled.
+    final pagingStartMaxExtent = _contentScrollController.hasClients
+        ? _contentScrollController.position.maxScrollExtent
+        : null;
     final listingViewGeneration = _listingViewGeneration;
     final request = _captureMobileFileManagerRequest(
       _MobileFileManagerLocation.objects(bucketEntry, prefix),
@@ -63,6 +69,22 @@ extension _FileManagerPagePaging on _FileManagerPageState {
         _objectsNextToken = page.nextToken;
         _objectsHasMore = page.hasMore;
       });
+      if (pagingStartMaxExtent != null && mounted && isCurrentRequest()) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted ||
+              !isCurrentRequest() ||
+              !_contentScrollController.hasClients) {
+            return;
+          }
+          final position = _contentScrollController.position;
+          // The loading row may be much shorter than a newly appended compact
+          // row at large text scales. Comparing with the pre-request tail
+          // distinguishes a user who did reach it from one who scrolled away.
+          if (position.pixels >= pagingStartMaxExtent - 1) {
+            position.jumpTo(position.maxScrollExtent);
+          }
+        });
+      }
     } catch (error) {
       if (!mounted || !isCurrentRequest()) {
         return;

@@ -52,7 +52,7 @@
 
 ### 全部应用内模态清单
 
-**文件管理/对象:** 建目录 `CreateDirectoryDialog`;重命名 `showRenameObjectDialog`;复制/移动目标 `showObjectTargetPathDialog`;删除单个 `showDeleteObjectDialog`;批量删除 `showDeleteObjectsDialog`(选择来自 `file_manager_page_selection.dart`);桶设置 `showBucketSettingsDialog`;挂载桶 `showMountBucketDialog`;文件预览 `FilePreviewDialog`(另有独立非模态 OS 预览窗);批量任务进度 `BatchTaskProgressDialog`;面包屑溢出(入口 `lib/widgets/file_manager_breadcrumb_bar.dart`);页面错误/消息 `_showPageMessage`。对话框 helper 在 `lib/widgets/object_action_dialogs.dart`;建目录 `create_directory_dialog.dart`;桶/挂载 `bucket_settings_dialog.dart`、`mount_bucket_dialog.dart`;预览/进度 `file_preview_dialog.dart`、`batch_task_progress_dialog.dart`。
+**文件管理/对象:** 建目录 `CreateDirectoryDialog`;重命名 `showRenameObjectDialog`;复制/移动目标 `showObjectTargetPathDialog`;删除单个 `showDeleteObjectDialog`;批量删除 `showDeleteObjectsDialog`(选择来自 `file_manager_page_selection.dart`);Android 桶与对象 `…` 的动作抽屉(`file_manager_bucket_browser_actions.dart`、`file_manager_object_browser_mobile.dart`);桶设置 `showBucketSettingsDialog`;挂载桶 `showMountBucketDialog`;文件预览 `FilePreviewDialog`(另有独立非模态 OS 预览窗);批量任务进度 `BatchTaskProgressDialog`;面包屑溢出(入口 `lib/widgets/file_manager_breadcrumb_bar.dart`);页面错误/消息 `_showPageMessage`。对话框 helper 在 `lib/widgets/object_action_dialogs.dart`;建目录 `create_directory_dialog.dart`;桶/挂载 `bucket_settings_dialog.dart`、`mount_bucket_dialog.dart`;预览/进度 `file_preview_dialog.dart`、`batch_task_progress_dialog.dart`。
 
 **回收站:** 永久删一条 `showDeleteTrashItemDialog`;批量 `showDeleteTrashItemsDialog`;清空 `showClearTrashDialog`。
 
@@ -60,7 +60,7 @@
 
 **同步/账号/设置/应用 chrome:** 删除同步配置 `showAppConfirmModal`;清理已完成传输(内联);重置全部账号(内联,入口 `lib/widgets/settings_reset_user_config_section.dart`);高级 S3 设置(内联,region + path-style);关闭应用(托盘隐藏 vs 退出);Profile/网关选择器 `ProfilePickerDialog`(暂无活跃调用方,保留备用)。
 
-**非模态:** `FilePreviewWindowApp`(分离非模态预览窗,无 scrim/overlay release);toast(`showAppToast`/`showAppErrorToast`);右键/溢出菜单。
+**非模态:** `FilePreviewWindowApp`(分离非模态预览窗,无 scrim/overlay release);toast(`showAppToast`/`showAppErrorToast`);桌面右键/溢出菜单。
 
 ### Gotchas
 

@@ -270,7 +270,7 @@ extension _FileManagerPageActions on _FileManagerPageState {
           action == FileObjectAction.move ||
           action == FileObjectAction.rename ||
           action == FileObjectAction.delete;
-      if (isWriteAction && !_currentBucketWritable) {
+      if (isWriteAction && !_currentDirectoryWritable) {
         _ensureCurrentDirectoryWritable();
         return;
       }

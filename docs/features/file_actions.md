@@ -8,6 +8,8 @@
 
 下载命令同样绑定发起时的 source generation：单对象另存为 picker、批量下载的默认目录解析/浏览器准备，以及递归目录 lister 都捕获原始 bucket/config/prefix 和位置请求，并在每个异步等待返回后、首个 provider 调用前再次校验。profile 重绑定或用户离开源目录后，迟到的 picker 结果只会取消本地任务，不会用旧 endpoint/root prefix 发起 listing 或下载；批量流程也不会清除新位置的选区或弹出旧错误。`test/widget_test.dart` 的 Android stale directory-picker 回归锁定该契约。
 
+Android 对象动作抽屉与执行层共用当前目录可写性：`file_manager_page_object_view.dart` 把 `!_currentDirectoryWritable` 传为浏览器 `readOnly`，移动端据此隐藏复制、移动、重命名和删除，`file_manager_page_actions.dart`、`file_manager_page_selected_actions.dart` 与 `file_manager_page_selection.dart` 在执行前再次拒绝写入。批量下载只暴露至少一个可下载条目；浏览器传输和不支持递归目录下载的原生客户端都会过滤目录，即使选择同时包含文件和目录也只建立可用传输。`test/file_manager_object_browser_mobile_test.dart` 覆盖只读抽屉与目录下载入口。
+
 - `lib/widgets/object_action_dialogs.dart` / `lib/pages/file_manager_page_actions.dart` / `file_manager_page_selected_actions.dart` — 复制与移动打开限定当前桶的远端目录选择器,再用 `objectTargetPathInDirectory` 追加每个源对象的显示名;UI 绝不要求用户重建完整目标 key。
 - `lib/pages/file_manager_page_uploads.dart` / `file_manager_page_object_deletes.dart` / `file_manager_page_trash.dart` / `file_manager_page_restore_sync.dart` — 上传、删除、回收站恢复和事件刷新落实上述源缓存失效与当前位置刷新契约。
 - `lib/services/local_file_opener_io.dart` — Windows 用 `cmd /c start`,路径作为独立 argv 元素,避免 Explorer 文件名查找中的字面引号。

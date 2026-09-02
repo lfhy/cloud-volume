@@ -9,12 +9,19 @@ class ListSelectionControl extends StatelessWidget {
     required this.onTap,
     this.partiallySelected = false,
     this.enabled = true,
+    this.touchTargetSize = 18,
   });
+
+  static const double visualSize = 18;
 
   final bool selected;
   final bool partiallySelected;
   final bool enabled;
   final VoidCallback? onTap;
+
+  /// Keeps the compact mobile row's hit target large without changing the
+  /// desktop control's visual size or column width.
+  final double touchTargetSize;
 
   @override
   Widget build(BuildContext context) {
@@ -27,24 +34,30 @@ class ListSelectionControl extends StatelessWidget {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: enabled ? onTap : null,
-      child: Container(
-        width: 18,
-        height: 18,
-        decoration: BoxDecoration(
-          color: active ? accent : Colors.transparent,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: active
-                ? accent
-                : theme.colorScheme.border.withValues(alpha: 0.9),
-            width: 1.2,
+      child: SizedBox(
+        width: touchTargetSize,
+        height: touchTargetSize,
+        child: Center(
+          child: Container(
+            width: visualSize,
+            height: visualSize,
+            decoration: BoxDecoration(
+              color: active ? accent : Colors.transparent,
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: active
+                    ? accent
+                    : theme.colorScheme.border.withValues(alpha: 0.9),
+                width: 1.2,
+              ),
+            ),
+            child: selected
+                ? const Icon(LucideIcons.check, size: 12, color: Colors.white)
+                : partiallySelected
+                ? const Icon(LucideIcons.minus, size: 12, color: Colors.white)
+                : null,
           ),
         ),
-        child: selected
-            ? const Icon(LucideIcons.check, size: 12, color: Colors.white)
-            : partiallySelected
-            ? const Icon(LucideIcons.minus, size: 12, color: Colors.white)
-            : null,
       ),
     );
   }

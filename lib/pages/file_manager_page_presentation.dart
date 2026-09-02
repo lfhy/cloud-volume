@@ -120,7 +120,7 @@ extension _FileManagerPagePresentation on _FileManagerPageState {
               ? null
               : _upload,
           onBatchDownload: _loading ? null : _downloadSelectedObjects,
-          onBatchDelete: _loading || !_currentBucketWritable
+          onBatchDelete: _loading || !_currentDirectoryWritable
               ? null
               : _deleteSelectedObjects,
           onClearSelection: _clearSelection,

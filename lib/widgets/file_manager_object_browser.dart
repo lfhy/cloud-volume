@@ -17,11 +17,14 @@ import 'package:remote_storage/widgets/object_action_dialogs.dart';
 import 'package:remote_storage/widgets/file_manager_object_header.dart';
 import 'package:remote_storage/widgets/file_sync_status_badge.dart';
 import 'package:remote_storage/widgets/local_cloudpan_file_icon.dart';
+import 'package:remote_storage/services/app_modal.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'package:remote_storage/widgets/app_loading_indicator.dart';
 
 part 'file_manager_object_browser_menus.dart';
+part 'file_manager_object_browser_helpers.dart';
+part 'file_manager_object_browser_mobile.dart';
 part 'file_manager_object_browser_sync.dart';
 
 const String _objectContextMenuGroup = 'file_manager_object_browser';
@@ -43,12 +46,14 @@ class FileManagerObjectBrowser extends StatelessWidget {
     required this.deletingKeys,
     this.readOnly = false,
     this.supportsDirectoryDownload = true,
+    this.supportsBrowserTransfers = false,
     required this.gridIconSize,
     required this.listIconSize,
     this.mountedToDesktop = false,
     this.mountBucketName,
     this.profileId,
     this.showSyncStatus = false,
+    this.mobilePresentation = false,
     required this.onOpenDirectory,
     required this.onOpenFile,
     required this.onDownloadFile,
@@ -82,12 +87,19 @@ class FileManagerObjectBrowser extends StatelessWidget {
   final Set<String> deletingKeys;
   final bool readOnly;
   final bool supportsDirectoryDownload;
+
+  /// Browser downloads intentionally skip directories; desktop/mobile native
+  /// transfers may use the recursive directory lister when supported.
+  final bool supportsBrowserTransfers;
   final double gridIconSize;
   final double listIconSize;
   final String? mountBucketName;
   final String? profileId;
   final bool mountedToDesktop;
   final bool showSyncStatus;
+
+  /// Android uses a compact row-only surface; desktop keeps the table/grid.
+  final bool mobilePresentation;
   final ValueChanged<String> onOpenDirectory;
   final ValueChanged<ObjectInfo> onOpenFile;
   final ValueChanged<ObjectInfo> onDownloadFile;
@@ -123,22 +135,28 @@ class FileManagerObjectBrowser extends StatelessWidget {
         : [_parentDirectoryEntry, ...objects];
     final body = visibleObjects.isEmpty
         ? _buildEmptyState(theme)
+        : mobilePresentation
+        ? _buildMobileList(context, visibleObjects, theme, tasks)
         : isGrid
         ? _buildGrid(visibleObjects, theme, tasks)
         : _buildList(visibleObjects, theme, tasks);
+    final selectionBody = FileManagerDragSelection(
+      enabled: true,
+      selectedKeys: selectedKeys,
+      onSelectionChanged: onSelectionSetChanged,
+      onBlankTap: onClearSelection,
+      onBlankSecondaryTapDown: _showBackgroundContextMenu,
+      child: body,
+    );
+    // Right-click/blank-area menus are desktop affordances. Mobile rows own
+    // their long-press and overflow-sheet gestures instead.
+    if (mobilePresentation) return selectionBody;
     return DesktopContextMenuRegion(
       groupId: _objectContextMenuGroup,
       items: _buildBackgroundMenuItems(),
       handle: _backgroundContextMenuHandle,
       captureSecondaryTap: false,
-      child: FileManagerDragSelection(
-        enabled: true,
-        selectedKeys: selectedKeys,
-        onSelectionChanged: onSelectionSetChanged,
-        onBlankTap: onClearSelection,
-        onBlankSecondaryTapDown: _showBackgroundContextMenu,
-        child: body,
-      ),
+      child: selectionBody,
     );
   }
 
@@ -248,40 +266,41 @@ class FileManagerObjectBrowser extends StatelessWidget {
       builder: (context, constraints) {
         final compact = constraints.maxWidth < 600;
         return ShadCard(
-      padding: const EdgeInsets.all(4),
-      child: Column(
-        children: [
-          FileManagerObjectHeader(
-            theme: theme,
-            showSelectionControl: true,
-            allSelected: totalCount > 0 && selectedCount == totalCount,
-            partiallySelected: selectedCount > 0 && selectedCount < totalCount,
-            onToggleSelectAll: onToggleSelectAll,
-            showSyncStatus: showSyncStatus,
-            compact: compact,
+          padding: const EdgeInsets.all(4),
+          child: Column(
+            children: [
+              FileManagerObjectHeader(
+                theme: theme,
+                showSelectionControl: true,
+                allSelected: totalCount > 0 && selectedCount == totalCount,
+                partiallySelected:
+                    selectedCount > 0 && selectedCount < totalCount,
+                onToggleSelectAll: onToggleSelectAll,
+                showSyncStatus: showSyncStatus,
+                compact: compact,
+              ),
+              Expanded(
+                child: ListView.builder(
+                  controller: scrollController,
+                  itemCount: objects.length + (loadingMore ? 1 : 0),
+                  itemBuilder: (context, index) {
+                    if (index >= objects.length) {
+                      return _buildListLoadingRow(theme);
+                    }
+                    final object = objects[index];
+                    return _buildListObjectRow(
+                      context,
+                      object,
+                      theme,
+                      tasks,
+                      index,
+                      compact,
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
-          Expanded(
-            child: ListView.builder(
-              controller: scrollController,
-              itemCount: objects.length + (loadingMore ? 1 : 0),
-              itemBuilder: (context, index) {
-                if (index >= objects.length) {
-                  return _buildListLoadingRow(theme);
-                }
-                final object = objects[index];
-                return _buildListObjectRow(
-                  context,
-                  object,
-                  theme,
-                  tasks,
-                  index,
-                  compact,
-                );
-              },
-            ),
-          ),
-        ],
-      ),
         );
       },
     );
@@ -300,185 +319,6 @@ class FileManagerObjectBrowser extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-
-  Widget _leading(ObjectInfo object, ShadThemeData theme, double size) {
-    if (_isParentDirectory(object)) {
-      return SizedBox.square(
-        dimension: size,
-        child: Center(
-          child: Icon(
-            Icons.arrow_upward_rounded,
-            size: size * 0.52,
-            color: theme.colorScheme.primary,
-          ),
-        ),
-      );
-    }
-    return LocalCloudPanFileIcon(
-      name: object.displayName,
-      isDirectory: object.isDir,
-      size: size,
-    );
-  }
-
-  String _title(ObjectInfo object) {
-    return _isParentDirectory(object) ? '..' : object.displayName;
-  }
-
-  String _subtitle(ObjectInfo object, {bool forGrid = false}) {
-    if (_isParentDirectory(object)) return '返回上一级';
-    if (_isDeleting(object)) return '删除中';
-    if (object.isDir) return forGrid ? '' : '文件夹';
-    return forGrid
-        ? object.sizeText
-        : '${object.sizeText}  ${object.lastModified}';
-  }
-
-  String _sizeLabel(ObjectInfo object) {
-    if (_isParentDirectory(object) || object.isDir || _isDeleting(object)) {
-      return '';
-    }
-    return object.sizeText;
-  }
-
-  String _modifiedLabel(ObjectInfo object) {
-    if (_isDeleting(object)) return '删除中';
-    if (_isParentDirectory(object) || object.lastModified.isEmpty) return '';
-    return object.lastModified;
-  }
-
-  VoidCallback _tapHandler(ObjectInfo object) {
-    return () {
-      if (_isDeleting(object)) {
-        return;
-      }
-      if (_dismissActiveContextMenu()) {
-        return;
-      }
-      if (_shouldToggleSelectionOnClick(object)) {
-        onToggleSelection(object);
-        return;
-      }
-      _openObject(object);
-    };
-  }
-
-  VoidCallback _titleTapHandler(ObjectInfo object) {
-    return () {
-      if (_dismissActiveContextMenu()) {
-        return;
-      }
-      if (_shouldToggleSelectionOnClick(object)) {
-        onToggleSelection(object);
-        return;
-      }
-      _openObject(object);
-    };
-  }
-
-  VoidCallback? _selectionTapHandler(ObjectInfo object) {
-    if (!_showsSelectionControl(object)) {
-      return null;
-    }
-    return () {
-      if (_isDeleting(object)) {
-        return;
-      }
-      if (_dismissActiveContextMenu()) {
-        return;
-      }
-      onToggleSelection(object);
-    };
-  }
-
-  GestureTapDownCallback? _secondaryTapHandler(ObjectInfo object) {
-    if (_isParentDirectory(object) || _isDeleting(object)) {
-      return null;
-    }
-    return (_) {
-      if (!_isSelected(object)) {
-        onSelectionContextRequested?.call(object);
-      }
-    };
-  }
-
-  Widget _wrapWithContextMenu(
-    ObjectInfo object,
-    Widget child, {
-    DesktopContextMenuHandle? handle,
-  }) {
-    if (_isParentDirectory(object)) {
-      return child;
-    }
-    if (_isDeleting(object)) {
-      return child;
-    }
-    return DesktopContextMenuRegion(
-      groupId: _objectContextMenuGroup,
-      items: _buildObjectMenuItems(object),
-      handle: handle,
-      onSecondaryTapDown: _secondaryTapHandler(object),
-      child: child,
-    );
-  }
-
-  bool _dismissActiveContextMenu() {
-    return DesktopContextMenuRegistry.dismiss(_objectContextMenuGroup);
-  }
-
-  void _runMenuAction(VoidCallback action) {
-    DesktopContextMenuRegistry.dismiss(_objectContextMenuGroup);
-    action();
-  }
-
-  void _openObject(ObjectInfo object) {
-    if (_isParentDirectory(object)) {
-      onNavigateUp();
-      return;
-    }
-    if (object.isDir) {
-      onOpenDirectory(object.key);
-      return;
-    }
-    onOpenFile(object);
-  }
-
-  bool _isSelected(ObjectInfo object) {
-    if (_isParentDirectory(object)) {
-      return false;
-    }
-    return selectedKeys.contains(object.key);
-  }
-
-  bool _isDeleting(ObjectInfo object) {
-    if (_isParentDirectory(object)) {
-      return false;
-    }
-    return deletingKeys.contains(object.key);
-  }
-
-  bool _showsSelectionControl(ObjectInfo object) {
-    return !_isParentDirectory(object);
-  }
-
-  bool _shouldToggleSelectionOnClick(ObjectInfo object) {
-    return selectedKeys.isNotEmpty && _showsSelectionControl(object);
-  }
-
-  bool _isParentDirectory(ObjectInfo object) {
-    return object.key == _parentDirectoryEntry.key;
-  }
-
-  Widget _selectionTarget(ObjectInfo object, Widget child) {
-    if (_isParentDirectory(object) || _isDeleting(object)) {
-      return child;
-    }
-    return FileManagerDragSelectionTarget(
-      selectionKey: object.key,
-      enabled: true,
-      child: child,
     );
   }
 }

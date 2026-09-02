@@ -258,44 +258,57 @@ class _BucketOverflowMenuButtonState extends State<_BucketOverflowMenuButton> {
             (MediaQuery.sizeOf(dialogContext).width - horizontalSafeArea - 60)
                 .clamp(1.0, double.infinity)
                 .toDouble();
-        final actionContentWidth = menuWidth - actionHorizontalPadding * 2;
+        final actionContentWidth = (menuWidth - actionHorizontalPadding * 2)
+            .clamp(0.0, double.infinity)
+            .toDouble();
         return AppShadDialog(
-          title: Text(widget.bucketLabel),
+          title: Text(
+            widget.bucketLabel,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               for (final action in widget.mobileActions) ...[
-                ShadButton.ghost(
-                  width: menuWidth,
-                  // Keep the pressed surface full-width while giving the icon
-                  // column the same 16dp breathing room as a touch list row.
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: actionHorizontalPadding,
-                  ),
-                  onPressed: () {
-                    Navigator.of(dialogContext).pop();
-                    action.onPressed();
-                  },
-                  child: SizedBox(
-                    width: actionContentWidth,
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        SizedBox(
-                          width: 48,
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: Icon(action.icon, size: 17),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  child: ShadButton.ghost(
+                    width: menuWidth,
+                    // Keep the pressed surface full-width while giving the icon
+                    // column the same 16dp breathing room as a touch list row.
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: actionHorizontalPadding,
+                    ),
+                    onPressed: () {
+                      Navigator.of(dialogContext).pop();
+                      action.onPressed();
+                    },
+                    child: SizedBox(
+                      width: actionContentWidth,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          SizedBox(
+                            width: 48,
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: Icon(action.icon, size: 17),
+                            ),
                           ),
-                        ),
-                        Expanded(
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(action.label),
+                          Expanded(
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                action.label,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),

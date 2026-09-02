@@ -4,6 +4,12 @@
 
 ---
 
+## 2026-09-02 Android 桶内对象紧凑列表评审(app_shell / file_actions 域)
+
+Android 对象浏览已采用与桶列表一致的紧凑行和底部动作抽屉，桌面表格、网格及右键菜单保持原路径。提交前首轮 P0/P1 评审发现并同批修复：触底分页在紧凑行追加后未保持尾部可见、选择控件命中区小于 48dp、WebDAV 当前目录不可写时仍会显示/执行写操作，以及不支持递归目录下载时目录多选仍暴露无效下载入口。最终复审又在 280×480、1.5 倍字体、12 个追加项场景确认，不能以新内容高度差判断是否锚定；分页改为记录请求开始时的 `maxScrollExtent`，仅当用户之后已到达该旧尾部才跳到新尾部。移动端也不再渲染无本地镜像语义的“已同步”徽标，紧凑名称提升到 14sp。
+
+最终 P0/P1 复审通过，无遗留 P2/P3。回归覆盖紧凑行、48dp 行尾/选择、长按与系统 Back、只读目录、文件/目录混合下载、窄屏大字号抽屉以及大字号分页；`flutter test`、`flutter analyze`、`go test ./...`、`make check-docs` 与 `git diff --check` 均作为收尾验证。
+
 ## 2026-09-01 Android 文件管理呈现复核(app_shell 域)
 
 - Android 不再共享桌面文件 chrome：`mobile_file_manager_presentation.dart` 只持有布局，`FileManagerWorkspace` 继续是数据、异步请求、mutation 与位置 Back 栈的唯一事实来源。桶行的 `…` 用 `showAppModal` 底部抽屉展示可用动作，不能恢复挂载入口或行内设置图标。
