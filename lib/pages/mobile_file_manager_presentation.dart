@@ -91,8 +91,8 @@ extension _MobileFileManagerPresentation on _FileManagerPageState {
         ),
         if (actions.isNotEmpty) ...[
           const SizedBox(width: 8),
-          // The visible plus is a compact entry to context-sensitive actions;
-          // the semantic label explains that it can also open trash actions.
+          // The visible plus is a compact entry to context-sensitive file
+          // actions. The global trash remains a separate navigation target.
           Semantics(
             label: '文件操作',
             child: ShadIconButton.ghost(
@@ -162,15 +162,6 @@ extension _MobileFileManagerPresentation on _FileManagerPageState {
         );
       }
     } else if (_activeBucket != null) {
-      if (!_isTrashHome && !_loading && _activeBucketTrashEnabled) {
-        actions.add(
-          _MobileFileAction(
-            label: '回收站',
-            icon: LucideIcons.trash2,
-            onPressed: () => unawaited(_openPresentationTrash()),
-          ),
-        );
-      }
       if (!_loading && _currentDirectoryWritable) {
         actions.addAll([
           _MobileFileAction(

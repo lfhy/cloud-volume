@@ -29,6 +29,7 @@ import 'package:remote_storage/models/transfer_job.dart';
 import 'package:remote_storage/models/sync_profile.dart';
 import 'package:remote_storage/pages/app_bootstrap_page.dart';
 import 'package:remote_storage/pages/file_manager_page.dart';
+import 'package:remote_storage/pages/global_trash_page.dart';
 import 'package:remote_storage/pages/main_layout_page.dart';
 import 'package:remote_storage/pages/mobile_file_manager_page.dart';
 import 'package:remote_storage/services/app_modal.dart';
@@ -819,7 +820,8 @@ void main() {
       await _openMobileFileActions(tester);
       expect(find.byType(AppShadDialog), findsOneWidget);
       expect(find.text('文件操作'), findsOneWidget);
-      expect(find.widgetWithText(ShadButton, '回收站'), findsOneWidget);
+      expect(find.widgetWithText(ShadButton, '回收站'), findsNothing);
+      expect(find.widgetWithText(ShadButton, '打开回收站'), findsNothing);
       expect(find.widgetWithText(ShadButton, '新建目录'), findsOneWidget);
       expect(find.widgetWithText(ShadButton, '上传'), findsOneWidget);
       expect(
@@ -841,6 +843,14 @@ void main() {
       await tester.tap(find.byIcon(LucideIcons.chevronLeft));
       await tester.pumpAndSettle();
       expect(find.text('文件'), findsAtLeastNWidgets(1));
+      final bucketOverflow = find.descendant(
+        of: find.byType(FileManagerBucketBrowser),
+        matching: find.byIcon(LucideIcons.ellipsisVertical),
+      );
+      expect(bucketOverflow, findsOneWidget);
+      await tester.tap(bucketOverflow);
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(ShadButton, '打开回收站'), findsOneWidget);
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
@@ -853,11 +863,12 @@ void main() {
     }
   });
 
-  testWidgets('Android file action drawer opens clear-trash confirmation', (
+  testWidgets('Android dedicated trash tab keeps recycle bin separate', (
     tester,
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     try {
+      await tester.binding.setSurfaceSize(const Size(1000, 1200));
       SharedPreferences.setMockInitialValues({});
       final api = _FakeApi(
         configured: true,
@@ -886,15 +897,16 @@ void main() {
 
       await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('手机文件'));
+      final trashTab = find.descendant(
+        of: find.byType(MobileNavigationBar<SidebarItem>),
+        matching: find.byIcon(LucideIcons.trash2),
+      );
+      expect(trashTab, findsOneWidget);
+      await tester.tap(trashTab);
       await tester.pumpAndSettle();
-      await _openMobileFileActions(tester);
-      await tester.tap(find.widgetWithText(ShadButton, '回收站'));
-      await tester.pumpAndSettle();
+      expect(find.byType(GlobalTrashPage), findsOneWidget);
       expect(find.text('已删文件.txt'), findsOneWidget);
-
-      await _openMobileFileActions(tester);
-      expect(find.widgetWithText(ShadButton, '清空回收站'), findsOneWidget);
+      expect(find.byIcon(LucideIcons.plus), findsNothing);
       await tester.tap(find.widgetWithText(ShadButton, '清空回收站'));
       await tester.pumpAndSettle();
       expect(find.text('将彻底删除「手机文件」回收站中的所有项目，之后无法恢复。'), findsOneWidget);
@@ -910,6 +922,7 @@ void main() {
       RemoteTaskStore.instance.resetForTest();
       SyncProfileNotifier.instance.stop();
     } finally {
+      await tester.binding.setSurfaceSize(null);
       debugDefaultTargetPlatformOverride = null;
     }
   });
@@ -1722,7 +1735,9 @@ void main() {
     }
   });
 
-  testWidgets('Android ignores a late trash page after Back', (tester) async {
+  testWidgets('Android ignores a late bucket-trash page after Back', (
+    tester,
+  ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     try {
       SharedPreferences.setMockInitialValues({});
@@ -1770,13 +1785,7 @@ void main() {
 
       await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('手机文件'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('资料'));
-      await tester.pumpAndSettle();
-      await _openMobileFileActions(tester);
-      await tester.tap(find.widgetWithText(ShadButton, '回收站'));
-      await tester.pumpAndSettle();
+      await _openMobileBucketTrash(tester);
       expect(find.text('已删0.txt'), findsOneWidget);
       expect(find.byIcon(LucideIcons.layoutGrid), findsNothing);
       expect(find.byIcon(LucideIcons.list), findsNothing);
@@ -1802,10 +1811,8 @@ void main() {
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
-      expect(find.text('说明.txt'), findsOneWidget);
-      await _openMobileFileActions(tester);
-      await tester.tap(find.widgetWithText(ShadButton, '回收站'));
-      await tester.pumpAndSettle();
+      expect(find.byType(FileManagerBucketBrowser), findsOneWidget);
+      await _openMobileBucketTrash(tester);
       expect(find.text('已删0.txt'), findsOneWidget);
 
       pendingPage.complete(
@@ -1888,13 +1895,7 @@ void main() {
 
       await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('手机文件'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('资料'));
-      await tester.pumpAndSettle();
-      await _openMobileFileActions(tester);
-      await tester.tap(find.widgetWithText(ShadButton, '回收站'));
-      await tester.pumpAndSettle();
+      await _openMobileBucketTrash(tester);
 
       final pendingRestore = Completer<void>();
       api.nextRestoreTrashItem = pendingRestore;
@@ -1904,11 +1905,11 @@ void main() {
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
-      expect(find.text('说明.txt'), findsOneWidget);
+      expect(find.byType(FileManagerBucketBrowser), findsOneWidget);
 
       pendingRestore.complete();
       await tester.pumpAndSettle();
-      expect(find.text('说明.txt'), findsOneWidget);
+      expect(find.byType(FileManagerBucketBrowser), findsOneWidget);
       expect(find.text('返回文件'), findsNothing);
 
       await tester.pumpWidget(const SizedBox.shrink());
@@ -2007,7 +2008,7 @@ void main() {
     }
   });
 
-  testWidgets('Android Back restores the directory that opened bucket trash', (
+  testWidgets('Android Back closes bucket trash opened from bucket actions', (
     tester,
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
@@ -2039,13 +2040,7 @@ void main() {
 
       await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('手机文件'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('资料'));
-      await tester.pumpAndSettle();
-      await _openMobileFileActions(tester);
-      await tester.tap(find.widgetWithText(ShadButton, '回收站'));
-      await tester.pumpAndSettle();
+      await _openMobileBucketTrash(tester);
       expect(find.text('返回文件'), findsNothing);
       expect(find.byIcon(LucideIcons.plus), findsOneWidget);
       await _openMobileFileActions(tester);
@@ -2056,7 +2051,7 @@ void main() {
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
-      expect(find.text('说明.txt'), findsOneWidget);
+      expect(find.byType(FileManagerBucketBrowser), findsOneWidget);
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
@@ -2693,9 +2688,12 @@ void main() {
         );
         backgroundButton.onPressed!();
         await tester.pumpAndSettle();
-        await _openMobileFileActions(tester);
-        await tester.tap(find.widgetWithText(ShadButton, '回收站'));
+        await tester.binding.setSurfaceSize(null);
         await tester.pumpAndSettle();
+        expect(await tester.binding.handlePopRoute(), isTrue);
+        await tester.pumpAndSettle();
+        expect(find.byType(FileManagerBucketBrowser), findsOneWidget);
+        await _openMobileBucketTrash(tester, invokeActionDirectly: true);
         expect(find.text('返回文件'), findsNothing);
         expect(find.byIcon(LucideIcons.plus), findsOneWidget);
 
@@ -3256,11 +3254,7 @@ void main() {
 
       await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('手机文件'));
-      await tester.pumpAndSettle();
-      await _openMobileFileActions(tester);
-      await tester.tap(find.widgetWithText(ShadButton, '回收站'));
-      await tester.pumpAndSettle();
+      await _openMobileBucketTrash(tester);
 
       final pendingPage = Completer<TrashListPage>();
       api.nextTrashPage = pendingPage;
@@ -3332,7 +3326,7 @@ void main() {
     }
   });
 
-  testWidgets('Android Back closes trash, returns to files, then exits', (
+  testWidgets('Android Back closes bucket trash and preserves tab history', (
     tester,
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
@@ -3366,11 +3360,7 @@ void main() {
 
       await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('手机文件'));
-      await tester.pumpAndSettle();
-      await _openMobileFileActions(tester);
-      await tester.tap(find.widgetWithText(ShadButton, '回收站'));
-      await tester.pumpAndSettle();
+      await _openMobileBucketTrash(tester);
       expect(find.text('返回文件'), findsNothing);
       await _openMobileFileActions(tester);
       expect(find.widgetWithText(ShadButton, '返回文件'), findsOneWidget);
@@ -3380,12 +3370,16 @@ void main() {
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
-      expect(find.text('说明.txt'), findsOneWidget);
+      expect(find.byType(FileManagerBucketBrowser), findsOneWidget);
       expect(find.text('返回文件'), findsNothing);
+
+      await tester.tap(find.text('手机文件'));
+      await tester.pumpAndSettle();
+      expect(find.text('说明.txt'), findsOneWidget);
 
       expect(await tester.binding.handlePopRoute(), isTrue);
       await tester.pumpAndSettle();
-      expect(find.text('文件'), findsAtLeastNWidgets(1));
+      expect(find.byType(FileManagerBucketBrowser), findsOneWidget);
 
       await tester.tap(find.text('账号'));
       await tester.pumpAndSettle();
@@ -3640,6 +3634,28 @@ final class _TestPlatformFile extends PlatformFile {
 
 Future<void> _openMobileFileActions(WidgetTester tester) async {
   await tester.tap(find.byIcon(LucideIcons.plus));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _openMobileBucketTrash(
+  WidgetTester tester, {
+  bool invokeActionDirectly = false,
+}) async {
+  final overflow = find.descendant(
+    of: find.byType(FileManagerBucketBrowser),
+    matching: find.byIcon(LucideIcons.ellipsisVertical),
+  );
+  expect(overflow, findsOneWidget);
+  await tester.tap(overflow);
+  await tester.pumpAndSettle();
+  final openTrash = find.widgetWithText(ShadButton, '打开回收站');
+  if (invokeActionDirectly) {
+    final button = tester.widget<ShadButton>(openTrash);
+    expect(button.onPressed, isNotNull);
+    button.onPressed!();
+  } else {
+    await tester.tap(openTrash);
+  }
   await tester.pumpAndSettle();
 }
 
