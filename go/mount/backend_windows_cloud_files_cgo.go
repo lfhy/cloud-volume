@@ -108,7 +108,7 @@ func (b *windowsCloudFilesBackend) Start(session *mountSession) error {
 		_ = watcher.Close()
 		return err
 	}
-	if err := hydrator.OnFetchPlaceholders(session.mountPath); err != nil {
+	if err := hydrator.PopulatePlaceholders(session.mountPath); err != nil {
 		_ = watcher.Close()
 		_ = provider.Disconnect()
 		_ = provider.Deregister()
@@ -399,6 +399,19 @@ func (b *windowsCloudFilesBackend) handleRename(
 		if session.readOnly {
 			return
 		}
+		// A normal local file can arrive as fsnotify Rename(old)+Create(new)
+		// before (or without) a CFAPI completion. Serialize both paths so the
+		// metadata rename is admitted exactly once.
+		watcher.renameMu.Lock()
+		defer watcher.renameMu.Unlock()
+		if watcher.state.fallbackRenameHandled(oldPath, newPath) {
+			log.Printf(
+				"[mount/cloud-files] rename-completion already paired old=%q new=%q",
+				oldPath,
+				newPath,
+			)
+			return
+		}
 		oldVirtual := cloudFilesLocalPathToVirtual(session.mountPath, oldPath)
 		newVirtual := cloudFilesLocalPathToVirtual(session.mountPath, newPath)
 		if isWindowsLocalOnlyPath(oldVirtual) || isWindowsLocalOnlyPath(newVirtual) {
@@ -406,7 +419,6 @@ func (b *windowsCloudFilesBackend) handleRename(
 		}
 		isDir := watcher.IsDir(newPath)
 		watcher.MarkRenameSource(oldPath, isDir)
-		watcher.Rebase(oldPath, newPath, isDir)
 		if err := session.access.enqueueRenamePath(
 			oldVirtual,
 			newVirtual,
@@ -415,7 +427,21 @@ func (b *windowsCloudFilesBackend) handleRename(
 			isDir,
 		); err != nil {
 			session.lastError = err.Error()
+			log.Printf(
+				"[mount/cloud-files] rename-completion old=%q new=%q error=%v",
+				oldVirtual,
+				newVirtual,
+				err,
+			)
+			return
 		}
+		watcher.Rebase(oldPath, newPath, isDir)
+		// The fsnotify Rename(old)+Create(new) pair can still race this callback;
+		log.Printf(
+			"[mount/cloud-files] rename-completion old=%q new=%q",
+			oldVirtual,
+			newVirtual,
+		)
 	}
 }
 

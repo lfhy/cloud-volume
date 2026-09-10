@@ -151,21 +151,35 @@ func uploadWholeObject(
 	totalBytes int64,
 	taskID string,
 ) error {
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
+	var payloadHashOption func(*s3.Options)
+	if taskID != "" {
+		var err error
+		payloadHashOption, err = precomputeFilePayloadHash(ctx, file)
+		if err != nil {
+			return err
+		}
+	} else if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	body := io.Reader(file)
+	body := io.ReadSeeker(file)
 	if taskID != "" {
-		body = &contextReader{
+		// The precomputed SigV4 hash avoids a signing read being counted as upload
+		// progress; retain seek support for genuine retry rewinds.
+		body = &contextReadSeeker{
 			ctx:    ctx,
 			reader: file,
 			onRead: func(n int) { advanceTransfer(taskID, int64(n)) },
 		}
 	}
-	_, err := client.PutObject(ctx, &s3.PutObjectInput{
+	input := &s3.PutObjectInput{
 		Bucket: &bucket,
 		Key:    &key,
 		Body:   body,
-	})
+	}
+	if payloadHashOption != nil {
+		_, err := client.PutObject(ctx, input, payloadHashOption)
+		return err
+	}
+	_, err := client.PutObject(ctx, input)
 	return err
 }

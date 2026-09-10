@@ -4,12 +4,15 @@
 package mount
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+
+	"remote-storage/go/mount/metadata"
 )
 
 func TestWindowsPathStatePlaceholderIgnoreDoesNotHideChildren(t *testing.T) {
@@ -81,6 +84,125 @@ func TestMarkRenameSourceLeavesRenamedChildrenWritable(t *testing.T) {
 	}
 	if len(watcher.state.hydrating) != 0 {
 		t.Fatalf("rename must not leave permanent hydration markers: %v", watcher.state.hydrating)
+	}
+}
+
+func TestWindowsWatcherPairsNormalFileRenameIntoMetadata(t *testing.T) {
+	// A newly created normal NTFS file can produce only fsnotify Rename(old)
+	// plus Create(new), so verify that it still becomes one metadata rename.
+	access := newTestBucketAccess(t)
+	backend := newMetadataMountWriteBackend()
+	manager, handle := attachMetadataWriteService(t, access, backend)
+	root := t.TempDir()
+	oldPath := filepath.Join(root, "alpha.txt")
+	newPath := filepath.Join(root, "renamed.txt")
+	if err := os.WriteFile(oldPath, []byte("pending payload"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	watcher := &windowsSyncWatcher{
+		root:   root,
+		access: access,
+		state: &windowsPathState{
+			ignored:      map[string]windowsIgnoredPath{},
+			hydrating:    map[string]bool{},
+			kinds:        map[string]bool{},
+			files:        map[string]windowsObservedFile{},
+			placeholders: map[string]bool{},
+		},
+	}
+
+	oldInfo, err := os.Stat(oldPath)
+	if err != nil {
+		t.Fatalf("stat source: %v", err)
+	}
+	watcher.state.remember(oldPath, false)
+	if !watcher.state.shouldQueueFile(oldPath, oldInfo.Size(), oldInfo.ModTime(), false) {
+		t.Fatal("expected initial normal file to enter the watcher state")
+	}
+	if err := access.stageLocalWrite("alpha.txt", oldPath, oldInfo.Size()); err != nil {
+		t.Fatalf("stage source: %v", err)
+	}
+	if err := os.Rename(oldPath, newPath); err != nil {
+		t.Fatalf("rename normal local file: %v", err)
+	}
+	watcher.handleRenameSource(oldPath, "alpha.txt")
+	info, err := os.Stat(newPath)
+	if err != nil {
+		t.Fatalf("stat renamed file: %v", err)
+	}
+	if !watcher.completePendingFileRename(newPath, "renamed.txt", info) {
+		t.Fatal("expected Rename(old)+Create(new) pair to become a metadata rename")
+	}
+	beforeGroups, err := manager.ListTaskGroups()
+	if err != nil {
+		t.Fatalf("list task groups before late callback: %v", err)
+	}
+	beforeTasks, beforeEvents := countMetadataTaskProjection(beforeGroups)
+	session := &mountSession{mountPath: root, access: access}
+	(&windowsCloudFilesBackend{}).handleRename(session, watcher)(oldPath, newPath)
+	if session.lastError != "" {
+		t.Fatalf("late CFAPI completion reported an error: %q", session.lastError)
+	}
+	afterGroups, err := manager.ListTaskGroups()
+	if err != nil {
+		t.Fatalf("list task groups after late callback: %v", err)
+	}
+	afterTasks, afterEvents := countMetadataTaskProjection(afterGroups)
+	if beforeTasks != afterTasks || beforeEvents != afterEvents {
+		t.Fatalf(
+			"late callback changed task projection: before=%d/%d after=%d/%d",
+			beforeTasks,
+			beforeEvents,
+			afterTasks,
+			afterEvents,
+		)
+	}
+
+	ctx := context.Background()
+	if _, err := handle.Service.StatPath(ctx, "alpha.txt"); err == nil {
+		t.Fatal("source remained in the Desired metadata view")
+	}
+	if _, err := handle.Service.StatPath(ctx, "renamed.txt"); err != nil {
+		t.Fatalf("renamed target missing from Desired metadata view: %v", err)
+	}
+	if err := manager.DrainAll(ctx); err != nil {
+		t.Fatalf("drain metadata worker: %v", err)
+	}
+	backend.mu.Lock()
+	_, oldExists := backend.objects["alpha.txt"]
+	_, newExists := backend.objects["renamed.txt"]
+	backend.mu.Unlock()
+	if oldExists || !newExists {
+		t.Fatalf("remote rename convergence old=%t new=%t", oldExists, newExists)
+	}
+}
+
+func countMetadataTaskProjection(groups []metadata.TaskGroup) (tasks, events int) {
+	for _, group := range groups {
+		tasks += len(group.Tasks)
+		for _, task := range group.Tasks {
+			events += len(task.Events)
+		}
+	}
+	return tasks, events
+}
+
+func TestWindowsPathStateRejectsAmbiguousRenamePair(t *testing.T) {
+	t.Parallel()
+
+	first := filepath.Join(`C:\sync-root`, `first.txt`)
+	second := filepath.Join(`C:\sync-root`, `second.txt`)
+	target := filepath.Join(`C:\sync-root`, `renamed.txt`)
+	observed := windowsObservedFile{size: 24, modTime: 42}
+	state := &windowsPathState{
+		kinds: map[string]bool{first: false, second: false},
+		files: map[string]windowsObservedFile{first: observed, second: observed},
+	}
+	if !state.beginPendingFileRename(first) || !state.beginPendingFileRename(second) {
+		t.Fatal("expected both staged sources to become pending rename candidates")
+	}
+	if oldPath, ok := state.claimPendingFileRename(target, observed.size, time.Unix(0, observed.modTime)); ok || oldPath != "" {
+		t.Fatalf("ambiguous candidates paired as old=%q ok=%t", oldPath, ok)
 	}
 }
 

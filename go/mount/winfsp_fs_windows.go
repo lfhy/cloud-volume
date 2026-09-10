@@ -16,8 +16,6 @@ import (
 	"sync"
 
 	"github.com/winfsp/cgofuse/fuse"
-
-	s3ops "remote-storage/go/s3"
 )
 
 // winFspBucketFS projects bucketAccess onto a WinFsp virtual volume.

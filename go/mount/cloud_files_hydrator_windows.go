@@ -9,7 +9,6 @@ import (
 	"log"
 	"path/filepath"
 	"sync"
-	"time"
 )
 
 type cloudFilesHydrator struct {
@@ -24,7 +23,7 @@ type cloudFilesHydrator struct {
 
 	placeholderMu        sync.Mutex
 	placeholderInflight  map[string]*cloudFilesPlaceholderFetch
-	placeholderFetched   map[string]time.Time
+	placeholderFetched   map[string]cloudFilesPlaceholderCache
 	projectionMu         sync.Mutex
 	projectedDirectories map[string]map[string]cloudPlaceholderInfo
 }
@@ -44,7 +43,7 @@ func newCloudFilesHydrator(
 		reader:               reader,
 		cancels:              map[string]context.CancelFunc{},
 		placeholderInflight:  map[string]*cloudFilesPlaceholderFetch{},
-		placeholderFetched:   map[string]time.Time{},
+		placeholderFetched:   map[string]cloudFilesPlaceholderCache{},
 		projectedDirectories: map[string]map[string]cloudPlaceholderInfo{},
 	}
 }
@@ -120,23 +119,66 @@ func (h *cloudFilesHydrator) OnCancelFetch(req cloudFilesFetchRequest) {
 	}
 }
 
-func (h *cloudFilesHydrator) OnFetchPlaceholders(localPath string) (resultErr error) {
+// PopulatePlaceholders performs the initial physical projection after mount
+// startup. FETCH_PLACEHOLDERS callbacks use CfExecute instead of this path.
+func (h *cloudFilesHydrator) PopulatePlaceholders(localPath string) (resultErr error) {
 	cleanLocalPath := filepath.Clean(localPath)
-	shouldFetch, inflight := h.beginPlaceholderFetch(cleanLocalPath)
+	shouldFetch, cached, inflight := h.beginPlaceholderFetch(cleanLocalPath)
 	if inflight != nil {
 		<-inflight.done
-		return inflight.err
+		if inflight.err != nil {
+			return inflight.err
+		}
+		return h.projectPlaceholders(cleanLocalPath, inflight.placeholders)
 	}
 	if !shouldFetch {
-		return nil
+		return h.projectPlaceholders(cleanLocalPath, cached)
 	}
-	defer func() {
-		h.finishPlaceholderFetch(cleanLocalPath, resultErr)
-	}()
 
+	placeholders, resultErr := h.listDirectoryPlaceholders(cleanLocalPath)
+	if resultErr == nil {
+		resultErr = h.projectPlaceholders(cleanLocalPath, placeholders)
+	}
+	h.finishPlaceholderFetch(cleanLocalPath, placeholders, resultErr)
+	return resultErr
+}
+
+// OnFetchPlaceholders reports the actual child set to the Cloud Files request.
+// Creating placeholders out of band then completing the request with zero
+// entries makes Explorer cache an empty directory.
+func (h *cloudFilesHydrator) OnFetchPlaceholders(
+	localPath string,
+	opInfo uintptr,
+) (resultErr error) {
+	cleanLocalPath := filepath.Clean(localPath)
+	shouldFetch, cached, inflight := h.beginPlaceholderFetch(cleanLocalPath)
+	if inflight != nil {
+		<-inflight.done
+		return h.transferFetchedPlaceholders(opInfo, inflight.placeholders, inflight.err)
+	}
+	if !shouldFetch {
+		return h.transferFetchedPlaceholders(opInfo, cached, nil)
+	}
+
+	placeholders, resultErr := h.listDirectoryPlaceholders(cleanLocalPath)
+	if resultErr == nil {
+		resultErr = h.transferFetchedPlaceholders(opInfo, placeholders, nil)
+		if resultErr == nil {
+			h.rememberTransferredPlaceholders(cleanLocalPath, placeholders)
+		}
+	} else {
+		resultErr = h.transferFetchedPlaceholders(opInfo, nil, resultErr)
+	}
+	h.finishPlaceholderFetch(cleanLocalPath, placeholders, resultErr)
+	return resultErr
+}
+
+func (h *cloudFilesHydrator) listDirectoryPlaceholders(
+	localPath string,
+) ([]cloudPlaceholderInfo, error) {
 	virtualPath, valid := cloudFilesLocalPathToVirtualChecked(h.syncRoot, localPath)
 	if !valid {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"resolve Cloud Files placeholder path %q under %q",
 			localPath,
 			h.syncRoot,
@@ -150,20 +192,41 @@ func (h *cloudFilesHydrator) OnFetchPlaceholders(localPath string) (resultErr er
 	)
 	items, err := h.access.listRemoteDirectoryMetadata(context.Background(), virtualPath)
 	if err != nil {
-		return fmt.Errorf("list remote directory %q: %w", virtualPath, err)
+		return nil, fmt.Errorf("list remote directory %q: %w", virtualPath, err)
 	}
-	placeholders := cloudFilesMetadataDirectoryPlaceholders(items, h.access.metadataNamespaceID())
+	placeholders := cloudFilesMetadataDirectoryPlaceholders(
+		items,
+		h.access.metadataNamespaceID(),
+	)
 	log.Printf(
 		"[mount/cloud-files] fetch-placeholders-done local=%q virtual=%q count=%d",
 		localPath,
 		virtualPath,
 		len(placeholders),
 	)
-	if h.hasProjectedDirectory(localPath) {
-		if err := h.refreshProjectedDirectory(localPath, placeholders); err != nil {
-			return err
+	return placeholders, nil
+}
+
+func (h *cloudFilesHydrator) transferFetchedPlaceholders(
+	opInfo uintptr,
+	placeholders []cloudPlaceholderInfo,
+	callbackErr error,
+) error {
+	if err := h.provider.TransferPlaceholders(opInfo, placeholders, callbackErr); err != nil {
+		if callbackErr != nil {
+			return fmt.Errorf("complete placeholder callback: %v; %w", callbackErr, err)
 		}
-		return nil
+		return err
+	}
+	return callbackErr
+}
+
+func (h *cloudFilesHydrator) projectPlaceholders(
+	localPath string,
+	placeholders []cloudPlaceholderInfo,
+) error {
+	if h.hasProjectedDirectory(localPath) {
+		return h.refreshProjectedDirectory(localPath, placeholders)
 	}
 
 	h.watcher.RememberPlaceholders(localPath, placeholders)
@@ -174,4 +237,13 @@ func (h *cloudFilesHydrator) OnFetchPlaceholders(localPath string) (resultErr er
 	h.rememberProjectedDirectory(localPath, placeholders)
 	h.watcher.watchPlaceholderDirectories(localPath, placeholders)
 	return nil
+}
+
+func (h *cloudFilesHydrator) rememberTransferredPlaceholders(
+	localPath string,
+	placeholders []cloudPlaceholderInfo,
+) {
+	h.watcher.RememberPlaceholders(localPath, placeholders)
+	h.rememberProjectedDirectory(localPath, placeholders)
+	h.watcher.watchPlaceholderDirectories(localPath, placeholders)
 }

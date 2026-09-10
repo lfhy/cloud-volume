@@ -58,6 +58,7 @@ typedef struct RS_CF_PLACEHOLDER_CREATE_INFO {
 
 typedef enum RS_CF_REGISTER_FLAGS {
     CF_REGISTER_FLAG_NONE = 0x00000000,
+    CF_REGISTER_FLAG_DISABLE_ON_DEMAND_POPULATION_ON_ROOT = 0x00000002,
 } CF_REGISTER_FLAGS;
 
 typedef enum RS_CF_HYDRATION_POLICY_PRIMARY {
@@ -323,8 +324,14 @@ HRESULT rs_cf_execute_transfer(
     LARGE_INTEGER length,
     const BYTE* data);
 HRESULT rs_cf_report_error(uintptr_t callbackInfoPtr, HRESULT providerError);
-HRESULT rs_cf_ack_placeholders(uintptr_t callbackInfoPtr, HRESULT completionStatus);
-HRESULT rs_cf_complete_placeholders(uintptr_t callbackInfoPtr, HRESULT completionStatus, DWORD flags);
+HRESULT rs_cf_transfer_placeholders(
+    uintptr_t callbackInfoPtr,
+    NTSTATUS completionStatus,
+    DWORD flags,
+    LONGLONG placeholderTotalCount,
+    CF_PLACEHOLDER_CREATE_INFO* items,
+    DWORD count,
+    DWORD* entriesProcessed);
 HRESULT rs_cf_report_progress_cb(
     uintptr_t callbackInfoPtr,
     LARGE_INTEGER total,

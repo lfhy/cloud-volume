@@ -120,7 +120,11 @@ HRESULT rs_cf_register(LPCWSTR syncRootPath, LPCWSTR providerID, LPCWSTR display
     policies.HardLink = CF_HARDLINK_POLICY_NONE;
     policies.PlaceholderManagement = CF_PLACEHOLDER_MANAGEMENT_POLICY_DEFAULT;
 
-    return fn(syncRootPath, &reg, &policies, CF_REGISTER_FLAG_NONE);
+    return fn(
+        syncRootPath,
+        &reg,
+        &policies,
+        CF_REGISTER_FLAG_DISABLE_ON_DEMAND_POPULATION_ON_ROOT);
 }
 
 HRESULT rs_cf_deregister(LPCWSTR syncRootPath) {
@@ -353,24 +357,14 @@ HRESULT rs_cf_report_error(uintptr_t callbackInfoPtr, HRESULT providerError) {
     return fn(&opInfo, &params);
 }
 
-HRESULT rs_cf_ack_placeholders(uintptr_t callbackInfoPtr, HRESULT completionStatus) {
-    rs_cf_execute_fn fn = (rs_cf_execute_fn)rs_load_proc("CfExecute");
-    if (!fn) return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
-    if (!callbackInfoPtr) return E_INVALIDARG;
-
-    const CF_CALLBACK_INFO* info = (const CF_CALLBACK_INFO*)callbackInfoPtr;
-    CF_OPERATION_INFO opInfo = rs_build_op_info(info, CF_OPERATION_TYPE_TRANSFER_PLACEHOLDERS);
-    CF_OPERATION_PARAMETERS params = {0};
-    params.ParamSize = RS_SIZE_OF_OP_PARAM(TransferPlaceholders);
-    params.TransferPlaceholders.Flags = CF_OPERATION_TRANSFER_PLACEHOLDERS_FLAG_NONE;
-    params.TransferPlaceholders.CompletionStatus = completionStatus;
-    return fn(&opInfo, &params);
-}
-
-HRESULT rs_cf_complete_placeholders(
+HRESULT rs_cf_transfer_placeholders(
         uintptr_t callbackInfoPtr,
-        HRESULT completionStatus,
-        DWORD flags) {
+        NTSTATUS completionStatus,
+        DWORD flags,
+        LONGLONG placeholderTotalCount,
+        CF_PLACEHOLDER_CREATE_INFO* items,
+        DWORD count,
+        DWORD* entriesProcessed) {
     rs_cf_execute_fn fn = (rs_cf_execute_fn)rs_load_proc("CfExecute");
     if (!fn) return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
     if (!callbackInfoPtr) return E_INVALIDARG;
@@ -381,11 +375,15 @@ HRESULT rs_cf_complete_placeholders(
     params.ParamSize = RS_SIZE_OF_OP_PARAM(TransferPlaceholders);
     params.TransferPlaceholders.Flags = (CF_OPERATION_TRANSFER_PLACEHOLDERS_FLAGS)flags;
     params.TransferPlaceholders.CompletionStatus = completionStatus;
-    params.TransferPlaceholders.PlaceholderTotalCount.QuadPart = 0;
-    params.TransferPlaceholders.PlaceholderArray = NULL;
-    params.TransferPlaceholders.PlaceholderCount = 0;
+    params.TransferPlaceholders.PlaceholderTotalCount.QuadPart = placeholderTotalCount;
+    params.TransferPlaceholders.PlaceholderArray = items;
+    params.TransferPlaceholders.PlaceholderCount = count;
     params.TransferPlaceholders.EntriesProcessed = 0;
-    return fn(&opInfo, &params);
+    HRESULT hr = fn(&opInfo, &params);
+    if (entriesProcessed) {
+        *entriesProcessed = params.TransferPlaceholders.EntriesProcessed;
+    }
+    return hr;
 }
 
 HRESULT rs_cf_report_progress_cb(

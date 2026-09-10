@@ -272,40 +272,6 @@ func (p *cloudFilesProvider) ReportError(req cloudFilesFetchRequest, err error) 
 	return nil
 }
 
-func (p *cloudFilesProvider) AckPlaceholders(opInfo uintptr, callbackErr error) error {
-	status := C.HRESULT(0)
-	if callbackErr != nil {
-		status = C.HRESULT(-2147467259)
-	}
-	hr := C.rs_cf_ack_placeholders(C.uintptr_t(opInfo), status)
-	if hr != 0 {
-		return fmt.Errorf("ack Cloud Files placeholders: HRESULT 0x%08x", uint32(hr))
-	}
-	return nil
-}
-
-func (p *cloudFilesProvider) CompletePlaceholders(
-	opInfo uintptr,
-	callbackErr error,
-	disableOnDemandPopulation bool,
-) error {
-	status := C.HRESULT(0)
-	if callbackErr != nil {
-		status = C.HRESULT(-2147467259)
-	}
-	flags := C.DWORD(C.CF_OPERATION_TRANSFER_PLACEHOLDERS_FLAG_NONE)
-	if callbackErr == nil && disableOnDemandPopulation {
-		flags = C.DWORD(
-			C.CF_OPERATION_TRANSFER_PLACEHOLDERS_FLAG_DISABLE_ON_DEMAND_POPULATION,
-		)
-	}
-	hr := C.rs_cf_complete_placeholders(C.uintptr_t(opInfo), status, flags)
-	if hr != 0 {
-		return fmt.Errorf("complete Cloud Files placeholders: HRESULT 0x%08x", uint32(hr))
-	}
-	return nil
-}
-
 func (p *cloudFilesProvider) ReportProgress(req cloudFilesFetchRequest, total, done int64) error {
 	if req.opInfo == 0 {
 		return nil

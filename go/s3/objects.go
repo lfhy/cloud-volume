@@ -172,17 +172,29 @@ func UploadFileContext(
 		defer func() { finishTransfer(taskID, err) }()
 	}
 
-	body := io.Reader(f)
+	var payloadHashOption func(*s3.Options)
 	if taskID != "" {
-		body = &contextReader{
+		payloadHashOption, err = precomputeFilePayloadHash(ctx, f)
+		if err != nil {
+			return err
+		}
+	}
+	body := io.ReadSeeker(f)
+	if taskID != "" {
+		// SigV4 hashes and may rewind file uploads before sending them. Keep
+		// the seek capability for retries while only sent bytes count as progress.
+		body = &contextReadSeeker{
 			ctx:    ctx,
 			reader: f,
 			onRead: func(n int) { advanceTransfer(taskID, int64(n)) },
 		}
 	}
-	_, err = client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket: &bucket, Key: &key, Body: body,
-	})
+	input := &s3.PutObjectInput{Bucket: &bucket, Key: &key, Body: body}
+	if payloadHashOption != nil {
+		_, err = client.PutObject(ctx, input, payloadHashOption)
+	} else {
+		_, err = client.PutObject(ctx, input)
+	}
 	return err
 }
 

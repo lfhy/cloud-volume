@@ -27,6 +27,7 @@ CLI_FULL_OUT := $(CLI_DIR)/cloud-volume-cli-full
 MACOS_BRIDGE_OUT := $(BRIDGE_DIR)/libremote_storage_bridge.dylib
 LINUX_BRIDGE_OUT := $(BRIDGE_DIR)/libremote_storage_bridge.so
 WINDOWS_BRIDGE_OUT := $(BRIDGE_DIR)/remote_storage_bridge.dll
+WINFSP_INC := $(CURDIR)/third_party/winfsp/inc/fuse
 BRIDGE_GO_ENV := CGO_ENABLED=1
 BRIDGE_GOARCH ?= $(shell go env GOARCH)
 BRIDGE_LDFLAGS := -X main.buildArch=$(BRIDGE_GOARCH)
@@ -64,7 +65,6 @@ bridge-linux:
 bridge-windows:
 ifeq ($(HOST_PLATFORM),windows)
 	@mkdir -p $(BRIDGE_DIR)
-	WINFSP_INC := $(CURDIR)/third_party/winfsp/inc/fuse
 	$(BRIDGE_GO_ENV) CPATH="$(WINFSP_INC)" go build -buildmode=c-shared -ldflags "$(BRIDGE_LDFLAGS)" -o $(WINDOWS_BRIDGE_OUT) ./bridge
 else
 	@echo "bridge-windows must be run on a Windows host."

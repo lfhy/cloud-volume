@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"path/filepath"
 
 	"remote-storage/go/mount/metadata"
@@ -21,7 +20,11 @@ func (a *bucketAccess) stageMetadataWrite(virtualPath, localPath string, _ int64
 	if service == nil {
 		return fmt.Errorf("metadata write path is unavailable")
 	}
-	file, err := os.Open(localPath)
+	// Serialize opening, sampling, and admission with an externally completed
+	// Cloud Files rename, so its callback cannot journal the rename first.
+	a.writebackMu.Lock()
+	defer a.writebackMu.Unlock()
+	file, err := openMetadataWriteSource(localPath)
 	if err != nil {
 		return err
 	}
@@ -36,8 +39,6 @@ func (a *bucketAccess) stageMetadataWrite(virtualPath, localPath string, _ int64
 
 	// Cache markers must change in the same mount-local order as Desired paths.
 	// The metadata facade has its own durable path order across all adapters.
-	a.writebackMu.Lock()
-	defer a.writebackMu.Unlock()
 	inode, ref, err := service.WritePath(context.Background(), cleanVirtualPath(virtualPath), file, info.Size(), metadata.WriteOptions{
 		Origin: "mount",
 		MTime:  info.ModTime().Format("2006-01-02 15:04:05"),

@@ -447,15 +447,6 @@ func safeChunkLabel(value string) string {
 	return value
 }
 
-func syncDirectory(path string) error {
-	dir, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
-}
-
 func chunkFileMatches(path, expected string) (bool, error) {
 	file, err := os.Open(path)
 	if err != nil {
