@@ -5,11 +5,13 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/theme/list_interaction_colors.dart';
 import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:remote_storage/widgets/app_tooltip.dart';
+import 'package:remote_storage/widgets/fitting_file_name_text.dart';
 import 'package:remote_storage/widgets/list_selection_controls.dart';
 import 'package:remote_storage/widgets/remote_task_details.dart';
 import 'package:remote_storage/widgets/remote_task_style_helpers.dart';
@@ -123,6 +125,10 @@ class _RemoteTaskRowState extends State<RemoteTaskRow> {
                       child: ListSelectionControl(
                         selected: widget.selected,
                         onTap: widget.onToggleSelected,
+                        touchTargetSize:
+                            defaultTargetPlatform == TargetPlatform.android
+                            ? 48
+                            : 18,
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -221,20 +227,36 @@ class _TaskText extends StatelessWidget {
     // Title shows only the entry name (icon chip carries the op type); the
     // verb, full path, and bucket are detail-panel lines.
     final subtitle = remoteTaskSubtitle(task);
+    // Android 对齐移动列表基线（紧凑标题 14sp / 副标题 12sp，与文件管理、
+    // 回收站的 compact 行一致）；桌面保持 13/11 的密集节奏。
+    final touch = defaultTargetPlatform == TargetPlatform.android;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          remoteTaskEntryName(task),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: theme.colorScheme.foreground,
-          ),
-        ),
+        // Android 走 FittingFileNameText：放得下原样（像素感知快路径），
+        // 放不下退到 compactDisplayName 的 14 字符预算（任务行最窄）；
+        // 桌面行宽足够，保持完整名称。
+        touch
+            ? FittingFileNameText(
+                name: remoteTaskEntryName(task),
+                truncationMaxLength: 14,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: theme.colorScheme.foreground,
+                ),
+              )
+            : Text(
+                remoteTaskEntryName(task),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: theme.colorScheme.foreground,
+                ),
+              ),
         if (subtitle.isNotEmpty) ...[
           const SizedBox(height: 2),
           Text(
@@ -242,7 +264,7 @@ class _TaskText extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 11,
+              fontSize: touch ? 12 : 11,
               color: theme.colorScheme.mutedForeground,
             ),
           ),
@@ -310,12 +332,14 @@ class _TaskRightSide extends StatelessWidget {
   }
 
   Widget _iconAction(String message, IconData icon, VoidCallback onPressed) {
+    // Touch rows need the full 48dp target; desktop keeps the compact 28dp.
+    final touch = defaultTargetPlatform == TargetPlatform.android;
     return AppTooltip(
       message: message,
       child: ShadIconButton.ghost(
         icon: Icon(icon, size: 15),
-        width: 28,
-        height: 28,
+        width: touch ? 48 : 28,
+        height: touch ? 48 : 28,
         iconSize: 15,
         onPressed: acting ? null : onPressed,
       ),

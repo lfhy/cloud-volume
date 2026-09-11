@@ -9,8 +9,11 @@ import 'package:remote_storage/models/bootstrap_state.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
 import 'package:remote_storage/platform/platform_info.dart';
 import 'package:remote_storage/services/remote_storage_api.dart';
+import 'package:remote_storage/state/mobile_settings_navigation.dart';
 import 'package:remote_storage/utils/default_download_directory.dart';
+import 'package:remote_storage/widgets/app_tooltip.dart';
 import 'package:remote_storage/widgets/app_toast.dart';
+import 'package:remote_storage/widgets/mobile_page_chrome.dart';
 import 'package:remote_storage/widgets/settings_about_section.dart';
 import 'package:remote_storage/widgets/settings_reset_user_config_section.dart';
 import 'package:remote_storage/widgets/settings_sections.dart'
@@ -74,12 +77,18 @@ class SettingsPage extends StatefulWidget {
     required this.api,
     required this.onEditConfig,
     required this.onRefresh,
+    this.mobileNavigation,
   });
 
   final BootstrapState state;
   final RemoteStorageGateway api;
   final VoidCallback onEditConfig;
   final VoidCallback onRefresh;
+
+  /// Android-only back-stack hook owned by the shell; when set, the page
+  /// reports detail/index transitions so system Back can collapse the
+  /// detail page before falling through to tab history.
+  final MobileSettingsNavigation? mobileNavigation;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -125,6 +134,20 @@ class _SettingsPageState extends State<SettingsPage> {
   String? _resetUserConfigError;
   _SettingsTab? _mobileTab;
 
+  /// Single mutation entry for the Android detail/index split. While a
+  /// detail page is open its collapse callback stays bound on the shell
+  /// navigation so system Back reaches it before tab history.
+  void _selectMobileTab(_SettingsTab? tab) {
+    setState(() => _mobileTab = tab);
+    if (tab != null) {
+      widget.mobileNavigation?.bind(_collapseMobileDetail);
+    } else {
+      widget.mobileNavigation?.clear();
+    }
+  }
+
+  void _collapseMobileDetail() => _selectMobileTab(null);
+
   bool get _showsWindowsTab => isWindowsPlatform;
 
   void _updateState(VoidCallback action) => setState(action);
@@ -140,82 +163,142 @@ class _SettingsPageState extends State<SettingsPage> {
     final config = widget.state.config;
     final isAndroid = defaultTargetPlatform == TargetPlatform.android;
 
+    if (isAndroid) {
+      return SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+          child: _buildAndroidSettings(theme, config),
+        ),
+      );
+    }
+    // Two-column layout: vertical group rail on the left, scrolling content
+    // on the right. The group rail replaces the former top ShadTabs bar so
+    // all settings categories are reachable without horizontal scrolling.
     return Padding(
       padding: const EdgeInsets.only(top: 56, left: 36, right: 36, bottom: 20),
-      // Two-column layout: vertical group rail on the left, scrolling content
-      // on the right. The group rail replaces the former top ShadTabs bar so
-      // all settings categories are reachable without horizontal scrolling.
-      child: LayoutBuilder(builder: (context, constraints) {
-        if (isAndroid) {
-          if (_mobileTab == null) {
-            return _buildMobileSettingsIndex(theme);
-          }
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(children: [
-                IconButton(
-                  tooltip: '返回设置',
-                  onPressed: () => setState(() => _mobileTab = null),
-                  icon: const Icon(Icons.arrow_back),
-                ),
-                Text(_tabLabel(_mobileTab!), style: theme.textTheme.h3.copyWith(fontWeight: FontWeight.w700, fontSize: 22)),
-              ]),
-              const SizedBox(height: 12),
-              Expanded(
-                child: SingleChildScrollView(
-                  controller: _contentScrollController,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      ..._buildContentForTab(theme, config, _mobileTab!),
-                      const SizedBox(height: 40),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          );
-        }
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      child: _buildDesktopSettings(theme, config),
+    );
+  }
+
+  Widget _buildAndroidSettings(ShadThemeData theme, RemoteStorageConfig config) {
+    if (_mobileTab == null) {
+      return _buildMobileSettingsIndex(theme);
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-          // --- Left sidebar: title + vertical group navigation ---
-          SizedBox(
-            width: 180,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '设置',
-                  style: theme.textTheme.h3.copyWith(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 22,
-                  ),
+            AppTooltip(
+              message: '返回设置',
+              child: ShadIconButton.ghost(
+                width: 48,
+                height: 48,
+                iconSize: 20,
+                icon: Icon(
+                  LucideIcons.chevronLeft,
+                  color: theme.colorScheme.foreground,
                 ),
-                const SizedBox(height: 24),
-                Expanded(child: _buildGroupRail(theme)),
-              ],
+                onPressed: () => _selectMobileTab(null),
+              ),
             ),
-          ),
-          const SizedBox(width: 24),
-          // --- Right content area ---
-          Expanded(
-            child: SingleChildScrollView(
-              controller: _contentScrollController,
+            const SizedBox(width: 4),
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ..._buildAllContent(theme, config),
-                  const SizedBox(height: 40),
+                  Text(
+                    _tabLabel(_mobileTab!),
+                    style: theme.textTheme.h3.copyWith(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 23,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    _mobileDetailSubtitle(_mobileTab!),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: theme.colorScheme.mutedForeground,
+                      fontSize: 13,
+                    ),
+                  ),
                 ],
               ),
             ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Expanded(
+          child: SingleChildScrollView(
+            controller: _contentScrollController,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ..._buildContentForTab(theme, config, _mobileTab!),
+                const SizedBox(height: 40),
+              ],
+            ),
           ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDesktopSettings(ShadThemeData theme, RemoteStorageConfig config) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // --- Left sidebar: title + vertical group navigation ---
+            SizedBox(
+              width: 180,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '设置',
+                    style: theme.textTheme.h3.copyWith(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 22,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Expanded(child: _buildGroupRail(theme)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 24),
+            // --- Right content area ---
+            Expanded(
+              child: SingleChildScrollView(
+                controller: _contentScrollController,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ..._buildAllContent(theme, config),
+                    const SizedBox(height: 40),
+                  ],
+                ),
+              ),
+            ),
           ],
         );
-      }),
+      },
     );
+  }
+
+  /// The rail-group header the tab belongs to doubles as the detail-page
+  /// subtitle, expressing scope without repeating the title.
+  String _mobileDetailSubtitle(_SettingsTab tab) {
+    for (final group in _railGroups()) {
+      if (group.tabs.contains(tab)) return group.header;
+    }
+    return '设置';
   }
 
   Widget _buildMobileSettingsIndex(ShadThemeData theme) {
@@ -223,8 +306,11 @@ class _SettingsPageState extends State<SettingsPage> {
     return ListView(
       padding: const EdgeInsets.only(bottom: 40),
       children: [
-        Text('设置', style: theme.textTheme.h3.copyWith(fontWeight: FontWeight.w700, fontSize: 28)),
-        const SizedBox(height: 18),
+        MobilePageHeader(
+          title: '设置',
+          subtitle: '管理应用与连接偏好。',
+        ),
+        const SizedBox(height: 6),
         for (final group in groups) ...[
           Padding(
             padding: const EdgeInsets.only(left: 4, top: 14, bottom: 6),
@@ -235,11 +321,16 @@ class _SettingsPageState extends State<SettingsPage> {
             child: Column(
               children: [
                 for (var i = 0; i < group.tabs.length; i++) ...[
-                  ListTile(
-                    dense: true,
-                    title: Text(_tabLabel(group.tabs[i])),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => setState(() => _mobileTab = group.tabs[i]),
+                  // ShadCard's DecoratedBox hides ListTile ink; a transparent
+                  // Material restores the visible press feedback on touch.
+                  Material(
+                    type: MaterialType.transparency,
+                    child: ListTile(
+                      dense: true,
+                      title: Text(_tabLabel(group.tabs[i])),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => _selectMobileTab(group.tabs[i]),
+                    ),
                   ),
                   if (i != group.tabs.length - 1) const Divider(height: 1),
                 ],
@@ -307,6 +398,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   void dispose() {
+    widget.mobileNavigation?.clear();
     _contentScrollController.dispose();
     super.dispose();
   }

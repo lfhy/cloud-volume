@@ -2,9 +2,9 @@
 
 import 'package:flutter/material.dart';
 import 'package:remote_storage/theme/list_interaction_colors.dart';
+import 'package:remote_storage/widgets/fitting_file_name_text.dart';
 import 'package:remote_storage/widgets/list_selection_controls.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
-import 'package:remote_storage/utils/display_name.dart';
 
 /// 文件管理页的列表项。
 class FileListTile extends StatefulWidget {
@@ -154,22 +154,30 @@ class _FileListTileState extends State<FileListTile> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          // 名称截断仅用于紧凑（Android 窄屏）行；桌面端
-                          // 列表保持完整文件名。
-                          widget.compact
-                              ? compactDisplayName(widget.title)
-                              : widget.title,
-                          style: TextStyle(
-                            // 14sp remains legible in compact touch rows;
-                            // desktop keeps its denser 13sp list rhythm.
-                            fontSize: widget.compact ? 14 : 13,
-                            fontWeight: FontWeight.w500,
-                            color: titleColor,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                        // 名称截断仅用于紧凑（Android 窄屏/窄窗宽度门）
+                        // 行；桌面宽列表保持完整文件名。紧凑行走
+                        // FittingFileNameText：像素感知快路径——放得下
+                        // 原样（如 19 字符的 default_blurred.png），放不下
+                        // 才退到 compactDisplayName 的 18 字符预算截断。
+                        widget.compact
+                            ? FittingFileNameText(
+                                name: widget.title,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                  color: titleColor,
+                                ),
+                              )
+                            : Text(
+                                widget.title,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: titleColor,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                         if (widget.subtitleLabel.isNotEmpty) ...[
                           const SizedBox(height: 2),
                           Text(

@@ -1,5 +1,7 @@
 /// Shortens a filename while preserving its extension for narrow cards.
 String compactDisplayName(String name, {int maxLength = 18}) {
+  // Guard the head-cut fallback: maxLength <= 2 would slice a negative range.
+  assert(maxLength >= 3, 'maxLength below 3 cannot render any ellipsis');
   if (name.length <= maxLength) return name;
   final dot = name.lastIndexOf('.');
   final extension = dot > 0 && dot < name.length - 1 ? name.substring(dot) : '';

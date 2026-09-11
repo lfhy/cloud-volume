@@ -27,19 +27,45 @@ extension _TransfersPageRemoteHeader on _TransfersPageState {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: _androidCompactQueueHeader
+              ? CrossAxisAlignment.center
+              : CrossAxisAlignment.start,
           children: [
-            // 桌面端保持上游行为：标题始终显示。Android 窄屏在选中任务后把
-            // 标题槽换成「已选 N 项」，为批量操作按钮腾出宽度。
+            // 桌面端保持上游行为：标题始终显示、22 号、无副标题。Android
+            // 窄屏在选中任务后把标题槽换成「已选 N 项」，为批量操作按钮
+            // 腾出宽度；无选中时按移动基线显示 23 号标题 + 副标题。
             Expanded(
               child: _selectedTaskIds.isEmpty || !_androidCompactQueueHeader
-                  ? Text(
-                      '任务队列',
-                      style: theme.textTheme.h3.copyWith(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 22,
-                      ),
-                    )
+                  ? _androidCompactQueueHeader
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '任务队列',
+                                style: theme.textTheme.h3.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 23,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                '查看传输与同步任务的进度。',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: theme.colorScheme.mutedForeground,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          )
+                        : Text(
+                            '任务队列',
+                            style: theme.textTheme.h3.copyWith(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 22,
+                            ),
+                          )
                   : Text(
                       '已选 ${_selectedTaskIds.length} 项',
                       style: theme.textTheme.h3.copyWith(
@@ -50,10 +76,11 @@ extension _TransfersPageRemoteHeader on _TransfersPageState {
             ),
             const SizedBox(width: 10),
             // Android 窄屏：选中任务后隐藏队列级按钮，只保留选中级操作，
-            // 避免一行按钮超出屏幕宽度被裁切。
+            // 避免一行按钮超出屏幕宽度被裁切；按钮在 Android 保持 48dp
+            // 触控高，桌面维持 sm 原高。
             if (!_androidCompactQueueHeader || _selectedTaskIds.isEmpty)
-              ShadButton.outline(
-                size: ShadButtonSize.sm,
+              _queueActionButton(
+                height: _androidCompactQueueHeader ? 48 : null,
                 onPressed: _runningBatchAction || syncable == 0
                     ? null
                     : () => unawaited(_triggerAllRemoteTasks(store)),
@@ -72,7 +99,8 @@ extension _TransfersPageRemoteHeader on _TransfersPageState {
                   size: ShadButtonSize.sm,
                   onPressed: _runningBatchAction || triggerable == 0
                       ? null
-                      : () => unawaited(_triggerSelectedRemote(store, selected)),
+                      : () =>
+                            unawaited(_triggerSelectedRemote(store, selected)),
                   child: Text(triggerable == 0 ? '立即执行' : '立即执行 $triggerable'),
                 ),
                 const SizedBox(width: 6),
@@ -86,8 +114,8 @@ extension _TransfersPageRemoteHeader on _TransfersPageState {
               ],
               if (clearable > 0) ...[
                 const SizedBox(width: 6),
-                ShadButton.outline(
-                  size: ShadButtonSize.sm,
+                _queueActionButton(
+                  height: _androidCompactQueueHeader ? 48 : null,
                   onPressed: _runningBatchAction
                       ? null
                       : () => unawaited(
@@ -101,11 +129,10 @@ extension _TransfersPageRemoteHeader on _TransfersPageState {
               ],
             ],
             if (historyTotal > 0 &&
-                (!_androidCompactQueueHeader ||
-                    _selectedTaskIds.isEmpty)) ...[
+                (!_androidCompactQueueHeader || _selectedTaskIds.isEmpty)) ...[
               const SizedBox(width: 10),
-              ShadButton.outline(
-                size: ShadButtonSize.sm,
+              _queueActionButton(
+                height: _androidCompactQueueHeader ? 48 : null,
                 onPressed: _runningBatchAction
                     ? null
                     : () => unawaited(_clearRemoteHistory(store)),
@@ -130,6 +157,27 @@ extension _TransfersPageRemoteHeader on _TransfersPageState {
           child: _buildRemoteList(theme, store, visible, selectedVisible),
         ),
       ],
+    );
+  }
+
+  /// Queue-level outline button: Android keeps a 48dp touch height inside a
+  /// centered hit box; desktop keeps the original sm sizing.
+  Widget _queueActionButton({
+    double? height,
+    VoidCallback? onPressed,
+    required Widget child,
+  }) {
+    final android = _androidCompactQueueHeader;
+    final button = ShadButton.outline(
+      size: ShadButtonSize.sm,
+      height: height,
+      onPressed: onPressed,
+      child: child,
+    );
+    if (!android) return button;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 48),
+      child: Center(child: button),
     );
   }
 }

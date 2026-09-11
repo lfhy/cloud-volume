@@ -126,14 +126,51 @@ class GlobalTrashBrowser extends StatelessWidget {
                     deleting: busy,
                     trailing: compact
                         ? Row(mainAxisSize: MainAxisSize.min, children: [
-                            ShadIconButton.ghost(icon: Icon(LucideIcons.rotateCcw, size: 18, color: theme.colorScheme.primary), onPressed: busy ? null : () => onRestore(entry)),
-                            ShadIconButton.ghost(icon: Icon(LucideIcons.trash2, size: 18, color: theme.colorScheme.mutedForeground), onPressed: busy ? null : () => onDeletePermanently(entry)),
+                            // Android compact rows: 48dp touch targets so the
+                            // restore / permanent-delete icons stay tappable.
+                            SizedBox(
+                              width: 48,
+                              height: 48,
+                              child: Center(
+                                child: ShadIconButton.ghost(
+                                  icon: Icon(
+                                    LucideIcons.rotateCcw,
+                                    size: 18,
+                                    color: theme.colorScheme.primary,
+                                  ),
+                                  width: 48,
+                                  height: 48,
+                                  onPressed: busy
+                                      ? null
+                                      : () => onRestore(entry),
+                                ),
+                              ),
+                            ),
+                            SizedBox(
+                              width: 48,
+                              height: 48,
+                              child: Center(
+                                child: ShadIconButton.ghost(
+                                  icon: Icon(
+                                    LucideIcons.trash2,
+                                    size: 18,
+                                    color: theme.colorScheme.mutedForeground,
+                                  ),
+                                  width: 48,
+                                  height: 48,
+                                  onPressed: busy
+                                      ? null
+                                      : () => onDeletePermanently(entry),
+                                ),
+                              ),
+                            ),
                           ])
                         : TrashRowActions(
                             deletedLabel: entry.item.deletedAt,
                             busy: busy,
                             onRestore: () => onRestore(entry),
-                            onDeletePermanently: () => onDeletePermanently(entry),
+                            onDeletePermanently: () =>
+                                onDeletePermanently(entry),
                           ),
                     compact: compact,
                   ),

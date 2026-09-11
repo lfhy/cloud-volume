@@ -23,6 +23,7 @@ import 'package:remote_storage/services/remote_storage_api.dart';
 import 'package:remote_storage/services/sync_directory_navigation.dart';
 import 'package:remote_storage/state/mobile_nav_preferences.dart';
 import 'package:remote_storage/state/mobile_file_manager_navigation.dart';
+import 'package:remote_storage/state/mobile_settings_navigation.dart';
 import 'package:remote_storage/state/tab_nav_history.dart';
 import 'package:remote_storage/state/transfer_queue.dart';
 import 'package:remote_storage/state/sync_profile_notifier.dart';
@@ -59,6 +60,8 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
   final TabNavHistory<SidebarItem> _navHistory = TabNavHistory<SidebarItem>();
   final MobileFileManagerNavigation _mobileFileNavigation =
       MobileFileManagerNavigation();
+  final MobileSettingsNavigation _mobileSettingsNavigation =
+      MobileSettingsNavigation();
 
   void _onOpenSyncRemoteFromSyncPage(SyncRemoteOpenRequest request) {
     final generation = ++_pendingSyncRemoteOpenGeneration;
@@ -133,6 +136,7 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
   void dispose() {
     SyncDirectoryNavigation.instance.setHandler(null);
     _mobileFileNavigation.dispose();
+    _mobileSettingsNavigation.dispose();
     super.dispose();
   }
 
@@ -207,6 +211,10 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
     }
     if (_effectiveSelectedItem == SidebarItem.fileManager &&
         await _mobileFileNavigation.handleBack()) {
+      return;
+    }
+    if (_effectiveSelectedItem == SidebarItem.settings &&
+        _mobileSettingsNavigation.consumeBack()) {
       return;
     }
     _cancelPendingSyncRemoteOpen();
@@ -310,6 +318,7 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
           api: widget.api,
           onEditConfig: widget.onEditConfig,
           onRefresh: widget.onRefresh,
+          mobileNavigation: _mobileSettingsNavigation,
         ),
       ],
     );

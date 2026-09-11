@@ -28,7 +28,7 @@
 | [mobile_ui](features/mobile_ui.md) | Android/移动端 UI 的跨特性设计检查清单：信息层级、48dp 触控、列表状态反馈、安全区/系统栏、底栏/Back、抽屉与无障碍；移动 UI 改动前必读。 |
 | [ui_rules](features/ui_rules.md) | Flutter 组织规范、hover 可点击行 binding(StatefulWidget + `_hovered` + 中性洗色)、`AppLoadingIndicator` 分档、设置卡视觉一致性。 |
 | [app_modal](features/app_modal.md) | 统一拟态框(`showAppModal*` 唯一入口、`AppShadDialog` Android 底部抽屉/桌面有限宽)与全量模态清单;远端目录选择器的精确初始目标及 fill-height/窄屏布局;debug 桌面子窗口壳(`DesktopModalSubWindowApp`、内容自适应缩放)。 |
-| [settings](features/settings.md) | 设置页两栏锚点布局、四级诊断日志、应用内自动更新(镜像规则/完整性校验/续传重试/Windows 绿色 ZIP)、全局与每账号代理、远端配置备份与首启还原(单根备份别名与真实桶 identity 分离)。 |
+| [settings](features/settings.md) | 设置页两栏锚点布局(Android 为索引/详情两级 + 系统 Back 桥)、四级诊断日志、应用内自动更新(镜像规则/完整性校验/续传重试/Windows 绿色 ZIP)、全局与每账号代理、远端配置备份与首启还原(单根备份别名与真实桶 identity 分离)。 |
 
 ## 平台
 

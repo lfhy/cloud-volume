@@ -18,6 +18,8 @@
 - 页面有多个随位置变化的操作时，不在搜索框下另占一条横向操作栏；用右上角带语义名称的 48dp 图标入口，经 `showAppModal` 打开底部抽屉列出可用动作。没有可用动作时隐藏入口，抽屉行仍保持 48dp 命中区。
 - 手指没有持续 hover。移动端不可把桌面 hover、右键或 tooltip 当作发现机制；Android 上的 `AppTooltip` 必须降级为 `Semantics(label: message, child: child)`，绝不构造 `ShadTooltip`。Shad 的触摸 tooltip 会把 tap 当作 hover 切换，系统 Back 或 route 切换不会补发 leave，提示及背景洗色会残留。图标按钮必须有可读的 `Semantics` 标签，复杂动作放进命名清楚的菜单或抽屉。
 - 文字遵循主题字体与动态字号；正文优先不小于 16sp，紧凑说明不低于 12sp。单行位置/名称可省略号截断，但不能溢出或把关键操作挤出屏幕。
+- **文件名截断契约**：移动端文件列表的文件名展示统一走 `FittingFileNameText`（`lib/widgets/fitting_file_name_text.dart`）——**像素感知快路径**：名字宽度（TextPainter 实测，按该行自己的可用宽度）放得下就原样显示（19 字符的 `default_blurred.png` 在宽行完整显示）；放不下才退到 `compactDisplayName`（头+尾+扩展名，中段 `...`；`lib/utils/display_name.dart`）的字符预算截断——宽紧凑行（对象/回收站/目录选择器，约 250–300dp）默认 18，任务行（最窄，约 110dp）传 14。桌面宽列表保持完整文件名（桌面窄窗宽度门表面走同一链路）。辅助技术始终拿到完整名（Semantics label）。已知限制：字符预算按 UTF-16 码元，纯 CJK 长名退到截断后仍可能被外层尾省略截掉扩展名。回归见 `test/fitting_file_name_text_test.dart`、`test/display_name_test.dart` 与目录选择器测试。
+- **列表行字号基线**：移动端文件类列表行（对象/回收站/任务）标题 14sp、副标题/元信息 12sp，跨页一致（`RemoteTaskRow` 经 `defaultTargetPlatform` 分支对齐 `FileListTile` compact 的 14/12）；桌面维持 13/11 密集节奏。状态徽标 chip 等 10.5sp 小字属行内 chrome，不在此基线内。
 
 ## 导航与页面状态
 
@@ -52,3 +54,8 @@
 - 全局 hover、loading 与列表交互色：[ui_rules](ui_rules.md)。
 - Android 底部抽屉、安全区、IME、滚动与模态动画：[app_modal](app_modal.md)。
 - Android 运行、模拟器、APK 与移动端能力边界：[android_dev](android_dev.md)。
+- 顶层 tab 页共享 chrome：[mobile_page_chrome](../../../lib/widgets/mobile_page_chrome.dart) 提供 `MobilePageHeader`（稳定大标题 + 副标题 + 单一 48dp 动作入口）与 `showMobileActionSheet`（48dp 底部动作抽屉，文件管理同款实现）。账号/任务/回收站/设置页已按 2026-09-04 批次对齐该基线：SafeArea(bottom:false) + 16dp 边距、23sp 标题 + 13sp 副标题、触控目标 ≥48dp（含账号卡片动作、任务行内图标与选择控件、回收站 compact trailing、设置底部导航上移/下移钮）；设置页详情↔索引的系统 Back 链由 `MobileSettingsNavigation`（shell 持有）承接，先于 tab 历史消费。分享管理页与同步任务页在 Android 无底栏入口（不在 `kMobileBottomBarPool`），未做小屏适配；进入底栏池前必须先补。
+
+**Known P2/P3 (review 2026-09-04):** P2 任务行最坏组合（spinner+状态徽标+取消+展开，行内动作 Android 48dp 化后固定宽约 343px）在 320dp 屏扣 16dp 边距会溢出约 23px，360dp 无碍——真机统一测试时验证，必要时行内动作收进溢出菜单。P2 账号卡三按钮 320dp 下「桶管理」13sp 标签可用宽不足可能折行，可缩短标签或 maxLines 取舍。P3 回收站用例名 "swap-title on select" 未真正驱动选中态（名实不符）；任务页「已选 N 项」切换同样缺 widget 断言。P3 账号卡 deleteProfile 动作沿用「退出」文案（与既有 toast 一致），破坏性语义弱化待产品定夺。
+
+**Known P2/P3 (review 2026-09-04 像素门控批次):** P2 `FittingFileNameText` 的可见截断串即读屏听到的内容（无独立完整名 semanticsLabel）——`semanticsLabel`/`Semantics` 包装会改变 render-object 形状，破坏既有 find.text 辅助函数的 `RenderParagraph` 强转；待读屏全名需求出现时再连同测试辅助函数一起演进。P2 网格卡片（file_grid_item）仍走纯字符预算 compactDisplayName，未接像素快路径（窄卡片收益低）。P3 系统 boldText/letterSpacing 覆盖未并入测宽（二阶偏差，默认设置无影响）。

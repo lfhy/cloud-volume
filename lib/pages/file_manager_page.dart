@@ -44,6 +44,7 @@ import 'package:remote_storage/widgets/file_manager_trash_browser.dart';
 import 'package:remote_storage/widgets/file_preview_dialog.dart';
 import 'package:remote_storage/widgets/file_transfer_clipboard_region.dart';
 import 'package:remote_storage/widgets/mount_bucket_dialog.dart';
+import 'package:remote_storage/widgets/mobile_page_chrome.dart';
 import 'package:remote_storage/widgets/object_action_dialogs.dart';
 import 'package:remote_storage/widgets/share_dialogs.dart';
 import 'package:remote_storage/widgets/batch_task_progress_dialog.dart';

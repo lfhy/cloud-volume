@@ -166,13 +166,22 @@ class _TransfersPageState extends State<TransfersPage> {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
+    final body = AnimatedBuilder(
+      animation: RemoteTaskStore.instance,
+      builder: (context, _) => _buildRemoteQueueBody(theme, RemoteTaskStore.instance),
+    );
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+          child: body,
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.only(top: 56, left: 36, right: 36, bottom: 20),
-      child: AnimatedBuilder(
-        animation: RemoteTaskStore.instance,
-        builder: (context, _) =>
-            _buildRemoteQueueBody(theme, RemoteTaskStore.instance),
-      ),
+      child: body,
     );
   }
 }

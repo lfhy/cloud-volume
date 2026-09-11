@@ -45,7 +45,7 @@
 - `lib/models/remote_storage_config.dart` / `remote_storage_config_copy.dart` — `disabled` 字段(默认 false,fromJson,toJson 省略 false,copyWith)。
 - `lib/models/bootstrap_state.dart` — `ProfileInfo.disabled`(`json['disabled'] == true`)。
 - `lib/services/bucket_source_service.dart` — `loadEntriesWithFailures` 与 `loadSources` 在任何 `loadProfile`/`listBuckets` 调用**之前**过滤 `profiles.where((p) => !p.disabled)`。这是文件管理、全局回收站、同步选择器的单一门控。
-- `lib/widgets/cloud_storage_account_list.dart` — `_AccountActions`(列表)与 `_AccountCard`(网格)显示 `ShadSwitch`(value = `!profile.disabled`),切换调 `onToggleDisabled`。禁用账号标题加「(已禁用)」后缀。本文件同时持有 `enum AccountStatus { checking, ok, error, disabled }` 与 `_AccountStatusChip`(点 + 标签 + tooltip)。
+- `lib/widgets/cloud_storage_account_list.dart` — 列表/卡双视图装配与 `enum AccountStatus { checking, ok, error, disabled }`。`_AccountActions`(列表)与 `_AccountCard`(网格/移动)等展示件在 part 文件 `lib/widgets/cloud_storage_account_card.dart`(含 `_AccountStatusChip`、`_AccountActionButton` 的 dense/48dp 双变体、`_AccountTableHeader`、拖拽把手)。两处都显示 `ShadSwitch`(value = `!profile.disabled`),切换调 `onToggleDisabled`;禁用账号标题加「（已禁用）」后缀。Android 移动卡:开关行 48dp 高,三个动作按钮(桶管理/编辑/退出)为 48dp 触控的非 dense 变体;`_AccountStatusChip` 错误详情经 `Semantics` 暴露(触屏无 hover tooltip),桌面保留 Tooltip。
 - 回归锚点:`go/config/config_disabled_test.go`、`test/bucket_source_service_test.dart`(`loadEntriesWithFailures skips a disabled account entirely`)。
 
 **Gotchas(binding):**

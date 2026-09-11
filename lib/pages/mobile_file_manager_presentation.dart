@@ -2,18 +2,6 @@ part of 'file_manager_page.dart';
 
 // Android-only file-manager chrome. It shares the workspace state and actions
 // with desktop, while keeping mobile navigation and density independently tuned.
-class _MobileFileAction {
-  const _MobileFileAction({
-    required this.label,
-    required this.icon,
-    required this.onPressed,
-  });
-
-  final String label;
-  final IconData icon;
-  final VoidCallback onPressed;
-}
-
 extension _MobileFileManagerPresentation on _FileManagerPageState {
   Widget _buildMobileWorkspacePresentation(BuildContext context) {
     final theme = ShadTheme.of(context);
@@ -100,7 +88,13 @@ extension _MobileFileManagerPresentation on _FileManagerPageState {
               height: 48,
               iconSize: 22,
               icon: Icon(LucideIcons.plus, color: theme.colorScheme.primary),
-              onPressed: () => unawaited(_showMobileActionSheet(actions)),
+              onPressed: () => unawaited(
+                showMobileActionSheet(
+                  context,
+                  title: _showTrash ? '回收站操作' : '文件操作',
+                  actions: actions,
+                ),
+              ),
             ),
           ),
         ],
@@ -140,12 +134,12 @@ extension _MobileFileManagerPresentation on _FileManagerPageState {
     );
   }
 
-  List<_MobileFileAction> get _mobileActions {
-    final actions = <_MobileFileAction>[];
+  List<MobilePageAction> get _mobileActions {
+    final actions = <MobilePageAction>[];
     if (_showTrash) {
       if (_activeBucket != null && !_loading) {
         actions.add(
-          _MobileFileAction(
+          MobilePageAction(
             label: '返回文件',
             icon: LucideIcons.folderOpen,
             onPressed: () => unawaited(_closePresentationTrash()),
@@ -154,7 +148,7 @@ extension _MobileFileManagerPresentation on _FileManagerPageState {
       }
       if (!_loading && !(_trashItems?.isEmpty ?? true)) {
         actions.add(
-          _MobileFileAction(
+          MobilePageAction(
             label: '清空回收站',
             icon: LucideIcons.trash,
             onPressed: _clearBucketTrash,
@@ -164,12 +158,12 @@ extension _MobileFileManagerPresentation on _FileManagerPageState {
     } else if (_activeBucket != null) {
       if (!_loading && _currentDirectoryWritable) {
         actions.addAll([
-          _MobileFileAction(
+          MobilePageAction(
             label: '新建目录',
             icon: Icons.create_new_folder_rounded,
             onPressed: _createDirectory,
           ),
-          _MobileFileAction(
+          MobilePageAction(
             label: '上传',
             icon: LucideIcons.upload,
             onPressed: _upload,
@@ -178,77 +172,5 @@ extension _MobileFileManagerPresentation on _FileManagerPageState {
       }
     }
     return actions;
-  }
-
-  Future<void> _showMobileActionSheet(List<_MobileFileAction> actions) async {
-    if (actions.isEmpty) return;
-    await showAppModal<void>(
-      context: context,
-      builder: (dialogContext) {
-        // Keep sheet rows full-width inside horizontal cutouts while matching
-        // the 16dp icon inset used by bucket and object action drawers.
-        final horizontalSafeArea = MediaQuery.paddingOf(
-          dialogContext,
-        ).horizontal;
-        const actionHorizontalPadding = 16.0;
-        final menuWidth =
-            (MediaQuery.sizeOf(dialogContext).width - horizontalSafeArea - 60)
-                .clamp(1.0, double.infinity)
-                .toDouble();
-        final actionContentWidth = (menuWidth - actionHorizontalPadding * 2)
-            .clamp(0.0, double.infinity)
-            .toDouble();
-        return AppShadDialog(
-          title: Text(_showTrash ? '回收站操作' : '文件操作'),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              for (final action in actions) ...[
-                ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 48),
-                  child: ShadButton.ghost(
-                    width: menuWidth,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: actionHorizontalPadding,
-                    ),
-                    onPressed: () {
-                      Navigator.of(dialogContext).pop();
-                      action.onPressed();
-                    },
-                    child: SizedBox(
-                      width: actionContentWidth,
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          SizedBox(
-                            width: 48,
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: Icon(action.icon, size: 17),
-                            ),
-                          ),
-                          Expanded(
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                action.label,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 4),
-              ],
-            ],
-          ),
-        );
-      },
-    );
   }
 }

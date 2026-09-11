@@ -4,6 +4,8 @@
 
 两栏锚点布局:左垂直锚点栏轨(通用/Windows/关于 分组头),右滚动页一列展示全部设置卡。点左栏条目滚动右页到对应卡。栏轨**无持久 active/选中高亮**——条目只在 hover 时变化外观(点击不再钉住高亮)。
 
+**Android 分支**:同一 `_SettingsTab` 集呈现为「索引 → 详情」两级——索引页用 `MobilePageHeader`(共享 chrome 见 [mobile_ui](mobile_ui.md))+ 分组卡 ListTile 进入详情,详情页带 48dp 返回钮与分组名副标题;外层是 `SafeArea(bottom:false)` + 16dp 边距而非桌面的 56/36,`_mobileTab` 由 `_selectMobileTab` 单一入口驱动。系统 Back 在详情页先收起回索引再落 tab 历史,桥接契约是 `lib/state/mobile_settings_navigation.dart` 的 bind/clear 回调(shell 持有,页面进入详情绑回调、收起/销毁时清空),决策理由见 [Agent Note](../notes/implemented/architecture/2026-09-04-mobile-page-chrome-and-settings-back.md)。
+
 - `lib/pages/settings_page.dart` — `SettingsPage` + state。`_SettingsTab` 枚举标识每个配置块一卡/一锚。state 持有 `_contentScrollController` 与 `_sectionKeys`(**无 `_activeTab` 字段**)。`build()` 渲染 `Row`:左 `SizedBox(width: 180)`(标题 + `_buildGroupRail(theme)`),右 `Expanded` + `SingleChildScrollView(controller:)`(`_buildAllContent`)。
 - `lib/pages/settings_page_layout.dart` — part 文件。`_SettingsLayout` 扩展:`_railGroups()` 构建 `_SettingsRailGroup`(分组头 + 锚点);`_buildGroupRail` 渲染分组头 + `_SettingsGroupTile` 行;`_tabLabel` 枚举→中文标签;`_buildAllContent` 经 `KeyedSubtree` + `_sectionKeys` 渲染每张可见卡;`_scrollToAnchor` 用 `Scrollable.ensureVisible` **只滚动**,不更新任何 active 状态。`_SettingsGroupTile` 是 hover-aware StatefulWidget tile(hover binding 见 [ui_rules](ui_rules.md)),**无 `active` 参数**——外观仅 hover。
 - `lib/pages/settings_page_sections.dart` — part 文件。`_SettingsSections` 扩展,按锚点的卡构建器(更新/代理/外观/日志/下载/缓存/可见性/同步/回收站/WebDAV/重置账号/配置管理/Windows 写回/Windows 挂载/关于)。

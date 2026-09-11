@@ -44,6 +44,7 @@ import 'package:remote_storage/widgets/file_manager_object_browser.dart';
 import 'package:remote_storage/widgets/file_manager_trash_browser.dart';
 import 'package:remote_storage/widgets/file_manager_error_view.dart';
 import 'package:remote_storage/widgets/mobile_navigation_bar.dart';
+import 'package:remote_storage/widgets/mobile_page_chrome.dart';
 
 void main() {
   setUp(() {
@@ -3549,6 +3550,207 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     }
   });
+
+  // Android 小屏布局优化（账号/任务/回收站/设置页）的预期测试点：
+  // 每页稳定大标题 + 副标题、48dp 动作入口与触控行、系统 Back 链路。
+  // 真机统一测试前用这些 widget 回归锁定契约。
+  Future<BootstrapState> mobilePageBootstrapState() async {
+    return BootstrapState(
+      configPath: '/tmp/.remote-storage/config.toml',
+      configured: true,
+      config: RemoteStorageConfig.empty(),
+      profiles: const <ProfileInfo>[
+        ProfileInfo(
+          name: 'profile',
+          displayName: '测试账号',
+          storageType: StorageType.s3,
+          providerType: StorageProviderType.s3,
+          endpoint: 'https://s3.example.com',
+          accessKeyId: 'AKIA_TEST',
+        ),
+      ],
+    );
+  }
+
+  testWidgets('android accounts page keeps stable header and 48dp actions', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      SharedPreferences.setMockInitialValues({});
+      RemoteTaskStore.instance.resetForTest();
+      final api = _FakeApi(
+        configured: true,
+        freshBootstrapInstances: true,
+        configOverride: await mobilePageBootstrapState().then((s) => s.config),
+        profiles: const <ProfileInfo>[
+          ProfileInfo(
+            name: 'profile',
+            displayName: '测试账号',
+            storageType: StorageType.s3,
+            providerType: StorageProviderType.s3,
+            endpoint: 'https://s3.example.com',
+            accessKeyId: 'AKIA_TEST',
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
+      await tester.pumpAndSettle();
+      await tester.tap(find.bySemanticsLabel('账号').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('账号管理'), findsOneWidget);
+      expect(find.text('新增与管理云存储账号。'), findsOneWidget);
+      final addEntry = find.bySemanticsLabel('新增账号');
+      expect(addEntry, findsOneWidget);
+      final addSize = tester.getSize(addEntry);
+      expect(addSize.height, greaterThanOrEqualTo(48));
+      // 卡片动作行中文化且保持 48dp 触控。
+      expect(find.text('桶管理'), findsOneWidget);
+      expect(find.text('编辑'), findsOneWidget);
+      expect(find.text('退出'), findsOneWidget);
+      final buttonZone = find
+          .ancestor(
+            of: find.text('桶管理'),
+            matching: find.byType(GestureDetector),
+          )
+          .first;
+      expect(tester.getSize(buttonZone).height, greaterThanOrEqualTo(48));
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      TransferQueue.instance.resetForTest();
+      RemoteTaskStore.instance.resetForTest();
+      SyncProfileNotifier.instance.stop();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('android settings page back button collapses detail to index', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      SharedPreferences.setMockInitialValues({});
+      RemoteTaskStore.instance.resetForTest();
+      final api = _FakeApi(
+        configured: true,
+        freshBootstrapInstances: true,
+        configOverride: await mobilePageBootstrapState().then((s) => s.config),
+      );
+
+      await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
+      await tester.pumpAndSettle();
+      await tester.tap(find.bySemanticsLabel('设置').last);
+      await tester.pumpAndSettle();
+
+      // 页面大标题与底栏短标签同名，限定在移动头部组件内断言。
+      expect(
+        find.descendant(of: find.byType(MobilePageHeader), matching: find.text('设置')),
+        findsOneWidget,
+      );
+      expect(find.text('管理应用与连接偏好。'), findsOneWidget);
+
+      // 进入一个设置详情页（「外观」标签唯一），返回入口语义与 48dp 尺寸保持。
+      // IndexedStack 常驻各页，find.text 全树搜索会同时命中索引与详情的
+      // 同名文本，这里用 findsWidgets。
+      await tester.tap(find.text('外观'));
+      await tester.pumpAndSettle();
+      expect(find.text('外观'), findsWidgets);
+      final back = find.bySemanticsLabel('返回设置');
+      expect(back, findsOneWidget);
+      expect(tester.getSize(back).height, greaterThanOrEqualTo(48));
+
+      // 模拟系统 Back：设置详情页应先于 tab 历史被收起，回到设置索引。
+      final popped = await tester.binding.handlePopRoute();
+      expect(popped, isTrue);
+      await tester.pumpAndSettle();
+      expect(find.text('外观'), findsOneWidget);
+      expect(find.text('管理应用与连接偏好。'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      TransferQueue.instance.resetForTest();
+      RemoteTaskStore.instance.resetForTest();
+      SyncProfileNotifier.instance.stop();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('android transfers page keeps subtitle and 48dp bulk action', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      SharedPreferences.setMockInitialValues({});
+      RemoteTaskStore.instance.resetForTest();
+      final api = _FakeApi(
+        configured: true,
+        freshBootstrapInstances: true,
+        configOverride: await mobilePageBootstrapState().then((s) => s.config),
+      );
+
+      await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
+      await tester.pumpAndSettle();
+      await tester.tap(find.bySemanticsLabel('任务').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('任务队列'), findsOneWidget);
+      expect(find.text('查看传输与同步任务的进度。'), findsOneWidget);
+      final syncButton = find.text('立即同步');
+      expect(syncButton, findsOneWidget);
+      final buttonRect = tester.getRect(
+        find.ancestor(
+          of: syncButton,
+          matching: find.byType(ShadButton),
+        ).first,
+      );
+      expect(buttonRect.height, greaterThanOrEqualTo(48));
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      TransferQueue.instance.resetForTest();
+      RemoteTaskStore.instance.resetForTest();
+      SyncProfileNotifier.instance.stop();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('android trash page keeps subtitle and swap-title on select', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      SharedPreferences.setMockInitialValues({});
+      RemoteTaskStore.instance.resetForTest();
+      final api = _FakeApi(
+        configured: true,
+        freshBootstrapInstances: true,
+        configOverride: await mobilePageBootstrapState().then((s) => s.config),
+      );
+
+      await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
+      await tester.pumpAndSettle();
+      await tester.tap(find.bySemanticsLabel('回收站').last);
+      await tester.pumpAndSettle();
+
+      // 页面标题与底栏标签同名：副标题唯一，标题断言放宽为至少存在。
+      expect(find.text('回收站'), findsWidgets);
+      expect(find.text('浏览与恢复已删除的远端文件。'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      TransferQueue.instance.resetForTest();
+      RemoteTaskStore.instance.resetForTest();
+      SyncProfileNotifier.instance.stop();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
 }
 
 final class _FakeFilePicker extends FilePickerPlatform {
@@ -3633,7 +3835,14 @@ final class _TestPlatformFile extends PlatformFile {
 }
 
 Future<void> _openMobileFileActions(WidgetTester tester) async {
-  await tester.tap(find.byIcon(LucideIcons.plus));
+  // 账号等其他移动页也有 plus 入口；限定文件管理页内的图标避免命中
+  // IndexedStack 中不可见页面的同名控件。
+  await tester.tap(
+    find.descendant(
+      of: find.byType(MobileFileManagerPage),
+      matching: find.byIcon(LucideIcons.plus),
+    ),
+  );
   await tester.pumpAndSettle();
 }
 

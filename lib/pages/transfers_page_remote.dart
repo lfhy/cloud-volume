@@ -213,6 +213,8 @@ class _RemoteListHeader extends StatelessWidget {
             selected: allSelected,
             partiallySelected: partial,
             onTap: onToggleAll,
+            touchTargetSize:
+                defaultTargetPlatform == TargetPlatform.android ? 48 : 18,
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -330,9 +332,12 @@ class _RemoteHistoryPager extends StatelessWidget {
           ),
           const SizedBox(width: 16),
           // Ghost keeps the in-list continuation chromeless — it reads as a
-          // list footer action, not a bordered toolbar button.
+          // list footer action, not a bordered toolbar button. Android keeps
+          // a full 48dp touch height for the tap-only footer.
           ShadButton.ghost(
             size: ShadButtonSize.sm,
+            height:
+                defaultTargetPlatform == TargetPlatform.android ? 48 : null,
             onPressed: onLoadNext,
             child: Text('加载下一页（还剩 $remaining 条）'),
           ),
