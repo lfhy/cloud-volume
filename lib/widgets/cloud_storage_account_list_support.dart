@@ -121,37 +121,43 @@ class _AccountStatusChip extends StatelessWidget {
       AccountStatus.disabled => ('已禁用', theme.colorScheme.mutedForeground),
       AccountStatus.checking => ('检测中', theme.colorScheme.mutedForeground),
     };
-    return Tooltip(
-      message: status == AccountStatus.error
-          ? (error?.isNotEmpty == true ? error! : '连接失败')
-          : label,
-      waitDuration: const Duration(milliseconds: 400),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(
-              color: status == AccountStatus.checking
-                  ? theme.colorScheme.mutedForeground.withValues(alpha: 0.4)
-                  : color,
-              shape: BoxShape.circle,
+    final statusMessage = status == AccountStatus.error
+        ? (error?.isNotEmpty == true ? error! : '连接失败')
+        : label;
+    // Android 触屏没有 hover tooltip；Semantics 让错误详情对读屏/辅助
+    // 技术可读，桌面 Tooltip 保持不变。
+    return Semantics(
+      label: statusMessage,
+      child: Tooltip(
+        message: statusMessage,
+        waitDuration: const Duration(milliseconds: 400),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(
+                color: status == AccountStatus.checking
+                    ? theme.colorScheme.mutedForeground.withValues(alpha: 0.4)
+                    : color,
+                shape: BoxShape.circle,
+              ),
             ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 11.5,
-              color: status == AccountStatus.checking
-                  ? theme.colorScheme.mutedForeground
-                  : (status == AccountStatus.ok
-                        ? theme.colorScheme.foreground
-                        : color),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11.5,
+                color: status == AccountStatus.checking
+                    ? theme.colorScheme.mutedForeground
+                    : (status == AccountStatus.ok
+                          ? theme.colorScheme.foreground
+                          : color),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -163,12 +169,17 @@ class _AccountActionButton extends StatefulWidget {
     required this.icon,
     required this.onPressed,
     this.destructive = false,
+    this.dense = true,
   });
 
   final String label;
   final IconData icon;
   final VoidCallback? onPressed;
   final bool destructive;
+
+  /// Dense is the compact desktop-table style; the mobile card uses the
+  /// non-dense variant to keep a full 48dp touch target.
+  final bool dense;
 
   @override
   State<_AccountActionButton> createState() => _AccountActionButtonState();
@@ -199,30 +210,41 @@ class _AccountActionButtonState extends State<_AccountActionButton> {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: widget.onPressed,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          curve: Curves.easeOut,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: enabled
-                ? interaction.rowBackground(
-                    selected: false,
-                    hovered: _hovered,
-                    pressed: false,
-                  )
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(widget.icon, size: 13, color: color),
-              const SizedBox(width: 4),
-              Text(
-                widget.label,
-                style: TextStyle(fontSize: 11.5, color: color),
-              ),
-            ],
+        child: Container(
+          alignment: widget.dense ? null : Alignment.center,
+          constraints: widget.dense
+              ? null
+              : const BoxConstraints(minHeight: 48),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            curve: Curves.easeOut,
+            padding: widget.dense
+                ? const EdgeInsets.symmetric(horizontal: 10, vertical: 6)
+                : const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            decoration: BoxDecoration(
+              color: enabled
+                  ? interaction.rowBackground(
+                      selected: false,
+                      hovered: _hovered,
+                      pressed: false,
+                    )
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(widget.icon, size: widget.dense ? 13 : 16, color: color),
+                const SizedBox(width: 4),
+                Text(
+                  widget.label,
+                  style: TextStyle(
+                    fontSize: widget.dense ? 11.5 : 13,
+                    color: color,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

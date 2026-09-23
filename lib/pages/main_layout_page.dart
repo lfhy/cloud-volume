@@ -23,6 +23,8 @@ import 'package:remote_storage/services/remote_storage_api.dart';
 import 'package:remote_storage/services/sync_directory_navigation.dart';
 import 'package:remote_storage/state/mobile_nav_preferences.dart';
 import 'package:remote_storage/state/mobile_file_manager_navigation.dart';
+import 'package:remote_storage/state/mobile_selection_activity.dart';
+import 'package:remote_storage/state/mobile_settings_navigation.dart';
 import 'package:remote_storage/state/tab_nav_history.dart';
 import 'package:remote_storage/state/transfer_queue.dart';
 import 'package:remote_storage/state/sync_profile_notifier.dart';
@@ -59,6 +61,8 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
   final TabNavHistory<SidebarItem> _navHistory = TabNavHistory<SidebarItem>();
   final MobileFileManagerNavigation _mobileFileNavigation =
       MobileFileManagerNavigation();
+  final MobileSettingsNavigation _mobileSettingsNavigation =
+      MobileSettingsNavigation();
 
   void _onOpenSyncRemoteFromSyncPage(SyncRemoteOpenRequest request) {
     final generation = ++_pendingSyncRemoteOpenGeneration;
@@ -133,6 +137,7 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
   void dispose() {
     SyncDirectoryNavigation.instance.setHandler(null);
     _mobileFileNavigation.dispose();
+    _mobileSettingsNavigation.dispose();
     super.dispose();
   }
 
@@ -209,6 +214,10 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
         await _mobileFileNavigation.handleBack()) {
       return;
     }
+    if (_effectiveSelectedItem == SidebarItem.settings &&
+        _mobileSettingsNavigation.consumeBack()) {
+      return;
+    }
     _cancelPendingSyncRemoteOpen();
     final previous = _navHistory.back(
       (item) => MobileNavPreferences.instance.items.contains(item),
@@ -223,23 +232,33 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
 
   // Mobile bottom bar items/visibility/order are user-configurable in
   // Settings → 底部导航 (Android only); the config is the single source.
+  // 两态选择模型:当前可见 tab 处于选中态时整条底栏让位给页面的选中态
+  // 底部动作条(百度式全屏接管)。
   Widget _buildMobileNavigation() {
     return ListenableBuilder(
-      listenable: MobileNavPreferences.instance,
+      listenable: MobileSelectionActivity.instance,
       builder: (context, _) {
-        final items = MobileNavPreferences.instance.items;
-        return MobileNavigationBar<SidebarItem>(
-          accent: ThemeController.of(context).accent.color,
-          selectedValue: _effectiveSelectedItem,
-          onSelected: _selectItem,
-          items: [
-            for (final item in items)
-              MobileNavItem(
-                value: item,
-                icon: item.icon,
-                label: item.mobileLabel,
-              ),
-          ],
+        if (MobileSelectionActivity.instance.isActive(_effectiveSelectedItem)) {
+          return const SizedBox.shrink();
+        }
+        return ListenableBuilder(
+          listenable: MobileNavPreferences.instance,
+          builder: (context, _) {
+            final items = MobileNavPreferences.instance.items;
+            return MobileNavigationBar<SidebarItem>(
+              accent: ThemeController.of(context).accent.color,
+              selectedValue: _effectiveSelectedItem,
+              onSelected: _selectItem,
+              items: [
+                for (final item in items)
+                  MobileNavItem(
+                    value: item,
+                    icon: item.icon,
+                    label: item.mobileLabel,
+                  ),
+              ],
+            );
+          },
         );
       },
     );
@@ -310,6 +329,7 @@ class _MainLayoutPageState extends State<MainLayoutPage> {
           api: widget.api,
           onEditConfig: widget.onEditConfig,
           onRefresh: widget.onRefresh,
+          mobileNavigation: _mobileSettingsNavigation,
         ),
       ],
     );

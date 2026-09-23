@@ -8,16 +8,21 @@ import 'package:remote_storage/models/bootstrap_state.dart';
 import 'package:remote_storage/models/file_manager_bucket_entry.dart';
 import 'package:remote_storage/models/paged_listings.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
+import 'package:remote_storage/models/sidebar_item.dart';
 import 'package:remote_storage/services/bucket_source_service.dart';
 import 'package:remote_storage/services/remote_storage_api.dart';
+import 'package:remote_storage/state/mobile_selection_activity.dart';
 import 'package:remote_storage/state/object_listing_notifier.dart';
 import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:remote_storage/widgets/app_toast.dart';
 import 'package:remote_storage/widgets/global_trash_browser.dart';
 import 'package:remote_storage/widgets/global_trash_controls.dart';
+import 'package:remote_storage/widgets/mobile_page_chrome.dart';
+import 'package:remote_storage/widgets/mobile_selection_chrome.dart';
 import 'package:remote_storage/widgets/object_action_dialogs.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
+part 'global_trash_page_actions.dart';
 part 'global_trash_page_support.dart';
 part 'global_trash_page_view.dart';
 
@@ -76,6 +81,8 @@ class _GlobalTrashPageState extends State<GlobalTrashPage> {
 
   @override
   void dispose() {
+    // 选中态报告随之撤销,避免隐藏/卸载后 shell 仍认为本 tab 在选中态。
+    MobileSelectionActivity.instance.report(SidebarItem.trash, false);
     _searchController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -363,166 +370,6 @@ class _GlobalTrashPageState extends State<GlobalTrashPage> {
       _loadingMore = false;
       if (mounted) {
         setState(() {});
-      }
-    }
-  }
-
-  void _showPageSnack(String message) {
-    if (!mounted) {
-      return;
-    }
-    showAppToast(context, message: message);
-  }
-
-  Future<void> _restoreEntry(GlobalTrashBrowserEntry entry) async {
-    await _runBusy(<GlobalTrashBrowserEntry>[entry], () async {
-      await widget.api.restoreTrashItem(
-        _configForBucketId(entry.bucket),
-        _providerBucketName(entry.bucket),
-        entry.item.id,
-        originalKey: entry.item.originalKey,
-        isDirectory: entry.item.isDir,
-      );
-      ObjectListingNotifier.instance.markRestored(
-        _providerBucketName(entry.bucket),
-        [entry.item],
-      );
-      await _reloadBucket(entry.bucket, resetScroll: false);
-      _showPageSnack('已恢复 ${entry.item.name}');
-    });
-  }
-
-  Future<void> _deleteEntry(GlobalTrashBrowserEntry entry) async {
-    final confirmed = await showDeleteTrashItemDialog(context, entry.item);
-    if (!confirmed) {
-      return;
-    }
-    await _runBusy(<GlobalTrashBrowserEntry>[entry], () async {
-      await widget.api.deleteTrashItem(
-        _configForBucketId(entry.bucket),
-        _providerBucketName(entry.bucket),
-        entry.item.id,
-      );
-      await _reloadBucket(entry.bucket, resetScroll: false);
-    });
-  }
-
-  Future<void> _restoreSelected() async {
-    final targets = _filteredEntries
-        .where((entry) => _selectedIds.contains(entry.id))
-        .toList(growable: false);
-    if (targets.isEmpty) {
-      return;
-    }
-    await _runBusy(targets, () async {
-      for (final entry in targets) {
-        await widget.api.restoreTrashItem(
-          _configForBucketId(entry.bucket),
-          _providerBucketName(entry.bucket),
-          entry.item.id,
-          originalKey: entry.item.originalKey,
-          isDirectory: entry.item.isDir,
-        );
-      }
-      if (targets.isNotEmpty) {
-        ObjectListingNotifier.instance.markRestored(
-          _providerBucketName(targets.first.bucket),
-          targets.map((entry) => entry.item),
-        );
-      }
-      if (_activeBucket != null) {
-        await _reloadBucket(_activeBucket!, resetScroll: false);
-      }
-      _showPageSnack('已恢复 ${targets.length} 个项目');
-    });
-  }
-
-  Future<void> _deleteSelected() async {
-    final targets = _filteredEntries
-        .where((entry) => _selectedIds.contains(entry.id))
-        .toList(growable: false);
-    if (targets.isEmpty) {
-      return;
-    }
-    final confirmed = await showDeleteTrashItemsDialog(context, targets.length);
-    if (!confirmed) {
-      return;
-    }
-    await _runBusy(targets, () async {
-      for (final entry in targets) {
-        await widget.api.deleteTrashItem(
-          _configForBucketId(entry.bucket),
-          _providerBucketName(entry.bucket),
-          entry.item.id,
-        );
-      }
-      if (_activeBucket != null) {
-        await _reloadBucket(_activeBucket!, resetScroll: false);
-      }
-    });
-  }
-
-  Future<void> _clearActiveBucketTrash() async {
-    final bucket = _activeBucket;
-    if (bucket == null || _entries.isEmpty) {
-      return;
-    }
-    final label = _activeBucketLabel ?? _providerBucketName(bucket);
-    final confirmed = await showClearTrashDialog(context, label);
-    if (!confirmed) {
-      return;
-    }
-    setState(() {
-      _loading = true;
-      _error = null;
-      _busyEntries.clear();
-      _selectedIds.clear();
-    });
-    try {
-      await widget.api.clearTrash(
-        _configForBucketId(bucket),
-        _providerBucketName(bucket),
-      );
-      if (!mounted) {
-        return;
-      }
-      await _reloadBucket(bucket, resetScroll: false);
-      _showPageSnack('已清空 $bucket 的回收站');
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _error = error.toString();
-        _loading = false;
-      });
-    }
-  }
-
-  Future<void> _runBusy(
-    List<GlobalTrashBrowserEntry> entries,
-    Future<void> Function() action,
-  ) async {
-    setState(() {
-      for (final entry in entries) {
-        _busyEntries.add(entry.id);
-        _selectedIds.remove(entry.id);
-      }
-    });
-    try {
-      await action();
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      showAppErrorToast(context, message: error.toString());
-    } finally {
-      if (mounted) {
-        setState(() {
-          for (final entry in entries) {
-            _busyEntries.remove(entry.id);
-          }
-        });
       }
     }
   }

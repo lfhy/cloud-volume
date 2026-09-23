@@ -14,6 +14,7 @@ import 'package:remote_storage/widgets/app_toast.dart';
 import 'package:remote_storage/widgets/bucket_visibility_dialog.dart';
 import 'package:remote_storage/widgets/cloud_storage_account_list.dart';
 import 'package:remote_storage/widgets/file_manager_action_bar.dart';
+import 'package:remote_storage/widgets/mobile_page_chrome.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 class CloudStoragePage extends StatefulWidget {
@@ -138,34 +139,44 @@ class _CloudStoragePageState extends State<CloudStoragePage> {
     final isAndroid = defaultTargetPlatform == TargetPlatform.android;
 
     if (isAndroid) {
-      return Padding(
-        padding: const EdgeInsets.only(
-          top: 28,
-          left: 20,
-          right: 20,
-          bottom: 12,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _PageHeader(theme: theme, onAddAccount: _showAddAccountDialog),
-            const SizedBox(height: 14),
-            Expanded(
-              child: CloudStorageAccountList(
-                accounts: _accounts,
-                isGrid: false,
-                mobileLayout: true,
-                busy: _busy,
-                onEdit: _showEditAccountDialog,
-                onDelete: _delete,
-                onManageBuckets: _showBucketVisibilityDialog,
-                onToggleDisabled: _toggleDisabled,
-                status: _status,
-                statusError: _statusError,
-                onReorder: null,
+      return SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              MobilePageHeader(
+                title: '账号管理',
+                subtitle: '新增与管理云存储账号。',
+                actionSheetTitle: '账号操作',
+                actionsSemanticLabel: '新增账号',
+                actions: [
+                  MobilePageAction(
+                    label: '新增账号',
+                    icon: LucideIcons.plus,
+                    onPressed: _showAddAccountDialog,
+                  ),
+                ],
               ),
-            ),
-          ],
+              const SizedBox(height: 14),
+              Expanded(
+                child: CloudStorageAccountList(
+                  accounts: _accounts,
+                  isGrid: false,
+                  mobileLayout: true,
+                  busy: _busy,
+                  onEdit: _showEditAccountDialog,
+                  onDelete: _delete,
+                  onManageBuckets: _showBucketVisibilityDialog,
+                  onToggleDisabled: _toggleDisabled,
+                  status: _status,
+                  statusError: _statusError,
+                  onReorder: null,
+                ),
+              ),
+            ],
+          ),
         ),
       );
     }

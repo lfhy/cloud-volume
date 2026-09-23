@@ -28,11 +28,14 @@ extension _TransfersPageRemote on _TransfersPageState {
         visible.isNotEmpty &&
         visible.every((task) => _selectedTaskIds.contains(task.id));
     final partial = selectedVisible > 0 && !allSelected;
+    // Android 两态选择模型:过滤后仍可见的选择决定选中态(与回收站一致)。
+    final selectionActive = _androidCompactQueueHeader && selectedVisible > 0;
     final sections = _groupRemoteTasks(visible);
-    return ShadCard(
-      padding: const EdgeInsets.all(4),
-      child: Column(
-        children: [
+    final listBody = Column(
+      children: [
+        // Android 无列表头(与文件管理页一致,搜索框下紧贴列表);桌面
+        // 保留 共 N 项/全选/速度 头部。
+        if (!_androidCompactQueueHeader)
           _RemoteListHeader(
             totalCount: store.total,
             visibleCount: visible.length,
@@ -41,101 +44,84 @@ extension _TransfersPageRemote on _TransfersPageState {
             partial: partial,
             onToggleAll: () => _toggleRemoteVisibleSelection(visible),
           ),
-          Expanded(
-            // Standard body-loading view while the first history page reads.
-            child: store.tasks.isEmpty && store.isLoadingInitialHistory
-                ? const _RemoteInitialLoading()
-                : ListView(
-                    children: [
-                      for (final section in sections) ...[
-                        // Android 行内已有状态徽章，分组标题只占竖向空间，不显示。
-                        if (!_androidCompactQueueHeader)
-                          _RemoteSectionHeader(
-                            label: section.label,
-                            count: section.tasks.length,
+        Expanded(
+          // Standard body-loading view while the first history page reads.
+          child: store.tasks.isEmpty && store.isLoadingInitialHistory
+              ? const _RemoteInitialLoading()
+              : ListView(
+                  children: [
+                    for (var s = 0; s < sections.length; s++) ...[
+                      // Android 行内已有状态徽章，分组标题只占竖向空间，不显示。
+                      if (!_androidCompactQueueHeader)
+                        _RemoteSectionHeader(
+                          label: sections[s].label,
+                          count: sections[s].tasks.length,
+                        ),
+                      for (var i = 0; i < sections[s].tasks.length; i++)
+                        RemoteTaskRow(
+                          key: ValueKey<String>(sections[s].tasks[i].id),
+                          task: sections[s].tasks[i],
+                          selected: _selectedTaskIds.contains(
+                            sections[s].tasks[i].id,
                           ),
-                        for (final task in section.tasks)
-                          RemoteTaskRow(
-                            key: ValueKey<String>(task.id),
-                            task: task,
-                            selected: _selectedTaskIds.contains(task.id),
-                            onToggleSelected: () => _toggleTaskSelection(task.id),
-                            onCancel: task.cancelable
-                                ? () => _cancelRemoteTask(store, task)
-                                : null,
-                            onRetry: task.retryable
-                                ? () => _retryRemoteTask(store, task)
-                                : null,
-                            onTrigger: task.triggerable
-                                ? () => _triggerRemoteTask(store, task)
-                                : null,
-                            onExpanded: (expanded) {
-                              if (expanded) {
-                                unawaited(store.loadDetails(task.id));
-                              }
-                            },
-                            showDivider: true,
-                          ),
-                      ],
-                      // History continuation lives at the end of the list, so
-                      // it appears only once the user reaches the last row.
-                      if (showHistoryPager)
-                        _RemoteHistoryPager(
-                          loaded: store.loadedHistoryCount,
-                          total: store.historyTotal,
-                          remaining: store.remainingHistoryCount,
-                          initialLoading: store.isLoadingInitialHistory,
-                          loading: store.isLoadingMoreHistory,
-                          onLoadNext: () => unawaited(store.loadMore()),
+                          onToggleSelected: () =>
+                              _toggleTaskSelection(sections[s].tasks[i].id),
+                          onCancel: sections[s].tasks[i].cancelable
+                              ? () => _cancelRemoteTask(
+                                  store,
+                                  sections[s].tasks[i],
+                                )
+                              : null,
+                          onRetry: sections[s].tasks[i].retryable
+                              ? () => _retryRemoteTask(
+                                  store,
+                                  sections[s].tasks[i],
+                                )
+                              : null,
+                          onTrigger: sections[s].tasks[i].triggerable
+                              ? () => _triggerRemoteTask(
+                                  store,
+                                  sections[s].tasks[i],
+                                )
+                              : null,
+                          onExpanded: (expanded) {
+                            if (expanded) {
+                              unawaited(
+                                store.loadDetails(sections[s].tasks[i].id),
+                              );
+                            }
+                          },
+                          // 与 FileListTile 列表同款:末行不画分隔线,除非
+                          // 后面还有历史分页行。
+                          showDivider:
+                              s < sections.length - 1 ||
+                              i < sections[s].tasks.length - 1 ||
+                              showHistoryPager,
+                          selectionMode: selectionActive,
                         ),
                     ],
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Queue-tab row switches the list between status queues; each tab is a
-  // dedicated StatefulWidget per the hover binding rule.
-  Widget _buildRemoteQueueTabs(ShadThemeData theme, RemoteTaskStore store) {
-    final tasks = store.tasks;
-    final serverQueue = store.queue;
-    final hasServerCounts = serverQueue.reported;
-    int count(_RemoteTaskStatusFilter filter) {
-      // Prefer server-reported unpaged counts; loaded rows are only a
-      // fallback for older binaries that omit the queue field.
-      if (hasServerCounts) {
-        return switch (filter) {
-          _RemoteTaskStatusFilter.all => serverQueue.total,
-          _RemoteTaskStatusFilter.active => serverQueue.active,
-          _RemoteTaskStatusFilter.waiting => serverQueue.waiting,
-          _RemoteTaskStatusFilter.failed => serverQueue.failed,
-          _RemoteTaskStatusFilter.history => serverQueue.history,
-        };
-      }
-      return tasks
-          .where(
-            (task) =>
-                filter == _RemoteTaskStatusFilter.all || filter.matches(task),
-          )
-          .length;
-    }
-
-    return Row(
-      children: [
-        for (final filter in _RemoteTaskStatusFilter.values) ...[
-          _RemoteQueueTab(
-            label: filter.label,
-            count: count(filter),
-            selected: filter == _remoteStatusFilter,
-            onTap: () => _remoteSetState(() => _remoteStatusFilter = filter),
-          ),
-          const SizedBox(width: 8),
-        ],
+                    // History continuation lives at the end of the list, so
+                    // it appears only once the user reaches the last row.
+                    if (showHistoryPager)
+                      _RemoteHistoryPager(
+                        loaded: store.loadedHistoryCount,
+                        total: store.historyTotal,
+                        remaining: store.remainingHistoryCount,
+                        initialLoading: store.isLoadingInitialHistory,
+                        loading: store.isLoadingMoreHistory,
+                        onLoadNext: () => unawaited(store.loadMore()),
+                      ),
+                  ],
+                ),
+        ),
       ],
     );
+    // Android 对齐文件管理移动基线：任务列表直接落在页面背景上，
+    // 不再套带边框的卡片容器；桌面保持原卡片外观。
+    if (_androidCompactQueueHeader) return listBody;
+    return ShadCard(padding: const EdgeInsets.all(4), child: listBody);
   }
+
 }
 
 class _RemoteTaskSection {
@@ -213,6 +199,8 @@ class _RemoteListHeader extends StatelessWidget {
             selected: allSelected,
             partiallySelected: partial,
             onTap: onToggleAll,
+            touchTargetSize:
+                defaultTargetPlatform == TargetPlatform.android ? 48 : 18,
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -330,9 +318,12 @@ class _RemoteHistoryPager extends StatelessWidget {
           ),
           const SizedBox(width: 16),
           // Ghost keeps the in-list continuation chromeless — it reads as a
-          // list footer action, not a bordered toolbar button.
+          // list footer action, not a bordered toolbar button. Android keeps
+          // a full 48dp touch height for the tap-only footer.
           ShadButton.ghost(
             size: ShadButtonSize.sm,
+            height:
+                defaultTargetPlatform == TargetPlatform.android ? 48 : null,
             onPressed: onLoadNext,
             child: Text('加载下一页（还剩 $remaining 条）'),
           ),

@@ -13,6 +13,7 @@ import 'package:remote_storage/models/paged_listings.dart';
 import 'package:remote_storage/models/remote_task.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
 import 'package:remote_storage/models/s3_objects.dart';
+import 'package:remote_storage/models/sidebar_item.dart';
 import 'package:remote_storage/models/trash_item.dart';
 import 'package:remote_storage/platform/platform_info.dart';
 import 'package:remote_storage/services/file_access_service.dart';
@@ -26,6 +27,7 @@ import 'package:remote_storage/widgets/app_toast.dart';
 import 'package:remote_storage/widgets/bucket_settings_dialog.dart';
 import 'package:remote_storage/state/object_listing_notifier.dart';
 import 'package:remote_storage/state/mobile_file_manager_navigation.dart';
+import 'package:remote_storage/state/mobile_selection_activity.dart';
 import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/state/share_records_notifier.dart';
 import 'package:remote_storage/state/transfer_queue.dart';
@@ -44,6 +46,8 @@ import 'package:remote_storage/widgets/file_manager_trash_browser.dart';
 import 'package:remote_storage/widgets/file_preview_dialog.dart';
 import 'package:remote_storage/widgets/file_transfer_clipboard_region.dart';
 import 'package:remote_storage/widgets/mount_bucket_dialog.dart';
+import 'package:remote_storage/widgets/mobile_page_chrome.dart';
+import 'package:remote_storage/widgets/mobile_selection_chrome.dart';
 import 'package:remote_storage/widgets/object_action_dialogs.dart';
 import 'package:remote_storage/widgets/share_dialogs.dart';
 import 'package:remote_storage/widgets/batch_task_progress_dialog.dart';
@@ -61,6 +65,7 @@ part 'file_manager_page_bucket_view.dart';
 part 'file_manager_page_downloads.dart';
 part 'file_manager_page_mount.dart';
 part 'file_manager_page_mobile_rebind.dart';
+part 'file_manager_page_mobile_selection.dart';
 part 'file_manager_page_presentation_navigation.dart';
 part 'file_manager_page_presentation.dart';
 part 'mobile_file_manager_presentation.dart';
@@ -158,6 +163,8 @@ class _FileManagerPageState extends State<FileManagerWorkspace> {
   final Set<String> _mountBusyBuckets = <String>{};
   final Set<String> _selectedObjectKeys = <String>{};
   final Set<String> _deletingObjectKeys = <String>{};
+  // 桶内回收站视图(Android 两态选择模型)的选中集,按 TrashItem.id。
+  final Set<String> _selectedTrashItemIds = <String>{};
   final Map<_ObjectListingCacheKey, ObjectListPage> _objectListingCache =
       <_ObjectListingCacheKey, ObjectListPage>{};
   final Map<String, _BucketQuotaCacheValue> _bucketQuotaCache =
@@ -252,6 +259,8 @@ class _FileManagerPageState extends State<FileManagerWorkspace> {
 
   @override
   void dispose() {
+    // 选中态报告随之撤销,避免隐藏/卸载后 shell 仍认为本 tab 在选中态。
+    MobileSelectionActivity.instance.report(SidebarItem.fileManager, false);
     _loadingDetailTimer?.cancel();
     _mountStatusRefreshTimer?.cancel();
     ObjectListingNotifier.instance.removeListener(_handleObjectListingMutation);

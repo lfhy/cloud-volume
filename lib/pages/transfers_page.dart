@@ -6,11 +6,16 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:remote_storage/models/remote_storage_config.dart';
 import 'package:remote_storage/models/remote_task.dart';
+import 'package:remote_storage/models/remote_task_display.dart';
+import 'package:remote_storage/models/sidebar_item.dart';
 import 'package:remote_storage/services/remote_storage_gateway.dart';
+import 'package:remote_storage/state/mobile_selection_activity.dart';
 import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/widgets/app_loading_indicator.dart';
 import 'package:remote_storage/widgets/app_toast.dart';
 import 'package:remote_storage/widgets/list_selection_controls.dart';
+import 'package:remote_storage/widgets/mobile_page_chrome.dart';
+import 'package:remote_storage/widgets/mobile_selection_chrome.dart';
 import 'package:remote_storage/widgets/remote_task_style_helpers.dart';
 import 'package:remote_storage/widgets/remote_task_widgets.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -19,6 +24,7 @@ part 'transfers_page_remote.dart';
 part 'transfers_page_remote_actions.dart';
 part 'transfers_page_remote_filters.dart';
 part 'transfers_page_remote_header.dart';
+part 'transfers_page_remote_overflow.dart';
 
 // Queue actions can process a large durable journal, so keep the active
 // request visible in its button instead of looking like a disabled no-op.
@@ -76,6 +82,8 @@ class _TransfersPageState extends State<TransfersPage> {
 
   @override
   void dispose() {
+    // 选中态报告随之撤销,避免隐藏/卸载后 shell 仍认为本 tab 在选中态。
+    MobileSelectionActivity.instance.report(SidebarItem.transfers, false);
     RemoteTaskStore.instance.removeListener(_syncSelectionWithTasks);
     _searchController
       ..removeListener(_onSearchChanged)
@@ -135,30 +143,35 @@ class _TransfersPageState extends State<TransfersPage> {
   }
 
   Widget _buildEmptyState(ShadThemeData theme, String title, String message) {
+    final content = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          LucideIcons.arrowLeftRight,
+          size: 28,
+          color: theme.colorScheme.mutedForeground,
+        ),
+        const SizedBox(height: 10),
+        Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+        const SizedBox(height: 5),
+        Text(
+          message,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 12,
+            color: theme.colorScheme.mutedForeground,
+          ),
+        ),
+      ],
+    );
+    // Android 对齐文件管理空态：内容直接落在页面背景上，不套带边框的卡。
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return Center(child: content);
+    }
     return Center(
       child: ShadCard(
         padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              LucideIcons.arrowLeftRight,
-              size: 28,
-              color: theme.colorScheme.mutedForeground,
-            ),
-            const SizedBox(height: 10),
-            Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 5),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 12,
-                color: theme.colorScheme.mutedForeground,
-              ),
-            ),
-          ],
-        ),
+        child: content,
       ),
     );
   }
@@ -166,13 +179,31 @@ class _TransfersPageState extends State<TransfersPage> {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
+    final body = AnimatedBuilder(
+      animation: RemoteTaskStore.instance,
+      builder: (context, _) => _buildRemoteQueueBody(theme, RemoteTaskStore.instance),
+    );
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      // 选中态动作条全宽贴底(百度式):移出页边距列,自带底部安全区;
+      // 选中态下底部导航栏由 shell 隐藏。
+      return SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+                child: body,
+              ),
+            ),
+            _buildAndroidSelectionBarSlot(),
+          ],
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.only(top: 56, left: 36, right: 36, bottom: 20),
-      child: AnimatedBuilder(
-        animation: RemoteTaskStore.instance,
-        builder: (context, _) =>
-            _buildRemoteQueueBody(theme, RemoteTaskStore.instance),
-      ),
+      child: body,
     );
   }
 }

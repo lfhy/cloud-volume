@@ -51,6 +51,7 @@ extension _FileManagerPageTrash on _FileManagerPageState {
         _trashHasMore = page.hasMore;
         _pagingTrash = false;
         _selectedObjectKeys.clear();
+        _selectedTrashItemIds.clear();
         _endLoading();
       });
       if (_contentScrollController.hasClients) {
@@ -150,6 +151,11 @@ extension _FileManagerPageTrash on _FileManagerPageState {
       _MobileFileManagerLocation.trash(bucketEntry),
     );
     if (!_isCurrentMobileFileManagerRequest(request)) return;
+    // 动作发起即退出选中态(两态模型):待重载期间选择已不可操作,Back
+    // 应回退位置而不是再清一次选择。
+    if (_usesMobileNavigation) {
+      setState(_selectedTrashItemIds.clear);
+    }
     try {
       await widget.api.restoreTrashItem(
         bucketEntry.config,
@@ -220,6 +226,10 @@ extension _FileManagerPageTrash on _FileManagerPageState {
         )) {
       return;
     }
+    // 确认后退出选中态(与恢复路径一致,见 _restoreTrashItem)。
+    if (_usesMobileNavigation) {
+      setState(_selectedTrashItemIds.clear);
+    }
     try {
       await widget.api.deleteTrashItem(
         bucketEntry.config,
@@ -284,6 +294,7 @@ extension _FileManagerPageTrash on _FileManagerPageState {
       _loading = true;
       _error = null;
       _selectedObjectKeys.clear();
+      _selectedTrashItemIds.clear();
     });
     try {
       await widget.api.clearTrash(bucketEntry.config, bucketEntry.bucket.name);
@@ -338,6 +349,9 @@ extension _FileManagerPageTrash on _FileManagerPageState {
       onRestore: (item) => unawaited(_restoreTrashItem(item)),
       onDeletePermanently: (item) =>
           unawaited(_deleteTrashItemPermanently(item)),
+      // Android 两态选择模型:选中集与切换;批量动作在页面底部动作条。
+      selectedIds: _selectedTrashItemIds,
+      onToggleSelection: _toggleTrashItemSelection,
     );
   }
 }

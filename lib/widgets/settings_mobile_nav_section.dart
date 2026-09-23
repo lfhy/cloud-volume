@@ -169,10 +169,11 @@ class _SettingsMobileNavSectionState extends State<SettingsMobileNavSection> {
 
   Widget _moveButton(IconData icon, String tooltip, VoidCallback? onPressed) {
     final theme = widget.theme;
+    // Touch-only section (Android renders it exclusively), so keep the full
+    // 48dp target even though the icon stays visually small.
     return IconButton(
       tooltip: tooltip,
-      visualDensity: VisualDensity.compact,
-      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+      constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
       padding: EdgeInsets.zero,
       onPressed: onPressed,
       icon: Icon(

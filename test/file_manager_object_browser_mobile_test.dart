@@ -7,18 +7,23 @@ import 'package:remote_storage/widgets/file_manager_object_header.dart';
 import 'package:remote_storage/widgets/desktop_context_menu_region.dart';
 import 'package:remote_storage/widgets/file_list_tile.dart';
 import 'package:remote_storage/widgets/list_selection_controls.dart';
-import 'package:remote_storage/services/app_modal.dart';
+import 'package:remote_storage/widgets/mobile_selection_chrome.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 void main() {
+  // 两态选择模型下的 Android 对象行契约:浏览态行尾选择圆点、无行首
+  // 控件、行点击/长按分别是打开与进入选中;选中态行首 48dp 勾选控件、
+  // 圆点隐藏。行级动作在页面的选中态底部动作条,不再有每行 `…` 抽屉。
+
   testWidgets(
-    'Android object list uses compact rows and a bottom action sheet',
+    'Android browse rows open on tap and select via dot or long-press',
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
       try {
         tester.view.physicalSize = const Size(420, 900);
         tester.view.devicePixelRatio = 1;
         var openedFiles = 0;
+        var selectionTaps = 0;
 
         await tester.pumpWidget(
           ShadApp(
@@ -46,7 +51,7 @@ void main() {
                 onOpenFile: (_) => openedFiles++,
                 onDownloadFile: (_) {},
                 onNavigateUp: () {},
-                onToggleSelection: (_) {},
+                onToggleSelection: (_) => selectionTaps++,
                 onSelectionSetChanged: (_) {},
                 onToggleSelectAll: () {},
                 onClearSelection: () {},
@@ -62,64 +67,36 @@ void main() {
         expect(find.byType(FileManagerObjectHeader), findsNothing);
         final row = tester.widget<FileListTile>(find.byType(FileListTile));
         expect(row.compact, isTrue);
-        expect(tester.widget<Text>(find.text('notes.txt')).style?.fontSize, 14);
-        expect(tester.widget<Text>(find.text('24 B')).style?.fontSize, 12);
+        // 浏览态:无行首选择控件,行尾是 48dp 选择圆点。
+        expect(row.showSelectionControl, isFalse);
+        final dot = find.descendant(
+          of: find.byType(FileListTile),
+          matching: find.byType(MobileRowSelectDot),
+        );
+        expect(dot, findsOneWidget);
+        expect(tester.getSize(dot), const Size(48, 48));
         expect(
-          tester.widget<Text>(find.text('2026-08-31')).style?.fontSize,
-          12,
+          find.descendant(
+            of: find.byType(FileListTile),
+            matching: find.byIcon(LucideIcons.ellipsisVertical),
+          ),
+          findsNothing,
         );
-        expect(find.byIcon(LucideIcons.ellipsisVertical), findsOneWidget);
-        expect(
-          tester.getSize(find.byIcon(LucideIcons.ellipsisVertical)),
-          const Size(18, 18),
-        );
-        final button = find.ancestor(
-          of: find.byIcon(LucideIcons.ellipsisVertical),
-          matching: find.byType(ShadIconButton),
-        );
-        expect(tester.getSize(button), const Size(48, 48));
         expect(find.byType(DesktopContextMenuRegion), findsNothing);
-        expect(find.bySemanticsLabel('notes.txt 的更多操作'), findsOneWidget);
 
-        await tester.tap(find.byIcon(LucideIcons.ellipsisVertical));
-        await tester.pumpAndSettle();
-        expect(openedFiles, 0);
-        expect(find.byType(AppShadDialog), findsOneWidget);
-        expect(find.text('预览'), findsOneWidget);
-        expect(find.text('下载'), findsOneWidget);
-        expect(find.text('创建分享'), findsOneWidget);
-        expect(find.text('复制到...'), findsOneWidget);
-        expect(find.text('移动到...'), findsOneWidget);
-        expect(find.text('重命名'), findsOneWidget);
-        expect(find.text('删除'), findsOneWidget);
+        // 行点击仍是主操作(打开文件);圆点与长按进入选中。
+        await tester.tap(find.byType(FileListTile));
+        await tester.pump();
+        expect(openedFiles, 1);
+        expect(selectionTaps, 0);
 
-        // The dialog close affordance is also a ShadButton; action labels are
-        // the stable way to select the seven menu rows.
-        const actionLabels = [
-          '预览',
-          '下载',
-          '创建分享',
-          '复制到...',
-          '移动到...',
-          '重命名',
-          '删除',
-        ];
-        for (final label in actionLabels) {
-          final actionButton = find.ancestor(
-            of: find.text(label),
-            matching: find.byType(ShadButton),
-          );
-          expect(actionButton, findsOneWidget);
-          expect(tester.getSize(actionButton).height, greaterThanOrEqualTo(48));
-        }
-
-        expect(await tester.binding.handlePopRoute(), isTrue);
-        await tester.pumpAndSettle();
-        expect(find.byType(AppShadDialog), findsNothing);
+        await tester.tap(dot);
+        await tester.pump();
+        expect(selectionTaps, 1);
 
         await tester.longPress(find.byType(FileListTile));
-        await tester.pumpAndSettle();
-        expect(find.text('重命名'), findsOneWidget);
+        await tester.pump();
+        expect(selectionTaps, 2);
       } finally {
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump();
@@ -131,7 +108,7 @@ void main() {
   );
 
   testWidgets(
-    'Android object action sheet survives narrow, tall text layouts',
+    'Android browse rows keep the dot inside narrow, tall text layouts',
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
       try {
@@ -178,15 +155,13 @@ void main() {
         );
         await tester.pump();
 
-        await tester.tap(find.byIcon(LucideIcons.ellipsisVertical));
-        await tester.pumpAndSettle();
-        expect(find.byType(AppShadDialog), findsOneWidget);
-        expect(tester.takeException(), isNull);
-
-        // The action list is scrollable when the sheet cannot fit every row.
-        final actionList = find.byType(SingleChildScrollView);
-        expect(actionList, findsAtLeastNWidgets(1));
-        await tester.ensureVisible(find.text('删除'));
+        expect(
+          find.descendant(
+            of: find.byType(FileListTile),
+            matching: find.byType(MobileRowSelectDot),
+          ),
+          findsOneWidget,
+        );
         expect(tester.takeException(), isNull);
       } finally {
         await tester.pumpWidget(const SizedBox.shrink());
@@ -199,7 +174,7 @@ void main() {
   );
 
   testWidgets(
-    'Android object selection keeps a 48dp target and gates directory downloads',
+    'Android selection state shows the leading control and hides dots',
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
       try {
@@ -222,8 +197,6 @@ void main() {
                 loadingMore: false,
                 selectedKeys: const {'docs/a/', 'docs/b/'},
                 deletingKeys: const <String>{},
-                supportsDirectoryDownload: false,
-                supportsBrowserTransfers: false,
                 gridIconSize: 44,
                 listIconSize: 34,
                 onOpenDirectory: (_) {},
@@ -242,20 +215,19 @@ void main() {
         );
         await tester.pump();
 
+        // 选中态:行首 48dp 勾选控件接管,行尾圆点消失。
         final control = find.byType(ListSelectionControl).first;
         expect(tester.getSize(control), const Size(48, 48));
+        expect(
+          find.descendant(
+            of: find.byType(FileListTile),
+            matching: find.byType(MobileRowSelectDot),
+          ),
+          findsNothing,
+        );
         final controlRect = tester.getRect(control);
         await tester.tapAt(controlRect.topLeft + const Offset(2, 2));
         expect(selectionTaps, 1);
-
-        await tester.tap(find.byIcon(LucideIcons.ellipsisVertical).first);
-        await tester.pumpAndSettle();
-        expect(find.byType(AppShadDialog), findsOneWidget);
-        expect(find.text('已选 2 项'), findsOneWidget);
-        expect(find.text('批量下载'), findsNothing);
-        expect(find.text('批量复制到...'), findsOneWidget);
-        expect(find.text('批量移动到...'), findsOneWidget);
-        expect(find.text('批量删除'), findsOneWidget);
       } finally {
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump();
@@ -266,9 +238,7 @@ void main() {
     },
   );
 
-  testWidgets('Android read-only object sheet omits write actions', (
-    tester,
-  ) async {
+  testWidgets('parent and deleting rows hide the select dot', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     try {
       tester.view.physicalSize = const Size(420, 900);
@@ -283,12 +253,11 @@ void main() {
               prefix: '',
               isGrid: false,
               mobilePresentation: true,
-              readOnly: true,
               scrollController: ScrollController(),
               hasMore: false,
               loadingMore: false,
               selectedKeys: const <String>{},
-              deletingKeys: const <String>{},
+              deletingKeys: const <String>{'locked.txt'},
               gridIconSize: 44,
               listIconSize: 34,
               onOpenDirectory: (_) {},
@@ -307,73 +276,14 @@ void main() {
       );
       await tester.pump();
 
-      await tester.tap(find.byIcon(LucideIcons.ellipsisVertical));
-      await tester.pumpAndSettle();
-
-      expect(find.text('预览'), findsOneWidget);
-      expect(find.text('下载'), findsOneWidget);
-      expect(find.text('创建分享'), findsOneWidget);
-      expect(find.text('复制到...'), findsNothing);
-      expect(find.text('移动到...'), findsNothing);
-      expect(find.text('重命名'), findsNothing);
-      expect(find.text('删除'), findsNothing);
-    } finally {
-      await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pump();
-      debugDefaultTargetPlatformOverride = null;
-      tester.view.resetPhysicalSize();
-      tester.view.resetDevicePixelRatio();
-    }
-  });
-
-  testWidgets('Android batch sheet keeps eligible files with blocked folders', (
-    tester,
-  ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.android;
-    try {
-      tester.view.physicalSize = const Size(420, 900);
-      tester.view.devicePixelRatio = 1;
-      await tester.pumpWidget(
-        ShadApp(
-          home: Material(
-            child: FileManagerObjectBrowser(
-              objects: const [
-                ObjectInfo(key: 'report.txt', size: 24, isDir: false),
-                ObjectInfo(key: 'archive/', size: 0, isDir: true),
-              ],
-              prefix: '',
-              isGrid: false,
-              mobilePresentation: true,
-              scrollController: ScrollController(),
-              hasMore: false,
-              loadingMore: false,
-              selectedKeys: const <String>{'report.txt', 'archive/'},
-              deletingKeys: const <String>{},
-              supportsDirectoryDownload: false,
-              supportsBrowserTransfers: false,
-              gridIconSize: 44,
-              listIconSize: 34,
-              onOpenDirectory: (_) {},
-              onOpenFile: (_) {},
-              onDownloadFile: (_) {},
-              onNavigateUp: () {},
-              onToggleSelection: (_) {},
-              onSelectionSetChanged: (_) {},
-              onToggleSelectAll: () {},
-              onClearSelection: () {},
-              onSelectionAction: (_) {},
-              onObjectAction: (_, _) {},
-            ),
-          ),
+      expect(
+        find.descendant(
+          of: find.byType(FileListTile),
+          matching: find.byType(MobileRowSelectDot),
         ),
+        findsNothing,
       );
-      await tester.pump();
-
-      await tester.tap(find.byIcon(LucideIcons.ellipsisVertical).first);
-      await tester.pumpAndSettle();
-
-      expect(find.text('已选 2 项'), findsOneWidget);
-      expect(find.text('批量下载'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     } finally {
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();

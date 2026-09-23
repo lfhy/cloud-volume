@@ -28,15 +28,19 @@ import 'package:remote_storage/models/trash_item.dart';
 import 'package:remote_storage/models/transfer_job.dart';
 import 'package:remote_storage/models/sync_profile.dart';
 import 'package:remote_storage/pages/app_bootstrap_page.dart';
+import 'package:remote_storage/pages/cloud_storage_page.dart';
 import 'package:remote_storage/pages/file_manager_page.dart';
 import 'package:remote_storage/pages/global_trash_page.dart';
 import 'package:remote_storage/pages/main_layout_page.dart';
 import 'package:remote_storage/pages/mobile_file_manager_page.dart';
+import 'package:remote_storage/pages/settings_page.dart';
+import 'package:remote_storage/pages/transfers_page.dart';
 import 'package:remote_storage/services/app_modal.dart';
 import 'package:remote_storage/state/transfer_queue.dart';
 import 'package:remote_storage/state/remote_task_store.dart';
 import 'package:remote_storage/state/object_listing_notifier.dart';
 import 'package:remote_storage/state/sync_profile_notifier.dart';
+import 'package:remote_storage/widgets/file_list_tile.dart';
 import 'package:remote_storage/widgets/file_manager_breadcrumb_bar.dart';
 import 'package:remote_storage/widgets/file_manager_action_bar.dart';
 import 'package:remote_storage/widgets/file_manager_bucket_browser.dart';
@@ -44,6 +48,7 @@ import 'package:remote_storage/widgets/file_manager_object_browser.dart';
 import 'package:remote_storage/widgets/file_manager_trash_browser.dart';
 import 'package:remote_storage/widgets/file_manager_error_view.dart';
 import 'package:remote_storage/widgets/mobile_navigation_bar.dart';
+import 'package:remote_storage/widgets/mobile_page_chrome.dart';
 
 void main() {
   setUp(() {
@@ -889,6 +894,16 @@ void main() {
                 size: 24,
                 objectCount: 0,
               ),
+              TrashItem(
+                id: 'clear-action-item-2',
+                name: '已删目录',
+                originalKey: 'docs/已删目录',
+                trashKey: '.trash/clear-action-item-2',
+                deletedAt: '2026-09-02',
+                isDir: true,
+                size: 0,
+                objectCount: 3,
+              ),
             ],
             nextToken: '',
           ),
@@ -907,14 +922,85 @@ void main() {
       expect(find.byType(GlobalTrashPage), findsOneWidget);
       expect(find.text('已删文件.txt'), findsOneWidget);
       expect(find.byIcon(LucideIcons.plus), findsNothing);
+      // 页面级入口（刷新/清空回收站）保持右上角单一入口打开底部抽屉。
+      await tester.tap(find.bySemanticsLabel('回收站操作'));
+      await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(ShadButton, '清空回收站'));
       await tester.pumpAndSettle();
       expect(find.text('将彻底删除「手机文件」回收站中的所有项目，之后无法恢复。'), findsOneWidget);
-      expect(find.widgetWithText(ShadButton, '取消'), findsOneWidget);
-
-      await tester.tap(find.widgetWithText(ShadButton, '取消'));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AppShadDialog),
+          matching: find.widgetWithText(ShadButton, '取消'),
+        ),
+      );
       await tester.pumpAndSettle();
       expect(find.text('已删文件.txt'), findsOneWidget);
+
+      // 两态选择模型：浏览态行尾选择圆点，无行 `…` 抽屉。（行点击曾因
+      // onDoubleTap 双触发而失效，钉住浏览态行点击=进入选中。）
+      final selectDots = find.descendant(
+        of: find.byType(FileListTile),
+        matching: find.bySemanticsLabel('选择'),
+      );
+      expect(selectDots, findsNWidgets(2));
+      expect(
+        find.descendant(
+          of: find.byType(FileListTile),
+          matching: find.byIcon(LucideIcons.ellipsisVertical),
+        ),
+        findsNothing,
+      );
+
+      // 行点击进入选中态：头部变形（取消/已选中 N 个文件/全选）+ 底部
+      // 动作条（详情/恢复/彻底删除）,底部导航栏整体让位（两态模型）。
+      await tester.tap(find.byType(FileListTile).first);
+      await tester.pumpAndSettle();
+      expect(find.text('已选中 1 个文件'), findsOneWidget);
+      expect(find.text('浏览与恢复已删除的远端文件。'), findsNothing);
+      expect(find.text('取消'), findsOneWidget);
+      expect(find.text('全选'), findsOneWidget);
+      expect(find.text('恢复'), findsOneWidget);
+      expect(find.text('彻底删除'), findsOneWidget);
+      expect(find.byType(MobileNavigationBar<SidebarItem>), findsNothing);
+
+      // 单选首项「详情」打开文件详情 sheet：展示系统已有的元信息。
+      await tester.tap(find.text('详情'));
+      await tester.pumpAndSettle();
+      expect(find.text('文件详情'), findsOneWidget);
+      expect(find.text('名称'), findsOneWidget);
+      expect(find.text('删除时间'), findsOneWidget);
+      expect(find.text('原路径'), findsOneWidget);
+      expect(await tester.binding.handlePopRoute(), isTrue);
+      await tester.pumpAndSettle();
+
+      // 全选：剩余行进入选中集，按钮切换为「取消全选」。
+      await tester.tap(find.text('全选'));
+      await tester.pumpAndSettle();
+      expect(find.text('已选中 2 个文件'), findsOneWidget);
+      expect(find.text('取消全选'), findsOneWidget);
+
+      // 批量「彻底删除」走确认弹窗——它是旧「清空回收站」入口的等价
+      // 路径；这里取消退出，不真正删除。
+      await tester.tap(find.text('彻底删除'));
+      await tester.pumpAndSettle();
+      expect(find.text('批量彻底删除'), findsOneWidget);
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AppShadDialog),
+          matching: find.widgetWithText(ShadButton, '取消'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // 「取消」退出选中态，回到浏览态大标题,底部导航栏与页面级入口
+      // 恢复显示。
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+      expect(find.text('已选中 2 个文件'), findsNothing);
+      expect(find.text('浏览与恢复已删除的远端文件。'), findsOneWidget);
+      expect(find.byType(MobileNavigationBar<SidebarItem>), findsOneWidget);
+      expect(find.bySemanticsLabel('回收站操作'), findsOneWidget);
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
@@ -1400,10 +1486,11 @@ void main() {
         final objectRow = find.byKey(
           const ValueKey<String>('file-object-待下载目录/'),
         );
+        // 两态模型：圆点进入选中态，底部动作条触发「下载」。
         await tester.tap(
           find.descendant(
             of: objectRow,
-            matching: find.byIcon(LucideIcons.ellipsisVertical),
+            matching: find.bySemanticsLabel('选择'),
           ),
         );
         await tester.pumpAndSettle();
@@ -1899,7 +1986,11 @@ void main() {
 
       final pendingRestore = Completer<void>();
       api.nextRestoreTrashItem = pendingRestore;
-      await tester.tap(find.byIcon(LucideIcons.rotateCcw));
+      // 两态模型：行点击进入选中态，底部动作条触发「恢复」。
+      await tester.tap(find.byType(FileListTile).first);
+      await tester.pumpAndSettle();
+      expect(find.text('已选中 1 个文件'), findsOneWidget);
+      await tester.tap(find.text('恢复'));
       await tester.pump();
       expect(api.nextRestoreTrashItem, isNull);
 
@@ -2042,6 +2133,8 @@ void main() {
       await tester.pumpAndSettle();
       await _openMobileBucketTrash(tester);
       expect(find.text('返回文件'), findsNothing);
+      // 回收站视图的页面级入口（返回文件/清空回收站）保持右上角单一入口；
+      // 首次 Back 收起动作抽屉，再次 Back 才离开桶回收站。
       expect(find.byIcon(LucideIcons.plus), findsOneWidget);
       await _openMobileFileActions(tester);
       expect(find.widgetWithText(ShadButton, '返回文件'), findsOneWidget);
@@ -2665,14 +2758,17 @@ void main() {
         await tester.pumpAndSettle();
 
         final objectRow = find.byKey(const ValueKey('file-object-待删除.txt'));
+        // 两态模型：圆点进入选中态；动作条两排全量展示,删除在第二排直接
+        // 可点(无「更多」)。
         await tester.tap(
           find.descendant(
             of: objectRow,
-            matching: find.byIcon(LucideIcons.ellipsisVertical),
+            matching: find.bySemanticsLabel('选择'),
           ),
         );
         await tester.pumpAndSettle();
-        await tester.tap(find.widgetWithText(ShadButton, '删除'));
+        expect(find.text('重命名'), findsOneWidget);
+        await tester.tap(find.text('删除'));
         await tester.pumpAndSettle();
         await tester.tap(find.widgetWithText(ShadButton, '删除'));
         await tester.pump();
@@ -3124,6 +3220,7 @@ void main() {
         await tester.ensureVisible(objectRow);
         await tester.longPress(objectRow);
         // Page two deliberately remains pending, so do not settle its spinner.
+        // 两态模型：长按进入选中态；动作条两排全量展示,重命名直接可点。
         await tester.pump(const Duration(milliseconds: 320));
         await tester.tap(find.text('重命名'));
         await tester.pump(const Duration(milliseconds: 320));
@@ -3270,7 +3367,12 @@ void main() {
 
       final refreshedPage = Completer<TrashListPage>();
       api.nextTrashPage = refreshedPage;
-      await tester.tap(find.byIcon(LucideIcons.rotateCcw).first);
+      // 两态模型：行点击进入选中态，底部动作条触发「恢复」。
+      await tester.ensureVisible(find.byType(FileListTile).first);
+      await tester.pump();
+      await tester.tap(find.byType(FileListTile).first);
+      await tester.pump();
+      await tester.tap(find.text('恢复'));
       await tester.pump();
       expect(api.nextTrashPage, isNull);
 
@@ -3362,6 +3464,8 @@ void main() {
       await tester.pumpAndSettle();
       await _openMobileBucketTrash(tester);
       expect(find.text('返回文件'), findsNothing);
+      // 回收站视图的页面级入口（返回文件/清空回收站）保持右上角单一入口。
+      expect(find.byIcon(LucideIcons.plus), findsOneWidget);
       await _openMobileFileActions(tester);
       expect(find.widgetWithText(ShadButton, '返回文件'), findsOneWidget);
 
@@ -3549,6 +3653,253 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     }
   });
+
+  // Android 小屏布局优化（账号/任务/回收站/设置页）的预期测试点：
+  // 每页稳定大标题 + 副标题、48dp 动作入口与触控行、系统 Back 链路。
+  // 真机统一测试前用这些 widget 回归锁定契约。
+  Future<BootstrapState> mobilePageBootstrapState() async {
+    return BootstrapState(
+      configPath: '/tmp/.remote-storage/config.toml',
+      configured: true,
+      config: RemoteStorageConfig.empty(),
+      profiles: const <ProfileInfo>[
+        ProfileInfo(
+          name: 'profile',
+          displayName: '测试账号',
+          storageType: StorageType.s3,
+          providerType: StorageProviderType.s3,
+          endpoint: 'https://s3.example.com',
+          accessKeyId: 'AKIA_TEST',
+        ),
+      ],
+    );
+  }
+
+  testWidgets('android accounts page keeps stable header and 48dp actions', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      SharedPreferences.setMockInitialValues({});
+      RemoteTaskStore.instance.resetForTest();
+      final api = _FakeApi(
+        configured: true,
+        freshBootstrapInstances: true,
+        configOverride: await mobilePageBootstrapState().then((s) => s.config),
+        profiles: const <ProfileInfo>[
+          ProfileInfo(
+            name: 'profile',
+            displayName: '测试账号',
+            storageType: StorageType.s3,
+            providerType: StorageProviderType.s3,
+            endpoint: 'https://s3.example.com',
+            accessKeyId: 'AKIA_TEST',
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
+      await tester.pumpAndSettle();
+      await tester.tap(find.bySemanticsLabel('账号').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('账号管理'), findsOneWidget);
+      expect(find.text('新增与管理云存储账号。'), findsOneWidget);
+      final addEntry = find.bySemanticsLabel('新增账号');
+      expect(addEntry, findsOneWidget);
+      final addSize = tester.getSize(addEntry);
+      expect(addSize.height, greaterThanOrEqualTo(48));
+      // 卡片动作行中文化且保持 48dp 触控。
+      expect(find.text('桶管理'), findsOneWidget);
+      expect(find.text('编辑'), findsOneWidget);
+      expect(find.text('退出'), findsOneWidget);
+      final buttonZone = find
+          .ancestor(
+            of: find.text('桶管理'),
+            matching: find.byType(GestureDetector),
+          )
+          .first;
+      expect(tester.getSize(buttonZone).height, greaterThanOrEqualTo(48));
+      // 账号页卡片容器已按用户裁决恢复（无边框基线仅适用于文件/回收站/
+      // 任务列表页）。
+      expect(
+        find.descendant(
+          of: find.byType(CloudStoragePage),
+          matching: find.byType(ShadCard),
+        ),
+        findsWidgets,
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      TransferQueue.instance.resetForTest();
+      RemoteTaskStore.instance.resetForTest();
+      SyncProfileNotifier.instance.stop();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('android settings page back button collapses detail to index', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      SharedPreferences.setMockInitialValues({});
+      RemoteTaskStore.instance.resetForTest();
+      final api = _FakeApi(
+        configured: true,
+        freshBootstrapInstances: true,
+        configOverride: await mobilePageBootstrapState().then((s) => s.config),
+      );
+
+      await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
+      await tester.pumpAndSettle();
+      await tester.tap(find.bySemanticsLabel('设置').last);
+      await tester.pumpAndSettle();
+
+      // 页面大标题与底栏短标签同名，限定在移动头部组件内断言。
+      expect(
+        find.descendant(of: find.byType(MobilePageHeader), matching: find.text('设置')),
+        findsOneWidget,
+      );
+      expect(find.text('管理应用与连接偏好。'), findsOneWidget);
+      // 设置索引分组卡片已按用户裁决恢复。
+      expect(
+        find.descendant(
+          of: find.byType(SettingsPage),
+          matching: find.byType(ShadCard),
+        ),
+        findsWidgets,
+      );
+
+      // 进入一个设置详情页（「外观」标签唯一），返回入口语义与 48dp 尺寸保持。
+      // IndexedStack 常驻各页，find.text 全树搜索会同时命中索引与详情的
+      // 同名文本，这里用 findsWidgets。
+      await tester.tap(find.text('外观'));
+      await tester.pumpAndSettle();
+      expect(find.text('外观'), findsWidgets);
+      // 设置详情分区卡片已按用户裁决恢复。
+      expect(
+        find.descendant(
+          of: find.byType(SettingsPage),
+          matching: find.byType(ShadCard),
+        ),
+        findsWidgets,
+      );
+      final back = find.bySemanticsLabel('返回设置');
+      expect(back, findsOneWidget);
+      expect(tester.getSize(back).height, greaterThanOrEqualTo(48));
+
+      // 模拟系统 Back：设置详情页应先于 tab 历史被收起，回到设置索引。
+      final popped = await tester.binding.handlePopRoute();
+      expect(popped, isTrue);
+      await tester.pumpAndSettle();
+      expect(find.text('外观'), findsOneWidget);
+      expect(find.text('管理应用与连接偏好。'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      TransferQueue.instance.resetForTest();
+      RemoteTaskStore.instance.resetForTest();
+      SyncProfileNotifier.instance.stop();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('android transfers page keeps subtitle and hides empty entry', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      SharedPreferences.setMockInitialValues({});
+      RemoteTaskStore.instance.resetForTest();
+      final api = _FakeApi(
+        configured: true,
+        freshBootstrapInstances: true,
+        configOverride: await mobilePageBootstrapState().then((s) => s.config),
+      );
+
+      await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
+      await tester.pumpAndSettle();
+      await tester.tap(find.bySemanticsLabel('任务').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('任务队列'), findsOneWidget);
+      expect(find.text('查看传输与同步任务的进度。'), findsOneWidget);
+      // 无边框基线：Android 任务列表与空态不套带边框的卡片容器。
+      expect(
+        find.descendant(
+          of: find.byType(TransfersPage),
+          matching: find.byType(ShadCard),
+        ),
+        findsNothing,
+      );
+      // 动作收进抽屉：空队列没有可用动作时右上角入口整体隐藏，
+      // 「立即同步」不再作为内联按钮出现；有任务时的抽屉行为由
+      // transfers_page_batch_actions_test 的 android 用例钉住。
+      expect(find.text('立即同步'), findsNothing);
+      expect(find.bySemanticsLabel('任务操作'), findsNothing);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      TransferQueue.instance.resetForTest();
+      RemoteTaskStore.instance.resetForTest();
+      SyncProfileNotifier.instance.stop();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('android trash page keeps subtitle', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      SharedPreferences.setMockInitialValues({});
+      RemoteTaskStore.instance.resetForTest();
+      final api = _FakeApi(
+        configured: true,
+        freshBootstrapInstances: true,
+        configOverride: await mobilePageBootstrapState().then((s) => s.config),
+      );
+
+      await tester.pumpWidget(RemoteStorageApp(apiFactory: () async => api));
+      await tester.pumpAndSettle();
+      await tester.tap(find.bySemanticsLabel('回收站').last);
+      await tester.pumpAndSettle();
+
+      // 页面标题与底栏标签同名：副标题唯一，标题断言放宽为至少存在。
+      expect(find.text('回收站'), findsWidgets);
+      expect(find.text('浏览与恢复已删除的远端文件。'), findsOneWidget);
+      // 无边框基线：Android 回收站列表不套带边框的卡片容器。
+      expect(
+        find.descendant(
+          of: find.byType(GlobalTrashPage),
+          matching: find.byType(ShadCard),
+        ),
+        findsNothing,
+      );
+      // 页面级入口（刷新/清空回收站）保持右上角单一入口打开底部抽屉。
+      final trashEntry = find.bySemanticsLabel('回收站操作');
+      expect(trashEntry, findsOneWidget);
+      expect(tester.getSize(trashEntry).height, greaterThanOrEqualTo(48));
+      await tester.tap(trashEntry);
+      await tester.pumpAndSettle();
+      expect(find.byType(AppShadDialog), findsOneWidget);
+      expect(find.text('刷新'), findsOneWidget);
+      expect(await tester.binding.handlePopRoute(), isTrue);
+      await tester.pumpAndSettle();
+      expect(find.byType(AppShadDialog), findsNothing);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      TransferQueue.instance.resetForTest();
+      RemoteTaskStore.instance.resetForTest();
+      SyncProfileNotifier.instance.stop();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
 }
 
 final class _FakeFilePicker extends FilePickerPlatform {
@@ -3633,7 +3984,14 @@ final class _TestPlatformFile extends PlatformFile {
 }
 
 Future<void> _openMobileFileActions(WidgetTester tester) async {
-  await tester.tap(find.byIcon(LucideIcons.plus));
+  // 账号等其他移动页也有 plus 入口；限定文件管理页内的图标避免命中
+  // IndexedStack 中不可见页面的同名控件。
+  await tester.tap(
+    find.descendant(
+      of: find.byType(MobileFileManagerPage),
+      matching: find.byIcon(LucideIcons.plus),
+    ),
+  );
   await tester.pumpAndSettle();
 }
 

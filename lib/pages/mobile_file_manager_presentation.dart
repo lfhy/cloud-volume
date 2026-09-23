@@ -2,18 +2,6 @@ part of 'file_manager_page.dart';
 
 // Android-only file-manager chrome. It shares the workspace state and actions
 // with desktop, while keeping mobile navigation and density independently tuned.
-class _MobileFileAction {
-  const _MobileFileAction({
-    required this.label,
-    required this.icon,
-    required this.onPressed,
-  });
-
-  final String label;
-  final IconData icon;
-  final VoidCallback onPressed;
-}
-
 extension _MobileFileManagerPresentation on _FileManagerPageState {
   Widget _buildMobileWorkspacePresentation(BuildContext context) {
     final theme = ShadTheme.of(context);
@@ -30,10 +18,30 @@ extension _MobileFileManagerPresentation on _FileManagerPageState {
         ],
       ),
     );
-    return SafeArea(bottom: false, child: content);
+    // 向 shell 报告选中态(两态模型):选中时底部导航栏让位给动作条。
+    MobileSelectionActivity.instance.report(
+      SidebarItem.fileManager,
+      _mobileSelectionActive,
+    );
+    // 选中态底部动作条全宽贴底(百度式):移出页边距列,自带底部安全区。
+    return SafeArea(
+      bottom: false,
+      child: Column(
+        children: [
+          Expanded(child: content),
+          _buildMobileSelectionBar(),
+        ],
+      ),
+    );
   }
 
   Widget _buildMobileHeader(ShadThemeData theme) {
+    // 两态选择模型:选中态头部整体变形(取消/已选中 N 个/全选),返回钮与
+    // 页面动作入口让位——退出选中用「取消」,系统 Back 也会先清空选择。
+    final selectionHeader = _buildMobileSelectionHeader();
+    if (selectionHeader != null) {
+      return selectionHeader;
+    }
     final bucket = _presentationBucketEntry;
     final subtitle = bucket == null
         ? (_isTrashHome ? '选择一个存储桶' : '浏览和管理远程存储中的文件。')
@@ -100,7 +108,13 @@ extension _MobileFileManagerPresentation on _FileManagerPageState {
               height: 48,
               iconSize: 22,
               icon: Icon(LucideIcons.plus, color: theme.colorScheme.primary),
-              onPressed: () => unawaited(_showMobileActionSheet(actions)),
+              onPressed: () => unawaited(
+                showMobileActionSheet(
+                  context,
+                  title: _showTrash ? '回收站操作' : '文件操作',
+                  actions: actions,
+                ),
+              ),
             ),
           ),
         ],
@@ -140,12 +154,14 @@ extension _MobileFileManagerPresentation on _FileManagerPageState {
     );
   }
 
-  List<_MobileFileAction> get _mobileActions {
-    final actions = <_MobileFileAction>[];
+  List<MobilePageAction> get _mobileActions {
+    final actions = <MobilePageAction>[];
+    // 回收站视图的页面级入口(返回文件/清空回收站)按用户裁决恢复;
+    // 文件视图提供 新建目录/上传。
     if (_showTrash) {
       if (_activeBucket != null && !_loading) {
         actions.add(
-          _MobileFileAction(
+          MobilePageAction(
             label: '返回文件',
             icon: LucideIcons.folderOpen,
             onPressed: () => unawaited(_closePresentationTrash()),
@@ -154,7 +170,7 @@ extension _MobileFileManagerPresentation on _FileManagerPageState {
       }
       if (!_loading && !(_trashItems?.isEmpty ?? true)) {
         actions.add(
-          _MobileFileAction(
+          MobilePageAction(
             label: '清空回收站',
             icon: LucideIcons.trash,
             onPressed: _clearBucketTrash,
@@ -164,12 +180,12 @@ extension _MobileFileManagerPresentation on _FileManagerPageState {
     } else if (_activeBucket != null) {
       if (!_loading && _currentDirectoryWritable) {
         actions.addAll([
-          _MobileFileAction(
+          MobilePageAction(
             label: '新建目录',
             icon: Icons.create_new_folder_rounded,
             onPressed: _createDirectory,
           ),
-          _MobileFileAction(
+          MobilePageAction(
             label: '上传',
             icon: LucideIcons.upload,
             onPressed: _upload,
@@ -178,77 +194,5 @@ extension _MobileFileManagerPresentation on _FileManagerPageState {
       }
     }
     return actions;
-  }
-
-  Future<void> _showMobileActionSheet(List<_MobileFileAction> actions) async {
-    if (actions.isEmpty) return;
-    await showAppModal<void>(
-      context: context,
-      builder: (dialogContext) {
-        // Keep sheet rows full-width inside horizontal cutouts while matching
-        // the 16dp icon inset used by bucket and object action drawers.
-        final horizontalSafeArea = MediaQuery.paddingOf(
-          dialogContext,
-        ).horizontal;
-        const actionHorizontalPadding = 16.0;
-        final menuWidth =
-            (MediaQuery.sizeOf(dialogContext).width - horizontalSafeArea - 60)
-                .clamp(1.0, double.infinity)
-                .toDouble();
-        final actionContentWidth = (menuWidth - actionHorizontalPadding * 2)
-            .clamp(0.0, double.infinity)
-            .toDouble();
-        return AppShadDialog(
-          title: Text(_showTrash ? '回收站操作' : '文件操作'),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              for (final action in actions) ...[
-                ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 48),
-                  child: ShadButton.ghost(
-                    width: menuWidth,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: actionHorizontalPadding,
-                    ),
-                    onPressed: () {
-                      Navigator.of(dialogContext).pop();
-                      action.onPressed();
-                    },
-                    child: SizedBox(
-                      width: actionContentWidth,
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          SizedBox(
-                            width: 48,
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: Icon(action.icon, size: 17),
-                            ),
-                          ),
-                          Expanded(
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                action.label,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 4),
-              ],
-            ],
-          ),
-        );
-      },
-    );
   }
 }

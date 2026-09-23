@@ -106,6 +106,8 @@ class FileManagerWorkspace extends StatefulWidget {
 /// presentation. It is also used by external navigation such as sync tasks.
 extension _FileManagerPageMobileNavigation on _FileManagerPageState {
   Future<bool> _handleMobileFileManagerBack() async {
+    // 选中态先清空选择(两态模型),再处理同步跳转与位置回退。
+    if (_consumeMobileSelectionForBack()) return true;
     if (_cancelPendingMobileSyncRemoteOpen()) return true;
     return await _navigateBackMobileFileManagerLocation();
   }
