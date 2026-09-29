@@ -28,6 +28,8 @@
 
 `vX.Y.Z` tag 推送会触发 `.github/workflows/release-desktop.yml` 的 `android` job。Ubuntu runner 配置 Java 17、Go、Flutter 3.47.0、Android API 36 / Build Tools 36.0.0 / NDK 28.2.13676358；`scripts/build_android_packages.sh` 先构建 ARM64 Go 桥，再以 `--split-per-abi --target-platform android-arm64` 只取 `app-arm64-v8a-release.apk`。脚本校验包内只有 ARM64 原生库、含 `libremote_storage_bridge.so` 且通过 `apksigner verify`，上传 `yunjuan-android-arm64-v<X.Y.Z>.apk`。发布 job 仅在 Android job 成功时运行；其他平台的原有部分发布语义不变。设计取舍见 [Agent Note](../notes/implemented/process/2026-09-29-android-ci-release-signing.md)。
 
+仅测试 Android CI 构建时，在 GitHub Actions 的 `release-desktop` 页面点 **Run workflow**，选择 `main`、勾选 **Build only the signed Android APK**，保留测试版本 `0.0.0` 后运行。此模式只启动 `android` job，其它平台与 `publish` 全部跳过；签名 APK 留在该次 run 的 `yunjuan-android-arm64` artifact，不创建 GitHub Release，也不要把 `v0.0.0` 测试包分发给用户。正式 tag 推送仍执行完整发布矩阵。
+
 ### 首次配置 Repository secrets
 
 打开仓库 [Settings → Secrets and variables → Actions](https://github.com/lfhy/cloud-volume/settings/secrets/actions)，逐个点 **New repository secret**，建立以下四项（不要把密钥或密码贴进 issue、聊天或提交）：

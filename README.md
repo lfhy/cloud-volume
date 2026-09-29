@@ -432,7 +432,7 @@ WebDAV 账号包括：
 - macOS `universal` / `arm64`：桌面版 `dmg`、`zip`
 - Windows `amd64`：桌面版 `installer.exe`、`zip`
 - Linux `amd64`：桌面版 `tar.gz`、`AppImage`
-- Android `arm64`：正式版签名 APK（需配置仓库密钥，见 [Android CI 指南](docs/features/android_dev.md)）
+- Android `arm64`：正式版签名 APK（需配置仓库密钥；可单独手动验证 Android 构建，见 [Android CI 指南](docs/features/android_dev.md)）
 - Linux / macOS / Windows：Lite CLI 发布包
 - Linux / macOS / Windows：Full CLI 发布包，内含 `cloud-volume-cli-full` 单文件二进制
 - Linux `amd64` / `arm64`：Web 服务端 `tar.gz`，内含 `cloud-volume-web` 和对应静态站点

@@ -10,12 +10,15 @@ Android 构建原来只在本地生成以 debug key 签名的 APK，tag 发布�
 
 在现有 `.github/workflows/release-desktop.yml` 加 Android ARM64 job，并让 tag 发布显式要求该 job 成功。Ubuntu runner 复用 Unix NDK 桥脚本，`scripts/build_android_packages.sh` 只取 ARM64 split APK，检查包内 FFI 桥、ABI 和签名后交给既有 artifact → release 流程。签名密钥以四项 Repository secrets 提供，Base64 文件只在 runner 临时目录解码；打包入口缺签名环境即失败。Gradle 在四项签名环境齐全时使用正式证书，部分配置立即报错；全部未设置时保留本地 `flutter run --release` 的 debug 签名便捷性，但该路径不能通过发布脚本。
 
+`workflow_dispatch` 另提供 `android_only` 布尔输入与 `android_version`（默认 `0.0.0`），在普通分支手动验证时只运行 Android job，跳过其它平台和发布。tag push 的输入为空，保持完整发布矩阵。这样不必创建临时 semver 分支或 tag，也不会因测试构建意外创建公开 Release。
+
 ## Alternatives considered
 
 - **提交密钥库或在 CI 使用 debug key** — 私钥进入 Git 历史无法安全撤销，debug 证书也不是稳定的正式分发身份，放弃。
 - **只指定 `--target-platform android-arm64` 构建通用 APK** — 实测插件的其他 ABI 原生库仍会进入通用包；改为只发布 ARM64 split APK，并核查其内容。
 - **另建独立发布 workflow** — 会与现有 tag release 并发上传、增加跨工作流协调；保留单一发布入口。
 - **让 Android 失败后继续发布其它产物** — 会产生无 Android 下载项的同版本 release；Android 成为必要发布门禁，但其它既有 job 的部分发布语义暂不扩大修改。
+- **为测试创建 `v0.0.0` 临时分支或 tag** — 分支会污染远端命名空间，tag 还会触发正式发布；手动输入版本与 job gate 更直接。
 
 ## Consequences
 
