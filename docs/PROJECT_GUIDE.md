@@ -4,6 +4,10 @@
 
 ---
 
+## 2026-09-29 v1.2.7 全平台发布验证(android_dev / release workflow 域)
+
+在 Android-only CI 验证后，`make push` 创建并推送 `v1.2.7`；[release run 36519869965](https://github.com/lfhy/cloud-volume/actions/runs/36519869965) 的 Android、macOS 两种包、Windows、Linux、Web 与 10 个 CLI 矩阵项及 `publish` 全部成功。[GitHub Release](https://github.com/lfhy/cloud-volume/releases/tag/v1.2.7) 共上传 21 个工件，含 `yunjuan-android-arm64-v1.2.7.apk`（50,904,267 字节）。本地原有的 `macos/Podfile.lock` 未提交；发布脚本的 `FORCE=1` 只绕过脏树检查，tag 仍指向已提交的 `7c075e54`。现行 Android 签名发布契约见 [android_dev](features/android_dev.md)，决策见 [Agent Note](notes/implemented/process/2026-09-29-android-ci-release-signing.md)。
+
 ## 2026-09-29 Android CI 首次真实构建(android_dev / release workflow 域)
 
 配置四项 Repository secrets 后，以 `workflow_dispatch` 的 `android_only=true`、`android_version=0.0.0` 从 `main` 发起真实 GitHub-hosted 构建。首轮 [run 36517280045](https://github.com/lfhy/cloud-volume/actions/runs/36517280045) 在 `android-actions/setup-android@v3` 初始化失败：action 默认执行 `sdkmanager tools`，但上游已下架 `tools` 包。把 action `packages` 显式设为 `platform-tools` 后，[run 36517954155](https://github.com/lfhy/cloud-volume/actions/runs/36517954155) 完成 `arm64-v8a` Go 桥、50.9 MB ARM64 split APK、签名核验及 `yunjuan-android-arm64` artifact 上传（压缩 artifact 27,242,750 字节）；CLI、macOS、Windows、Web、Linux 和 `publish` 均为 skipped，无公开 Release。现行入口与兼容性约束见 [android_dev](features/android_dev.md)，取舍见 [Agent Note](notes/implemented/process/2026-09-29-android-ci-release-signing.md)。正式 tag 发布尚未在本轮触发。
