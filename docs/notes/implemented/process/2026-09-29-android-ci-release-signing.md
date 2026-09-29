@@ -26,4 +26,4 @@ Android SDK action 的 `packages` 显式设为 `platform-tools`：其默认列�
 
 必须先设置并安全备份正式签名密钥，tag 发布才能完成；相同 `com.cloud.volume` 包名换证书不能覆盖升级既有安装，需通过配置备份和重装迁移。CI 的密钥只在临时文件与构建进程中使用，APK 按 tag 版本命名，Flutter split 的 versionCode 带 ABI 偏移；版本号与 build number 由发布 workflow 传入。
 
-本地以一次性测试密钥实际构建 ARM64 split APK，核对只有 ARM64 原生库、含 Go 桥、`apksigner verify --print-certs` 显示该证书；`actionlint`、`bash -n`、文档门禁与仓库 Go/Flutter 检查在提交前执行。真正的 GitHub-hosted runner 与用户密钥要待 Repository secrets 配置后由 tag 发布验证。
+本地以一次性测试密钥实际构建 ARM64 split APK，核对只有 ARM64 原生库、含 Go 桥、`apksigner verify --print-certs` 显示该证书；`actionlint`、`bash -n`、文档门禁与仓库 Go/Flutter 检查通过。GitHub-hosted runner 的 [仅 Android 手动运行](https://github.com/lfhy/cloud-volume/actions/runs/36517954155)以仓库密钥成功构建并上传 artifact，其他平台和 `publish` 均跳过；正式 tag 发布路径仍待下次版本发布验证。
