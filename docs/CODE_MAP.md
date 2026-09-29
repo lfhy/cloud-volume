@@ -36,7 +36,7 @@
 |---|---|
 | [windows_platform](features/windows_platform.md) | 崩溃监视器/启动报告、自绘窗口与 DWM 圆角、Cloud Files/WinFsp/WebDAV 挂载呈现与盘符、Cloud Files callback 枚举/外部删除投影与持久 mutation journal、WinFsp 虚拟卷引擎(构建/安装/容量)。 |
 | [windows_dev](features/windows_dev.md) | Windows 新机依赖引导与运行/构建脚本(ARM64 CLANGARM64 工具链、CargoKit/Rustup、CPATH、Developer Mode)。 |
-| [android_dev](features/android_dev.md) | macOS/Windows Android 工具链引导、c-shared 桥构建、macOS 模拟器调测回路(`make android-run`)与 ARM64 APK 打包、应用 ID/私有数据边界、文件交接宿主、移动端桌面能力裁剪。 |
+| [android_dev](features/android_dev.md) | macOS/Windows Android 工具链引导、c-shared 桥构建、模拟器调测与 ARM64 APK 打包、GitHub Actions 签名发布及仓库密钥配置、应用 ID/私有数据边界、文件交接宿主。 |
 
 ## 后端
 

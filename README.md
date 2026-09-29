@@ -128,7 +128,7 @@ Android runner 已包含在仓库中，并把 ARM64 Go FFI bridge 作为 `librem
 .\scripts\build_android.ps1
 ```
 
-该脚本先用 Android NDK 构建 bridge，再执行 `flutter build apk --release --target-platform android-arm64`。产物位于 `build\app\outputs\flutter-apk\app-release.apk`。Android Gradle wrapper 与 Maven 仓库已优先使用国内镜像；离线或镜像不可达时需恢复网络后重试。
+该脚本先用 Android NDK 构建 bridge，再从 `flutter build apk --release --split-per-abi` 的输出取 `build\app\outputs\flutter-apk\app-arm64-v8a-release.apk`，复制到 `cloud-volume-release-arm64-v8a.apk`；此本地路径未配置正式密钥时使用 debug 签名。CI 的正式签名与 Repository secrets 配置见 [Android CI 指南](docs/features/android_dev.md)。Android Gradle wrapper 与 Maven 仓库已优先使用国内镜像；离线或镜像不可达时需恢复网络后重试。
 
 Android 启动图标同样从现有 macOS 1024px 品牌位图生成，不重新绘制标志。修改品牌图标后运行 `powershell -ExecutionPolicy Bypass -File .\scripts\generate_android_app_icon.ps1`，脚本会写出各密度的方形/圆形传统图标，并生成 API 26+ 自适应图标前景层（品牌图形按官方 66/108 安全区缩放居中）。
 
@@ -432,6 +432,7 @@ WebDAV 账号包括：
 - macOS `universal` / `arm64`：桌面版 `dmg`、`zip`
 - Windows `amd64`：桌面版 `installer.exe`、`zip`
 - Linux `amd64`：桌面版 `tar.gz`、`AppImage`
+- Android `arm64`：正式版签名 APK（需配置仓库密钥，见 [Android CI 指南](docs/features/android_dev.md)）
 - Linux / macOS / Windows：Lite CLI 发布包
 - Linux / macOS / Windows：Full CLI 发布包，内含 `cloud-volume-cli-full` 单文件二进制
 - Linux `amd64` / `arm64`：Web 服务端 `tar.gz`，内含 `cloud-volume-web` 和对应静态站点

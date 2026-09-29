@@ -1,3 +1,5 @@
+import java.io.File
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -5,6 +7,31 @@ plugins {
     // build also works on Flutter releases whose gradle plugin does not auto-apply it.
     id("org.jetbrains.kotlin.android")
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// CI supplies all four values together; an incomplete signing setup must not ship a debug-signed APK.
+val releaseSigningVariables = listOf(
+    "ANDROID_KEYSTORE_FILE",
+    "ANDROID_KEYSTORE_PASSWORD",
+    "ANDROID_KEY_ALIAS",
+    "ANDROID_KEY_PASSWORD",
+)
+val releaseSigningValues = releaseSigningVariables.associateWith {
+    providers.environmentVariable(it).orNull
+}
+val releaseSigningRequested = releaseSigningValues.values.any { it != null }
+val releaseKeystoreFile = if (releaseSigningRequested) {
+    val missing = releaseSigningValues.filterValues { it.isNullOrBlank() }.keys
+    require(missing.isEmpty()) {
+        "Incomplete Android release signing environment: missing or empty ${missing.joinToString()}"
+    }
+    File(requireNotNull(releaseSigningValues["ANDROID_KEYSTORE_FILE"])).also {
+        require(it.isAbsolute && it.isFile) {
+            "ANDROID_KEYSTORE_FILE must point to an existing absolute file"
+        }
+    }
+} else {
+    null
 }
 
 android {
@@ -32,11 +59,23 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (releaseKeystoreFile != null) {
+            create("releaseFromEnvironment") {
+                storeFile = releaseKeystoreFile
+                storePassword = releaseSigningValues["ANDROID_KEYSTORE_PASSWORD"]
+                keyAlias = releaseSigningValues["ANDROID_KEY_ALIAS"]
+                keyPassword = releaseSigningValues["ANDROID_KEY_PASSWORD"]
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // Local release runs without CI signing values retain Flutter's debug-key fallback.
+            signingConfig = signingConfigs.getByName(
+                if (releaseKeystoreFile != null) "releaseFromEnvironment" else "debug"
+            )
         }
     }
 }

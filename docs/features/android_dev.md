@@ -11,7 +11,8 @@
 - `scripts/run_android.sh` - `make android-run` 的实现:先建双 ABI 桥(物理 ARM 设备与两种模拟器架构都能跑),无在线设备时创建并启动 `cloud-volume` AVD(窗口式;`--headless` 无窗、`--boot-only` 只等到 boot completed、`--skip-bridge` 跳过桥),模拟器日志写 `build/logs/android-emulator.log`;轮询 `sys.boot_completed` 后 `flutter run -d <serial>`。模拟器进程忽略 INT/QUIT/TERM,Ctrl-C 只结束 flutter 会话、模拟器留给下一次 attach;`CV_DEBUG_ADDR` 非空时自动 `adb forward` 并透传 dart-define;已连接且授权的物理设备优先于启动模拟器。
 - `Makefile` - `android-setup`(引导)/`android-bridge`(双 ABI 桥)/`android-run`(调测回路)目标;Windows 主机上报错并指向对应 ps1 脚本。
 - `scripts/build_android_bridge.ps1` - 用已装 NDK 为 `GOOS=android`、`GOARCH=arm64` 编译 `./bridge`,产物写入 `android/app/src/main/jniLibs/arm64-v8a/libremote_storage_bridge.so`;构建后删除生成的 C 头。
-- `scripts/build_android.ps1` - 先建 Android 桥,再出 ARM64 Flutter release APK 到 `build/app/outputs/flutter-apk/app-release.apk`。
+- `scripts/build_android.ps1` - 先建 Android 桥,再从 split 输出取 `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk`，复制为 `cloud-volume-release-arm64-v8a.apk`。
+- `scripts/build_android_packages.sh` / `.github/workflows/release-desktop.yml` / `android/app/build.gradle.kts` - Linux CI 构建 ARM64 Go 桥与 split APK，注入签名密钥、核验包内 ABI 和签名，并将 APK 纳入 tag 发布；本地 `flutter run --release` 无签名环境时仍用 debug key。
 - `android/` - Flutter Android runner。wrapper 用腾讯 Gradle 分发镜像,`settings.gradle.kts` / `build.gradle.kts` 优先 Aliyun 的 Google、Gradle-plugin、Central 仓库再官方源。
 - `android/app/build.gradle.kts` / `android/app/src/main/kotlin/com/cloud/volume/MainActivity.kt` — Android `namespace` 与 `applicationId` 均为 `com.cloud.volume`;FrameTracker/输入法性能日志用它标识当前应用,不是远端存储地址。该 ID 同时决定安装升级身份与 `/data/user/0/<applicationId>` 私有沙箱及 `FileProvider` authority。旧 `cn.ihep.cloudvolume.remote_storage` 与新包可并存,新包不能读取或删除旧包私有数据;切换前通过既有远端配置备份保存账号配置,在新包首启时还原,未备份的账号需重新配置。决策理由见 [Android 应用标识迁移](../notes/implemented/architecture/2026-08-31-android-application-id.md)。
 - `bridge/dispatch_mobile.go` / `bridge/dispatch.go` / `go/config/paths.go` - Android 启动经 `set_app_data_root` 把 Flutter 的 application-support 目录传给原生桥,配置与缓存留在 Android 应用存储内而非无效的桌面 home。
@@ -23,9 +24,35 @@
 - `android/app/src/main/kotlin/com/cloud/volume/AndroidExternalFileOpener.kt` / `android/app/src/main/res/xml/external_open_paths.xml` / `AndroidManifest.xml` - 原生文件交接边界：provider 只暴露 `cache/external-open/` 的副本，外部应用拿到短期 `content://` 读授权并由 `ACTION_VIEW` chooser 打开。
 - `README.md` - 记录引导、移动能力、限制与 APK 构建命令。
 
+## GitHub Actions CI 发布
+
+`vX.Y.Z` tag 推送会触发 `.github/workflows/release-desktop.yml` 的 `android` job。Ubuntu runner 配置 Java 17、Go、Flutter 3.47.0、Android API 36 / Build Tools 36.0.0 / NDK 28.2.13676358；`scripts/build_android_packages.sh` 先构建 ARM64 Go 桥，再以 `--split-per-abi --target-platform android-arm64` 只取 `app-arm64-v8a-release.apk`。脚本校验包内只有 ARM64 原生库、含 `libremote_storage_bridge.so` 且通过 `apksigner verify`，上传 `yunjuan-android-arm64-v<X.Y.Z>.apk`。发布 job 仅在 Android job 成功时运行；其他平台的原有部分发布语义不变。设计取舍见 [Agent Note](../notes/implemented/process/2026-09-29-android-ci-release-signing.md)。
+
+### 首次配置 Repository secrets
+
+打开仓库 [Settings → Secrets and variables → Actions](https://github.com/lfhy/cloud-volume/settings/secrets/actions)，逐个点 **New repository secret**，建立以下四项（不要把密钥或密码贴进 issue、聊天或提交）：
+
+| 名称 | 填入的值 |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | 完整 keystore 文件的单行 Base64 文本，不是文件路径。 |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore 的 store 密码。 |
+| `ANDROID_KEY_ALIAS` | keystore 内用于签名的 key alias。 |
+| `ANDROID_KEY_PASSWORD` | 该 alias 的 key 密码；若与 store 密码相同，填相同值。 |
+
+先确定签名证书：若已有向用户分发的 `com.cloud.volume` APK，用 Android SDK 的 `apksigner verify --print-certs <旧包.apk>` 记下 SHA-256 指纹，再用 `keytool -list -v -keystore <原密钥库> -alias <alias>` 核对。要覆盖升级，必须沿用同一证书；新的正式密钥无法覆盖旧的 debug-key 安装。若没有可复用的正式密钥，可在安全位置执行下例生成新密钥（交互输入密码，不把密码写进命令历史）：
+
+```bash
+keytool -genkeypair -storetype PKCS12 -keystore "$HOME/yunjuan-release.p12" \
+  -alias cloud-volume -keyalg RSA -keysize 3072 -validity 10000
+```
+
+将密钥文件编码后粘贴到 `ANDROID_KEYSTORE_BASE64`：macOS 用 `base64 -i "$HOME/yunjuan-release.p12" | tr -d '\n' | pbcopy`，Windows PowerShell 用 `[Convert]::ToBase64String([IO.File]::ReadAllBytes('C:\path\yunjuan-release.p12')) | Set-Clipboard`。粘贴完成后清空剪贴板；另外三项填实际密码与 alias。把原密钥库和密码在仓库之外安全备份：GitHub Secrets 不能读回，遗失证书会影响后续升级；仅更换密码不能撤销已泄露的私钥。
+
+CI 在缺少任一 secret、Base64 无效或签名失败时直接失败，不会用 debug key 发布。`android/app/build.gradle.kts` 仅在全部签名环境变量都未设置时保留本地 `flutter run --release` 的 debug-key 回退；只设一部分也会失败。本地 `scripts/build_android_packages.sh` 同样要求全部四项签名环境变量（其中 `ANDROID_KEYSTORE_FILE` 是解码后的绝对路径）。正式密钥与旧 APK 证书不同的用户，应先通过应用内远端配置备份，再卸载旧包并安装新包；卸载会清除该包的私有数据。
+
 ## Gotchas
 
-- release APK(Windows `build_android.ps1`)仍只打包 `android-arm64`;macOS 调试回路(`run_android.sh`)构建 arm64-v8a + x86_64 双 ABI 桥,物理设备与两种模拟器架构都能跑。32 位 ARM 仍不支持。
+- release APK(Windows `build_android.ps1` 从 split 输出只取 `app-arm64-v8a-release.apk`;CI 同样只发布 ARM64);macOS 调试回路(`run_android.sh`)构建 arm64-v8a + x86_64 双 ABI 桥,物理设备与两种模拟器架构都能跑。32 位 ARM 仍不支持。
 - NDK 的 macOS 宿主工具链目录是 `darwin-x86_64`,Apple Silicon 靠 Rosetta 2 运行;`android_env.sh` 的 `cv_ensure_rosetta` 尝试 `softwareupdate --install-rosetta --agree-to-license`,失败时按该命令手动安装。宿主目录按 `darwin-*` glob 探测,上游若发布 native arm64 工具链无需改脚本。
 - **Apple Silicon 模拟器架构(binding gotcha):** legacy sdkmanager 走 repository2-1,其 macOS emulator 归档只有 x86_64;该构建跑 arm64 镜像直接 FATAL(launcher 把 Rosetta 下的 host 判成 x86_64),跑 x86_64 镜像则 `HVF Unknown error 0x4`(Rosetta 进程无法用 HVF 虚拟化 x86_64 guest)。正解是 repository2-3 的同版本 `emulator-darwin_aarch64` 归档(setup 自动替换),配 arm64-v8a 镜像走 native HVF;aarch64 归档不带 `package.xml`,必须回填 sdkmanager 的那份,否则 avdmanager 建 AVD 时报 "emulator package must be installed"。
 - 上游兼容性两处:Android repository XML 的 macOS host-os 标记是 `macosx`(旧归档为 `mac`);cmdline-tools 23 弃用 `sdkmanager --licenses`("no longer needed")且首次调用可能非零退出,setup 按"重试一次 + 输出含 no longer needed 即通过"容忍。flutter doctor 的 license 探针与 cmdline-tools 23 不兼容,会一直显示 "license status unknown"——license 文件已写入 `licenses/`,构建不受影响。
@@ -34,6 +61,8 @@
 - 模拟器镜像按主机 CPU 选择(Apple Silicon → arm64-v8a + native aarch64 emulator;Intel → x86_64),与 NDK 桥的 ABI 无关——两个 ABI 的 `.so` 都会打进 debug APK。
 
 **Known P2/P3 (review 2026-08-29):** 提交前评审(叙事见 [PROJECT_GUIDE](../PROJECT_GUIDE.md))发现并同批修复:P0 Flutter manifest 解析 heredoc 覆盖管道 stdin(改为先落盘再传 argv)、P1 `yes | sdkmanager --licenses` 在 pipefail 下成功被误判(改有限答案文件)、P2 boot 等待对单次 adb 抖动零容忍(加 `|| true`)、P3 android-setup 缺 Windows gating、P3 aarch64 emulator 每次重跑重复下载 400MB(加跳过标记)、P3 替换前先解压后删旧树。仍开放的 P3:回填的 `package.xml` 版本不与 repository2-3 归档校验,两 channel 漂移时 `sdkmanager` 升级可能把 emulator 换回 x86_64;`~/.zshrc` 块在换 `--sdk-root`/`--java-home` 重跑时不刷新,首跑 `--no-shellrc` 装了 Flutter 次跑补写块会漏 flutter PATH 项;`run_android.sh` 的 AVD 名 grep 把 `--avd` 参数当正则用(仅误报向)。
+
+**Known P2/P3 (review 2026-09-29):** P2 开放：`apksigner verify` 只验证签名有效，不验证与上一正式版证书的 SHA-256 一致；首次配置时按上文核对旧包，后续可把首次正式证书指纹固定为 CI 门禁。P3 已修复：临时 keystore 解码前设 `umask 077`，限制 runner 上的文件权限。
 - Go 桥是大体积静态工件,被 Git 有意忽略。每次 APK 构建前在构建机上跑 `scripts/build_android.ps1`。
 - `third_party/super_native_extensions` 与 `third_party/irondash_engine_context` 是 vendored 的桌面专属插件 fork。其 Android 注册被移除,因为 CargoKit 的 Gradle 脚本与 Gradle 9 不兼容;CargoKit 支持该构建前不要恢复那些声明。桌面拖放与 file URI 剪贴板保持可用;Android 用 `file_picker` 上传,不创建原生 drop region。
 - 引导仍从 Adoptium 与 Google Android 服务下载 JDK/SDK 包;封锁这些端点的网络会阻止安装,Flutter 本身可从仓库根压缩包离线引导。脚本不做部分安装清理,不破坏性替换已有目录。
