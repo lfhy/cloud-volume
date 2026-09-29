@@ -12,6 +12,8 @@ Android 构建原来只在本地生成以 debug key 签名的 APK，tag 发布�
 
 `workflow_dispatch` 另提供 `android_only` 布尔输入与 `android_version`（默认 `0.0.0`），在普通分支手动验证时只运行 Android job，跳过其它平台和发布。tag push 的输入为空，保持完整发布矩阵。这样不必创建临时 semver 分支或 tag，也不会因测试构建意外创建公开 Release。
 
+Android SDK action 的 `packages` 显式设为 `platform-tools`：其默认列表还含已下架的 `tools`，会在后续版本化 SDK/NDK 安装前失败。
+
 ## Alternatives considered
 
 - **提交密钥库或在 CI 使用 debug key** — 私钥进入 Git 历史无法安全撤销，debug 证书也不是稳定的正式分发身份，放弃。

@@ -386,6 +386,9 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action's default "tools" package is no longer published by sdkmanager.
+          packages: platform-tools
 
       - name: Install Android build components
         run: sdkmanager --sdk_root="$ANDROID_HOME" "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
